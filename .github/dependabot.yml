@@ -1,0 +1,70 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Chicago
+    # Skip versions published in the last week, so a compromised release has time
+    # to be caught and yanked before it lands here. Security updates are not delayed.
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    # Prefixes must be types the PR title check allows. `deps` is shown in the
+    # changelog and cuts a patch release; `chore` is hidden and releases nothing.
+    commit-message:
+      prefix: deps
+      prefix-development: chore
+    # Packages that must move together get their own groups, majors included, so a
+    # major bump never arrives split across PRs that can't install on their own.
+    groups:
+      vitest:
+        applies-to: version-updates
+        patterns: ['vitest', '@vitest/*']
+      graphql-codegen:
+        applies-to: version-updates
+        patterns: ['@graphql-codegen/*']
+      archiver:
+        applies-to: version-updates
+        patterns: ['archiver', '@types/archiver']
+      production:
+        applies-to: version-updates
+        dependency-type: production
+        update-types: [minor, patch]
+      development:
+        applies-to: version-updates
+        dependency-type: development
+        update-types: [minor, patch]
+      security:
+        applies-to: security-updates
+        patterns: ['*']
+    ignore:
+      # Keep Node's types at the oldest supported runtime (engines: ^22.13.0 || >=24).
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # typescript-eslint 8 caps its typescript peer below 6.1.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+      # tsup 9 requires Node ^22.18, and CI packs on 22.13.0.
+      - dependency-name: 'tsup'
+        update-types: ['version-update:semver-major']
+    # `[]` opts out of the default `dependencies` and `javascript` labels.
+    labels: []
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ['*']
+    labels: []

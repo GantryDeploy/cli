@@ -1,0 +1,90 @@
+{
+  "name": "@gantrydeploy/cli",
+  "version": "1.0.0",
+  "description": "Command line interface for the Gantry deployment platform",
+  "license": "Apache-2.0",
+  "homepage": "https://gantrydeploy.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GantryDeploy/cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GantryDeploy/cli/issues"
+  },
+  "keywords": [
+    "gantry",
+    "deploy",
+    "deployment",
+    "cli",
+    "aws",
+    "lambda",
+    "ecs"
+  ],
+  "type": "module",
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  },
+  "bin": {
+    "gantry": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "schema:pull": "node scripts/pull-schema.mjs",
+    "schema:sync": "npm run schema:pull && npm run codegen",
+    "codegen": "graphql-codegen --config codegen.ts",
+    "codegen:check": "npm run codegen && git diff --exit-code HEAD -- src/generated && test -z \"$(git status --porcelain -- src/generated)\"",
+    "typecheck": "tsc --noEmit",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "prepack": "npm run build && npm run check:bundle",
+    "test:package": "rm -rf .pack && mkdir .pack && npm pack --pack-destination .pack && bash scripts/smoke-test-tarball.sh .pack/*.tgz"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1153.0",
+    "@inquirer/prompts": "^8.7.4",
+    "archiver": "^8.0.0",
+    "chalk": "^6.0.1",
+    "cli-table3": "^0.6.5",
+    "commander": "^15.0.0",
+    "ignore": "^7.0.13",
+    "listr2": "^11.4.0",
+    "minimatch": "^10.0.1",
+    "ora": "^9.4.1",
+    "ssh2": "^1.16.0",
+    "tldts": "^7.4.18",
+    "yaml": "^2.7.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@graphql-codegen/cli": "^7.4.6",
+    "@graphql-codegen/typescript-operations": "^6.1.10",
+    "@types/archiver": "^8.0.0",
+    "@types/node": "^22.20.5",
+    "@types/ssh2": "^1.15.4",
+    "@vitest/coverage-v8": "^5.0.5",
+    "eslint": "^10.13.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import-x": "^4.16.2",
+    "eslint-plugin-prettier": "^5.5.7",
+    "prettier": "^3.9.10",
+    "tsup": "^8.0.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5"
+  }
+}

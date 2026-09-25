@@ -1,0 +1,1541 @@
+input ActivationInput {
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+
+  """Target version (rollback/promote) or canary version (canary)"""
+  versionId: String
+
+  """Canary weight, 0–100"""
+  weight: Float
+}
+
+type ActivationResult {
+  """ID of the activation deployment"""
+  deploymentId: String
+  message: String
+  success: Boolean!
+}
+
+"""Inputs for an artifact-upload CLI task"""
+type ArtifactUploadCliInputs {
+  """
+  Temporary AWS access key ID. Returned only to the CLI that claims the step, by claimStep.
+  """
+  accessKeyId: String
+  bucketName: String!
+  excludePatterns: [String!]
+  region: String!
+  s3Key: String!
+
+  """
+  Temporary AWS secret access key. Returned only to the CLI that claims the step, by claimStep.
+  """
+  secretAccessKey: String
+
+  """
+  Temporary AWS session token. Returned only to the CLI that claims the step, by claimStep.
+  """
+  sessionToken: String
+  sourcePath: String!
+  stepId: String!
+}
+
+input ArtifactUploadCliOutputsInput {
+  bucketName: String!
+  s3Key: String!
+  success: Boolean!
+
+  """Size of the uploaded zip in bytes"""
+  zipSize: Float!
+}
+
+type Bastion {
+  cloudAccountId: String!
+  createdAt: String!
+  id: String!
+
+  """Cloud instance ID, set once provisioned"""
+  instanceId: String
+  name: String!
+
+  """Network ID - must have public subnets"""
+  networkId: String!
+
+  """Public IP address used for SSH, set once provisioned"""
+  publicIp: String
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+  status: BastionStatusEnum!
+
+  """Team ID"""
+  teamId: String!
+  updatedAt: String!
+}
+
+type BastionMutationResult {
+  bastion: Bastion
+
+  """Deployment ID for provisioning progress tracking"""
+  deploymentId: String
+  message: String
+  success: Boolean!
+}
+
+type BastionPrivateKeyResult {
+  message: String
+
+  """SSH private key in PEM format"""
+  privateKey: String
+  success: Boolean!
+}
+
+"""Status of a bastion host"""
+enum BastionStatusEnum {
+  ACTIVE
+  DELETED
+  DELETE_FAILED
+  DELETING
+  FAILED
+  PENDING
+  PROVISIONING
+}
+
+type Blueprint {
+  deprecatedAt: String
+  id: String!
+  name: String!
+  namespace: String!
+  parsedSpec: JSON!
+  publishedAt: String!
+  publishedBy: BlueprintPublisher
+  reference: String!
+  version: Int!
+  yamlSource: String!
+}
+
+type BlueprintPublisher {
+  email: String!
+  id: String!
+  name: String
+}
+
+"""A Docker build argument"""
+type BuildArg {
+  name: String!
+  value: String!
+}
+
+type Cache {
+  cloudAccountId: String!
+  createdAt: String!
+
+  """Hostname clients connect to, set once provisioned"""
+  endpoint: String
+  engine: CacheEngineEnum!
+  id: String!
+  name: String!
+
+  """Network ID - required for all caches"""
+  networkId: String!
+
+  """Port clients connect to, set once provisioned"""
+  port: Int
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+  status: CacheStatusEnum!
+
+  """Team ID"""
+  teamId: String!
+  updatedAt: String!
+}
+
+"""Cache engine type"""
+enum CacheEngineEnum {
+  MEMCACHED
+  REDIS
+  VALKEY
+}
+
+type CacheEngineVersion {
+  engine: String!
+  family: String!
+  supportedModes: [String!]!
+  supportedRegions: [String!]!
+  version: String!
+}
+
+type CacheMutationResult {
+  cache: Cache
+
+  """Deployment ID for provisioning progress tracking"""
+  deploymentId: String
+  message: String
+  success: Boolean!
+}
+
+type CacheNodeType {
+  family: String!
+  memoryGiB: Float!
+  nodeType: String!
+  size: String!
+  supportedEngines: [String!]!
+  supportedRegions: [String!]!
+  vcpu: Int!
+}
+
+"""Status of a cache"""
+enum CacheStatusEnum {
+  ACTIVE
+  FAILED
+  PENDING
+}
+
+type CacheTypeInfo {
+  description: String!
+  displayName: String!
+  guidance: String!
+  provider: String!
+  requiresNetwork: Boolean!
+  supportsClusterMode: Boolean!
+  supportsServerless: Boolean!
+  type: CacheEngineEnum!
+}
+
+type CancelDeploymentResult {
+  deployment: Deployment
+  message: String
+  success: Boolean!
+}
+
+type Certificate {
+  additionalDomains: [String!]
+  cloudAccountId: String!
+  createdAt: String!
+  domainId: String
+  hasRegionalCertificates: Boolean!
+  id: String!
+  lastCheckedAt: String
+  primaryDomain: String!
+  regionalCertificates: [RegionalCertificate!]
+  status: CertificateStatusEnum!
+
+  """Team ID"""
+  teamId: String!
+}
+
+type CertificateMutationResult {
+  certificate: Certificate
+  message: String
+  success: Boolean!
+}
+
+"""Certificate status values"""
+enum CertificateStatusEnum {
+  ACTIVE
+  DELETED
+  DELETING
+  EXPIRED
+  FAILED
+  PARTIAL
+  PENDING
+  VALIDATING
+}
+
+type ClaimStepResult {
+  message: String
+  step: DeploymentStep
+  success: Boolean!
+}
+
+"""Inputs the CLI needs to run a step, shaped by the step cliTask"""
+union CliInputs = ArtifactUploadCliInputs | ContainerPushCliInputs | LocalBuildCliInputs | S3UploadCliInputs
+
+"""The status of CLI execution for a step"""
+enum CliStatus {
+  CLAIMED
+  COMPLETE
+  FAILED
+  PENDING
+}
+
+"""
+Results of a CLI task. Set exactly one field, matching the step's cliTask.
+"""
+input CliTaskOutputsInput {
+  artifactUpload: ArtifactUploadCliOutputsInput
+  containerPush: ContainerPushCliOutputsInput
+  localBuild: LocalBuildCliOutputsInput
+  s3Upload: S3UploadCliOutputsInput
+}
+
+type CloudAccount {
+  cloudProvider: CloudProvider
+  createdAt: String!
+  id: String!
+  name: String!
+  provider: CloudProviderEnum!
+
+  """Team ID"""
+  teamId: String!
+}
+
+type CloudAccountResourcesResult {
+  byProject: [ResourceProjectGroup!]
+  byType: [ResourceTypeGroup!]
+  cloudAccountId: String!
+  cloudAccountName: String!
+  totalResources: Float!
+}
+
+type CloudProvider {
+  available: Boolean!
+  name: String!
+  slug: String!
+}
+
+"""Supported cloud providers"""
+enum CloudProviderEnum {
+  AWS
+  AZURE
+  CLOUDFLARE
+  DIGITALOCEAN
+  GCP
+  VULTR
+}
+
+type CloudRegion {
+  code: String!
+  name: String!
+}
+
+type CloudResource {
+  createdAt: String!
+  environmentId: String
+  environmentName: String
+  id: String!
+  projectId: String
+  projectName: String
+  resourceId: String
+  resourceType: String!
+  serviceId: String
+  serviceName: String
+  status: ResourceStatusEnum!
+}
+
+type Cluster {
+  cloudAccountId: String!
+  createdAt: String!
+  id: String!
+  name: String!
+
+  """Network ID (required for managed instances)"""
+  networkId: String
+
+  """AWS region for the cluster"""
+  region: String!
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+  status: ClusterStatusEnum!
+
+  """Team ID"""
+  teamId: String!
+  type: ClusterTypeEnum!
+  updatedAt: String!
+}
+
+type ClusterMutationResult {
+  cluster: Cluster
+
+  """Deployment ID for provisioning progress tracking"""
+  deploymentId: String
+  message: String
+  success: Boolean!
+}
+
+"""Status of a cluster"""
+enum ClusterStatusEnum {
+  ACTIVE
+  FAILED
+  PENDING
+}
+
+"""Type of cluster"""
+enum ClusterTypeEnum {
+  ECS
+}
+
+type ClusterTypeInfo {
+  description: String!
+  displayName: String!
+  guidance: String
+  provider: String!
+  type: ClusterTypeEnum!
+}
+
+type CompleteCliStepResult {
+  message: String
+  success: Boolean!
+}
+
+type ConsoleRunResult {
+  exitCode: Int!
+  message: String
+  output: String!
+  success: Boolean!
+}
+
+"""Inputs for a container-push CLI task"""
+type ContainerPushCliInputs {
+  """
+  ECR auth token. Returned only to the CLI that claims the step, by claimStep.
+  """
+  ecrAuthToken: String
+  ecrEndpoint: String!
+  imageUri: String!
+  localImageTag: String!
+  stepId: String!
+}
+
+input ContainerPushCliOutputsInput {
+  imageUri: String!
+  localImageTag: String!
+  success: Boolean!
+}
+
+input CreateBastionInput {
+  """Cloud account ID"""
+  cloudAccountId: String!
+
+  """User-friendly name"""
+  name: String!
+
+  """Network ID - must have public subnets"""
+  networkId: String!
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+}
+
+input CreateCacheInput {
+  """Cloud account ID"""
+  cloudAccountId: String!
+
+  """Cache engine"""
+  engine: CacheEngineEnum!
+
+  """User-friendly name"""
+  name: String!
+
+  """Network ID - required for all caches"""
+  networkId: String!
+
+  """Provider-specific configuration including region and deployment mode"""
+  providerData: JSON
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+}
+
+input CreateCertificateInput {
+  additionalDomains: [String!]
+  cloudAccountId: String!
+  domainId: String
+  primaryDomain: String!
+  regions: [String!]!
+}
+
+input CreateClusterInput {
+  """Cloud account ID"""
+  cloudAccountId: String!
+
+  """User-friendly name"""
+  name: String!
+
+  """Network ID - required for managed instances"""
+  networkId: String
+
+  """Provider-specific configuration including capacity providers"""
+  providerData: JSON
+
+  """AWS region for the cluster"""
+  region: String!
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+
+  """Cluster type"""
+  type: ClusterTypeEnum!
+}
+
+input CreateDatabaseInput {
+  """Cloud account ID"""
+  cloudAccountId: String!
+
+  """Database engine"""
+  engine: DatabaseEngineEnum!
+
+  """User-friendly name"""
+  name: String!
+
+  """Network ID - required for all databases"""
+  networkId: String!
+
+  """Provider-specific configuration including region and deployment mode"""
+  providerData: JSON
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+}
+
+input CreateDomainInput {
+  """Root domain FQDN (e.g., example.com)"""
+  name: String!
+}
+
+input CreateEnvironmentInput {
+  cloudAccountId: String!
+  color: String
+  isProduction: Boolean! = false
+  name: String!
+  networkId: String
+  projectId: String!
+  region: String!
+  slug: String!
+}
+
+input CreateFilesystemInput {
+  """Cloud account ID"""
+  cloudAccountId: String!
+
+  """User-friendly name"""
+  name: String!
+
+  """Network ID - required for all filesystems"""
+  networkId: String!
+
+  """Provider-specific configuration including region"""
+  providerData: JSON
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+
+  """Filesystem type (efs, filestore)"""
+  type: FilesystemTypeEnum!
+}
+
+input CreateLoadBalancerInput {
+  """Cloud account ID"""
+  cloudAccountId: String!
+
+  """User-friendly name"""
+  name: String!
+
+  """Network ID - required for AWS ALB"""
+  networkId: String
+
+  """Provider-specific configuration including region"""
+  providerData: JSON
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+
+  """Load balancer type"""
+  type: LoadBalancerTypeEnum!
+}
+
+input CreateNetworkInput {
+  cloudAccountId: String!
+  name: String!
+  providerConfig: JSON
+  region: String!
+  slug: String!
+  subnets: JSON
+}
+
+input CreateProjectInput {
+  """Cloud provider: aws, gcp, or cloudflare"""
+  cloudProvider: String!
+  name: String!
+  tag: String
+}
+
+input CreateSecretInput {
+  cloudAccountId: String!
+  description: String
+  keyValuePairs: [SecretKeyValueInput!]!
+  name: String!
+}
+
+input CreateVersionInput {
+  """The full gantry.yml configuration"""
+  config: JSON!
+
+  """
+  Environment name to create the version for (e.g., "dev", "production"). When provided, creates the version record and returns versionId/versionNumber.
+  """
+  environment: String
+
+  """Git reference (commit SHA, branch, tag)"""
+  gitRef: String
+}
+
+type CreateVersionResult {
+  message: String
+
+  """Project ID for image tagging"""
+  projectId: String
+
+  """Project slug for image tagging"""
+  projectSlug: String
+  success: Boolean!
+
+  """Version ID"""
+  versionId: String
+
+  """Sequential version number for this project + environment"""
+  versionNumber: Float
+}
+
+type Database {
+  cloudAccountId: String!
+  createdAt: String!
+
+  """Hostname clients connect to, set once provisioned"""
+  endpoint: String
+  engine: DatabaseEngineEnum!
+  id: String!
+  name: String!
+
+  """Network ID - required for all databases"""
+  networkId: String!
+
+  """Port clients connect to, set once provisioned"""
+  port: Int
+
+  """Whether the database accepts connections from the internet"""
+  publiclyAccessible: Boolean
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+  status: DatabaseStatusEnum!
+
+  """Team ID"""
+  teamId: String!
+  updatedAt: String!
+}
+
+type DatabaseCredentialsResult {
+  message: String
+  password: String
+  success: Boolean!
+  username: String
+}
+
+"""Database engine type"""
+enum DatabaseEngineEnum {
+  AURORA_MYSQL
+  AURORA_POSTGRESQL
+  MARIADB
+  MYSQL
+  POSTGRESQL
+}
+
+type DatabaseEngineVersion {
+  deprecationDate: String
+  description: String!
+  engine: String!
+  family: String!
+  supportedModes: [String!]!
+  supportedRegions: [String!]!
+  version: String!
+}
+
+type DatabaseInstanceClass {
+  family: String!
+  instanceClass: String!
+  memoryMb: Float!
+  size: String!
+  vcpu: Float!
+}
+
+type DatabaseMutationResult {
+  database: Database
+
+  """Deployment ID for provisioning progress tracking"""
+  deploymentId: String
+  message: String
+  success: Boolean!
+}
+
+"""Status of a database"""
+enum DatabaseStatusEnum {
+  ACTIVE
+  FAILED
+  PENDING
+}
+
+type DatabaseTypeInfo {
+  description: String!
+  displayName: String!
+  guidance: String!
+  provider: String!
+  requiresNetwork: Boolean!
+  supportsServerless: Boolean!
+  type: DatabaseEngineEnum!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type Deployment {
+  completedAt: String
+
+  """Deployment type: deploy or teardown"""
+  deploymentType: String
+  environmentId: String
+  environmentName: String
+  id: String!
+  lastMessage: String
+  meta: JSON
+  projectId: String
+  projectName: String
+
+  """Deployment scope: cloud, project-env, or service-env"""
+  scope: String
+  serviceId: String
+  serviceName: String
+  startedAt: String!
+  status: DeploymentStatus!
+  steps: [DeploymentStep!]
+
+  """Team ID"""
+  teamId: String!
+  updatedAt: String!
+  versionId: String
+}
+
+input DeploymentOptionsInput {
+  """Delete stale files after upload"""
+  deleteStale: Boolean
+
+  """Force re-upload all files"""
+  force: Boolean
+}
+
+"""The phase of a deployment step"""
+enum DeploymentPhase {
+  BUILDING
+  DEPLOYING
+  GO_LIVE
+  POST_DEPLOY
+  SETUP
+  UPLOADING
+}
+
+type DeploymentPlanType {
+  routing: [RoutingPlanEntryType!]!
+  services: [ServicePlanEntryType!]!
+}
+
+"""The status of a deployment"""
+enum DeploymentStatus {
+  BLOCKED
+  CANCELLED
+  CANCELLING
+  COMPLETE
+  FAILED
+  INITIALIZING
+  PENDING
+  PLANNING
+  RUNNING
+  SKIPPED
+}
+
+type DeploymentStep {
+  cliError: String
+
+  """
+  Inputs for the CLI, shaped by cliTask. Present once the step is ready for the CLI.
+  """
+  cliInputs: CliInputs
+  cliOutputs: JSON
+  cliStatus: CliStatus
+  cliTask: String
+  completedAt: String
+  createdAt: String!
+  deploymentId: String!
+  error: String
+  executor: StepExecutor!
+  id: String!
+  outputs: JSON
+  phase: DeploymentPhase!
+  sequence: Float!
+  startedAt: String
+  status: DeploymentStepStatus!
+  stepType: String!
+}
+
+"""The status of a deployment step"""
+enum DeploymentStepStatus {
+  AWAITING_CLI
+  CANCELLED
+  COMPLETE
+  FAILED
+  MANIFEST_REQUIRED
+  PENDING
+  PROCESSING
+  QUEUED
+}
+
+type DnsValidationRecord {
+  name: String!
+  type: String!
+  value: String!
+}
+
+type Domain {
+  createdAt: String!
+  id: String!
+  name: String!
+
+  """Team ID"""
+  teamId: String!
+  updatedAt: String!
+}
+
+type DomainMutationResult {
+  domain: Domain
+  message: String
+  success: Boolean!
+}
+
+type Environment {
+  cloudAccountId: String!
+  color: String
+  createdAt: String!
+  id: String!
+  isProduction: Boolean!
+  name: String!
+  networkId: String
+  pipelineOrder: Int!
+  projectId: String!
+  region: String!
+  slug: String!
+
+  """Team ID"""
+  teamId: String!
+}
+
+type EnvironmentMutationResult {
+  environment: Environment
+  message: String
+  success: Boolean!
+}
+
+type FailCliStepResult {
+  message: String
+  success: Boolean!
+}
+
+"""A file submitted in a step manifest"""
+type FileManifestEntry {
+  """MD5 hash of the file content"""
+  hash: String!
+
+  """Relative file path"""
+  path: String!
+}
+
+input FileManifestItem {
+  """MD5 hash of the file content"""
+  hash: String!
+
+  """Relative file path (e.g., "css/app.css")"""
+  path: String!
+}
+
+input FileUploadResultInput {
+  """MD5 hash of the file content"""
+  hash: String!
+
+  """Relative file path"""
+  path: String!
+
+  """Whether the file was successfully uploaded"""
+  success: Boolean!
+}
+
+type Filesystem {
+  cloudAccountId: String!
+  createdAt: String!
+  id: String!
+  name: String!
+
+  """Network ID - required for all filesystems"""
+  networkId: String!
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+  status: FilesystemStatusEnum!
+
+  """Team ID"""
+  teamId: String!
+  type: FilesystemTypeEnum!
+  updatedAt: String!
+}
+
+type FilesystemMutationResult {
+  """Deployment ID for provisioning progress tracking"""
+  deploymentId: String
+  filesystem: Filesystem
+  message: String
+  success: Boolean!
+}
+
+"""Status of a filesystem"""
+enum FilesystemStatusEnum {
+  ACTIVE
+  FAILED
+  PENDING
+}
+
+"""Filesystem provider type"""
+enum FilesystemTypeEnum {
+  EFS
+  FILESTORE
+}
+
+"""
+The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf).
+"""
+scalar JSON
+
+type LoadBalancer {
+  cloudAccountId: String!
+  createdAt: String!
+  id: String!
+  name: String!
+
+  """Network ID (required for AWS ALB)"""
+  networkId: String
+
+  """URL-friendly identifier for CLI and API references"""
+  slug: String!
+  status: LoadBalancerStatusEnum!
+
+  """Team ID"""
+  teamId: String!
+  type: LoadBalancerTypeEnum!
+  updatedAt: String!
+}
+
+type LoadBalancerMutationResult {
+  """Deployment ID for provisioning progress tracking"""
+  deploymentId: String
+  loadBalancer: LoadBalancer
+  message: String
+  success: Boolean!
+}
+
+"""Status of a load balancer"""
+enum LoadBalancerStatusEnum {
+  ACTIVE
+  FAILED
+  PENDING
+}
+
+"""Type of load balancer"""
+enum LoadBalancerTypeEnum {
+  APPLICATION
+  GATEWAY_HTTP
+  GLOBAL
+}
+
+type LoadBalancerTypeInfo {
+  description: String!
+  displayName: String!
+  guidance: String!
+  provider: String!
+  requiresNetwork: Boolean!
+  requiresRegion: Boolean!
+  type: LoadBalancerTypeEnum!
+}
+
+"""Inputs for a local-build CLI task"""
+type LocalBuildCliInputs {
+  buildArgs: [BuildArg!]
+
+  """Build commands to run, in order"""
+  buildCommands: [String!]
+  dockerTarget: String
+  dockerfile: String
+
+  """Name of the named build this step runs"""
+  namedBuildName: String
+
+  """Project ID used for image tagging"""
+  projectId: String!
+  projectSlug: String!
+  serviceName: String!
+  stepId: String!
+
+  """Version number used for image tagging"""
+  versionNumber: Int!
+  workingDir: String
+}
+
+input LocalBuildCliOutputsInput {
+  buildCommands: String
+  localImageTag: String
+  serviceName: String!
+  success: Boolean!
+}
+
+type Mutation {
+  abortCanary(input: ActivationInput!, team: String): ActivationResult!
+  cancelDeployment(id: String!, team: String): CancelDeploymentResult!
+  claimStep(stepId: String!, team: String): ClaimStepResult!
+  completeCliStep(fileResults: [FileUploadResultInput!], outputs: CliTaskOutputsInput!, stepId: String!, team: String): CompleteCliStepResult!
+  createBastion(input: CreateBastionInput!, team: String): BastionMutationResult!
+  createCache(input: CreateCacheInput!, team: String): CacheMutationResult!
+  createCertificate(input: CreateCertificateInput!, team: String): CertificateMutationResult!
+  createCluster(input: CreateClusterInput!, team: String): ClusterMutationResult!
+  createDatabase(input: CreateDatabaseInput!, team: String): DatabaseMutationResult!
+  createDomain(input: CreateDomainInput!, team: String): DomainMutationResult!
+  createEnvironment(input: CreateEnvironmentInput!, team: String): EnvironmentMutationResult!
+  createFilesystem(input: CreateFilesystemInput!, team: String): FilesystemMutationResult!
+  createLoadBalancer(input: CreateLoadBalancerInput!, team: String): LoadBalancerMutationResult!
+  createNetwork(input: CreateNetworkInput!, team: String): NetworkMutationResult!
+  createProject(input: CreateProjectInput!, team: String): ProjectMutationResult!
+  createSecret(input: CreateSecretInput!, team: String): SecretMutationResult!
+  createVersion(input: CreateVersionInput!, team: String): CreateVersionResult!
+  deleteSecret(id: String!, team: String): SecretMutationResult!
+  destroyBastion(slug: String!, team: String): BastionMutationResult!
+  failCliStep(error: String!, stepId: String!, team: String): FailCliStepResult!
+  promoteBlueGreen(input: ActivationInput!, team: String): ActivationResult!
+  promoteCanary(input: ActivationInput!, team: String): ActivationResult!
+  promoteVersion(input: PromoteVersionInput!, team: String): PromoteVersionResult!
+  rollbackDeployment(input: ActivationInput!, team: String): ActivationResult!
+  runConsoleCommand(command: [String!]!, environmentSlug: String!, projectId: String!, service: String!, team: String, variant: String = "default"): ConsoleRunResult!
+  setCanary(input: ActivationInput!, team: String): ActivationResult!
+  startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!
+  startTeardown(input: StartTeardownInput!, team: String): StartTeardownResult!
+  submitManifest(input: SubmitManifestInput!, team: String): SubmitManifestResult!
+  triggerCertificateValidation(id: String!, team: String): CertificateMutationResult!
+  triggerReroute(input: TriggerRerouteInput!, team: String): TriggerRerouteResult!
+  updateSecret(input: UpdateSecretInput!, team: String): SecretMutationResult!
+}
+
+type Network {
+  cloudAccountId: String!
+  createdAt: String!
+  id: String!
+  name: String!
+  region: String!
+  slug: String!
+  stackStatus: String
+
+  """Team ID"""
+  teamId: String!
+}
+
+type NetworkMutationResult {
+  deploymentId: String
+  message: String
+  network: Network
+  success: Boolean!
+}
+
+"""A pre-signed S3 upload for one file"""
+type PresignedUpload {
+  """Content-Type to use when uploading"""
+  contentType: String!
+
+  """Relative file path"""
+  path: String!
+
+  """S3 key for the file"""
+  s3Key: String!
+
+  """Pre-signed PUT URL"""
+  url: String!
+}
+
+type PresignedUploadUrl {
+  """Content-Type to use when uploading"""
+  contentType: String!
+
+  """Relative file path"""
+  path: String!
+
+  """S3 key for the file"""
+  s3Key: String!
+
+  """Pre-signed PUT URL"""
+  url: String!
+}
+
+type Project {
+  cloudProvider: String
+  createdAt: String!
+  id: String!
+  name: String!
+  slug: String!
+  tag: String
+
+  """Team ID"""
+  teamId: String!
+}
+
+type ProjectMutationResult {
+  message: String
+  project: Project
+  success: Boolean!
+}
+
+input PromoteVersionInput {
+  """Source version ID to promote from"""
+  sourceVersionId: String!
+
+  """Target environment ID to promote to"""
+  targetEnvironmentId: String!
+}
+
+type PromoteVersionResult {
+  message: String
+
+  """New version ID in the target environment"""
+  newVersionId: String
+
+  """New version number in the target environment"""
+  newVersionNumber: Int
+
+  """Promotion record ID"""
+  promotionId: String
+  success: Boolean!
+
+  """YAML snapshot from the source version (for passing to startDeployment)"""
+  yamlSnapshot: String
+}
+
+type Query {
+  bastion(slug: String, team: String): Bastion
+  bastionPrivateKey(slug: String, team: String): BastionPrivateKeyResult!
+  bastions(networkId: String, team: String): [Bastion!]!
+  blueprint(reference: String!): Blueprint
+  cache(id: String!, team: String): Cache
+  cacheEngineVersions(engine: String, region: String): [CacheEngineVersion!]!
+  cacheNodeTypes(engine: String, region: String): [CacheNodeType!]!
+  cacheTypes(provider: String): [CacheTypeInfo!]!
+  caches(team: String): [Cache!]!
+  certificates(cloudAccountId: String, domainId: String, team: String): [Certificate!]!
+  cloudAccountResources(cloudAccountId: String!, groupBy: ResourceGroupingEnum = PROJECT, team: String): CloudAccountResourcesResult!
+  cloudRegions(provider: String = "aws"): [CloudRegion!]!
+  clouds(team: String): [CloudAccount!]!
+  clusterTypes(provider: String): [ClusterTypeInfo!]!
+  clusters(team: String): [Cluster!]!
+  database(id: String!, team: String): Database
+  databaseCredentials(id: String!, team: String): DatabaseCredentialsResult!
+  databaseEngineVersions(deploymentMode: String, engine: String, region: String): [DatabaseEngineVersion!]!
+  databaseInstanceClasses(engine: String, region: String): [DatabaseInstanceClass!]!
+  databaseTypes(provider: String): [DatabaseTypeInfo!]!
+  databases(team: String): [Database!]!
+  deployment(id: String!, team: String): Deployment
+  deploymentStep(id: String!, team: String): DeploymentStep
+  deploymentsByVersion(team: String, versionId: String!): [Deployment!]!
+  domain(id: String!, team: String): Domain
+  domains(team: String): [Domain!]!
+  environments(projectId: String, team: String): [Environment!]!
+  filesystem(id: String!, team: String): Filesystem
+  filesystems(team: String): [Filesystem!]!
+  loadBalancerTypes(provider: String): [LoadBalancerTypeInfo!]!
+  loadBalancers(team: String): [LoadBalancer!]!
+  networks(team: String): [Network!]!
+  project(id: String, slug: String, team: String): Project
+  projects(team: String): [Project!]!
+  resolveProject(input: ResolveProjectInput!): ResolveProjectResult!
+  secret(id: String!, team: String): Secret
+  secrets(cloudAccountId: String, team: String): [Secret!]!
+  servicesByProject(projectId: String!, team: String): [Service!]!
+  teardownPreview(environmentSlug: String!, projectId: String!, team: String): TeardownPreviewResult!
+  versionDnsRecords(team: String, versionId: String!): [VersionDnsRecord!]!
+  versionRouteUrls(team: String, versionId: String!): [VersionRouteUrl!]!
+  versionsByProject(environmentId: String!, projectId: String!, team: String): [Version!]!
+  whoami: WhoAmIResponse!
+}
+
+type RegionalCertificate {
+  acmCertificateArn: String
+  certificateId: String!
+  createdAt: String!
+
+  """DNS validation records (resolved from domainDnsRecords table)"""
+  dnsRecords: [DnsValidationRecord!]
+  id: String!
+  lastValidatedAt: String
+  region: String!
+  status: CertificateStatusEnum!
+  validationAttempts: Float!
+}
+
+type ResolutionErrorType {
+  code: String!
+  message: String!
+  path: String!
+  suggestion: String
+}
+
+input ResolveProjectInput {
+  environment: String
+  projectId: String!
+  variables: [VariableOverrideInput!]
+  yaml: String!
+}
+
+type ResolveProjectResult {
+  blueprintReference: String
+  environments: [ResolvedEnvironmentType!]!
+  errors: [ResolutionErrorType!]!
+  ok: Boolean!
+}
+
+type ResolvedAccess {
+  level: String!
+  resource: String!
+}
+
+type ResolvedEnvironmentType {
+  config: JSON!
+  environment: String!
+  plan: DeploymentPlanType!
+  provenance: [VariableProvenanceEntry!]!
+  resolvedYaml: String!
+}
+
+type ResourceEnvironmentGroup {
+  environmentId: String!
+  environmentName: String!
+  resources: [CloudResource!]!
+}
+
+"""How to group cloud account resources"""
+enum ResourceGroupingEnum {
+  PROJECT
+  TYPE
+}
+
+type ResourceProjectGroup {
+  environments: [ResourceEnvironmentGroup!]!
+  projectId: String!
+  projectName: String!
+}
+
+"""Status of a cloud resource"""
+enum ResourceStatusEnum {
+  ACTIVE
+  DELETED
+  DESTROYED
+  DESTROYING
+  PENDING_DELETION
+  PROVISIONING
+}
+
+type ResourceTypeGroup {
+  displayName: String!
+  resourceType: String!
+  resources: [CloudResource!]!
+}
+
+type RoutingPathEntryType {
+  deploymentType: String!
+  path: String!
+  routeHops: [String!]!
+  service: String!
+}
+
+type RoutingPlanEntryType {
+  domain: String!
+  entryType: String!
+  loadBalancer: String
+  paths: [RoutingPathEntryType!]!
+}
+
+"""Inputs for an s3-upload CLI task"""
+type S3UploadCliInputs {
+  bucketName: String!
+  deleteStale: Boolean
+  excludePatterns: [String!]
+  force: Boolean
+  includePatterns: [String!]
+  keyPrefix: String!
+
+  """Files submitted through submitManifest"""
+  manifest: [FileManifestEntry!]
+  region: String!
+  sourcePath: String!
+  stepId: String!
+
+  """
+  Pre-signed upload URLs. Returned only while the step is awaiting-cli, once the manifest is processed.
+  """
+  uploadUrls: UploadUrls
+}
+
+input S3UploadCliOutputsInput {
+  success: Boolean!
+
+  """Total bytes uploaded"""
+  totalSize: Float!
+  uploadedFiles: Int!
+}
+
+type Secret {
+  cloudAccountId: String!
+  createdAt: String!
+  description: String
+  id: String!
+  keys: [String!]!
+  name: String!
+  providerSecretId: String
+  region: String
+
+  """Team ID"""
+  teamId: String!
+}
+
+input SecretKeyValueInput {
+  key: String!
+  value: String!
+}
+
+type SecretMutationResult {
+  message: String
+  secret: Secret
+  success: Boolean!
+}
+
+type Service {
+  createdAt: String!
+  id: String!
+  name: String!
+  projectId: String!
+  runtime: ServiceRuntimeEnum
+
+  """Team ID"""
+  teamId: String!
+
+  """Service type from service_environments (requires environment context)"""
+  type: ServiceTypeEnum
+}
+
+type ServicePlanEntryType {
+  cluster: String
+  deploymentType: String!
+  name: String!
+  source: String!
+  type: String!
+}
+
+enum ServiceRuntimeEnum {
+  CONTAINER
+  SERVERLESS
+}
+
+enum ServiceTypeEnum {
+  HTTP
+  STATIC
+}
+
+input StartDeploymentInput {
+  """The full gantry.yml configuration"""
+  config: JSON!
+
+  """Environment name to deploy to (e.g., "dev", "production")"""
+  environment: String!
+
+  """Git reference (commit SHA, branch, tag)"""
+  gitRef: String
+
+  """Deployment options (e.g., deleteStale, force)"""
+  options: DeploymentOptionsInput
+
+  """
+  Version ID from createVersion mutation. If provided, skips version creation.
+  """
+  versionId: String
+}
+
+type StartDeploymentResult {
+  """Primary deployment (first service)"""
+  deployment: Deployment
+
+  """All deployment IDs created (one per service)"""
+  deploymentIds: [String!]
+  message: String
+  success: Boolean!
+
+  """Version ID for this deployment"""
+  versionId: String
+}
+
+input StartTeardownInput {
+  """Confirmation phrase typed by user"""
+  confirmationPhrase: String!
+
+  """
+  Environment slug (the key name from environments section in gantry.yml)
+  """
+  environmentSlug: String!
+
+  """Project ID from gantry.yml"""
+  projectId: String!
+
+  """JWT token issued by teardownPreview"""
+  teardownToken: String!
+}
+
+type StartTeardownResult {
+  message: String
+  resources: [TeardownResource!]
+  success: Boolean!
+  teardownId: String
+}
+
+"""Who executes the step - Gantry (cloud) or the CLI (local)"""
+enum StepExecutor {
+  CLI
+  WORKER
+}
+
+input SubmitManifestInput {
+  """Delete stale files after upload"""
+  delete: Boolean
+
+  """List of files to upload"""
+  files: [FileManifestItem!]!
+
+  """Force re-upload, skip deduplication"""
+  force: Boolean
+
+  """Step ID that needs the manifest"""
+  stepId: String!
+}
+
+type SubmitManifestResult {
+  message: String
+  success: Boolean!
+}
+
+type TeardownPreviewResult {
+  environmentId: String!
+  environmentName: String!
+
+  """ISO timestamp when the teardown token expires"""
+  expiresAt: DateTime!
+  resources: [TeardownResource!]!
+
+  """JWT token to be passed to startTeardown - expires in 5 minutes"""
+  teardownToken: String!
+  totalResources: Float!
+}
+
+type TeardownResource {
+  id: String!
+  resourceId: String
+  resourceType: String!
+  status: String!
+}
+
+input TriggerRerouteInput {
+  """The full gantry.yml configuration (used to identify project)"""
+  config: JSON!
+
+  """Environment name to reroute (e.g., "dev", "production")"""
+  environment: String!
+}
+
+type TriggerRerouteResult {
+  """Deployment ID for polling"""
+  deploymentId: String
+  message: String
+  success: Boolean!
+
+  """Version ID of the live version"""
+  versionId: String
+
+  """Version number of the live version"""
+  versionNumber: Float
+}
+
+input UpdateSecretInput {
+  description: String
+  id: String!
+  keyValuePairs: [SecretKeyValueInput!]
+  name: String
+}
+
+"""Pre-signed upload URLs generated from the manifest"""
+type UploadUrls {
+  """Files to upload"""
+  store: [PresignedUpload!]!
+}
+
+input VariableOverrideInput {
+  name: String!
+  value: String!
+}
+
+type VariableProvenanceEntry {
+  name: String!
+  source: String!
+  type: String!
+  value: String!
+}
+
+type Version {
+  createdAt: String!
+  environmentId: String!
+  gitRef: String
+  id: String!
+  number: Int!
+  projectId: String!
+
+  """Team ID"""
+  teamId: String!
+  yamlSnapshot: String!
+}
+
+type VersionDnsRecord {
+  hostname: String!
+  managed: Boolean!
+  name: String!
+  recordType: String!
+  syncStatus: String!
+  value: String!
+}
+
+type VersionRouteUrl {
+  cache: String
+  domain: String
+  path: String!
+  serviceName: String!
+  url: String!
+}
+
+type WhoAmIResponse {
+  access: [ResolvedAccess!]!
+  authenticated: Boolean!
+  isAdmin: Boolean!
+  kind: String!
+  teamId: String
+  teamIds: [String!]!
+  tokenName: String!
+}

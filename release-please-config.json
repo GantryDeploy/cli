@@ -19,8 +19,7 @@
   ],
   "packages": {
     ".": {
-      "package-name": "@gantrydeploy/cli",
-      "release-as": "1.0.0"
+      "package-name": "@gantrydeploy/cli"
     }
   }
 }

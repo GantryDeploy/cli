@@ -684,67 +684,115 @@ export function cleanStagingDir(projectDir: string): void {
   fs.mkdirSync(stagingPath, { recursive: true })
 }
 
-interface GitignoreScope {
+interface IgnoreScope {
   base: string
   ig: ReturnType<typeof ignore>
 }
 
+interface IgnoreScopes {
+  gitignore: IgnoreScope[]
+  gantryignore: IgnoreScope[]
+}
+
+type IgnoreVerdict = 'kept' | 'ignored' | 'env-blocked'
+
+const ENV_FILE_RULES = ['.env', '.env.*', '!.env.example']
+
 /**
  * Honours every `.gitignore` in the tree the way git does: rules are relative to
  * their own directory, and deeper files (including `!` negations) win. With
- * `useGitignore` false, everything on disk is copied and services trim it with
- * `exclude:`. WordPress needs this because projects often gitignore core files,
- * including `index.php`.
+ * `useGitignore` false, `.gitignore` files are skipped, which WordPress needs
+ * because projects often gitignore core files, including `index.php`.
+ *
+ * `.env` files are left out by default. `.gantryignore` files are read in both
+ * modes and evaluated after every `.gitignore`, so a `!` there re-includes a
+ * blocked `.env` file or a gitignored one.
+ *
+ * Returns the paths left out only by the default `.env` rule.
  */
-export function copyToStagingDir(projectDir: string, useGitignore = true): void {
+export function copyToStagingDir(projectDir: string, useGitignore = true): string[] {
   const stagingPath = getStagingPath(projectDir)
 
   // `.gitignore` never lists `.git`, and a static service would publish it to a
   // public bucket. In submodules and worktrees `.git` is a file, not a directory.
   const alwaysIgnored = ignore().add(['.git', STAGING_DIR_NAME])
+  const envBlocked: string[] = []
 
-  copyDirRecursive(projectDir, stagingPath, projectDir, alwaysIgnored, useGitignore ? [] : null)
+  copyDirRecursive(projectDir, stagingPath, {
+    rootDir: projectDir,
+    alwaysIgnored,
+    useGitignore,
+    envRules: { base: '', ig: ignore().add(ENV_FILE_RULES) },
+    envBlocked,
+  })
+
+  return envBlocked
 }
 
-function loadGitignoreScope(dir: string, rootDir: string): GitignoreScope | null {
-  const gitignorePath = path.join(dir, '.gitignore')
-  if (!fs.statSync(gitignorePath, { throwIfNoEntry: false })?.isFile()) {
-    return null
-  }
-  return {
-    base: path.relative(rootDir, dir).replace(/\\/g, '/'),
-    ig: ignore().add(fs.readFileSync(gitignorePath, 'utf-8')),
-  }
+interface CopyContext {
+  rootDir: string
+  alwaysIgnored: ReturnType<typeof ignore>
+  useGitignore: boolean
+  envRules: IgnoreScope
+  envBlocked: string[]
 }
 
-function isGitignored(relativePath: string, isDir: boolean, scopes: GitignoreScope[]): boolean {
+function loadIgnoreScope(dir: string, rootDir: string, fileName: string): IgnoreScope[] {
+  const filePath = path.join(dir, fileName)
+  if (!fs.statSync(filePath, { throwIfNoEntry: false })?.isFile()) {
+    return []
+  }
+  return [
+    {
+      base: path.relative(rootDir, dir).replace(/\\/g, '/'),
+      ig: ignore().add(fs.readFileSync(filePath, 'utf-8')),
+    },
+  ]
+}
+
+function ignoreVerdict(
+  relativePath: string,
+  isDir: boolean,
+  envRules: IgnoreScope,
+  scopes: IgnoreScopes
+): IgnoreVerdict {
   let ignored = false
-  for (const { base, ig } of scopes) {
-    const scoped = base ? relativePath.slice(base.length + 1) : relativePath
-    const result = ig.test(isDir ? `${scoped}/` : scoped)
-    if (result.ignored) {
-      ignored = true
-    } else if (result.unignored) {
-      ignored = false
+  let decidedBy: IgnoreScope | null = null
+  for (const scope of [envRules, ...scopes.gitignore, ...scopes.gantryignore]) {
+    const scoped = scope.base ? relativePath.slice(scope.base.length + 1) : relativePath
+    const result = scope.ig.test(isDir ? `${scoped}/` : scoped)
+    if (result.ignored || result.unignored) {
+      ignored = result.ignored
+      decidedBy = scope
     }
   }
-  return ignored
+  if (!ignored) return 'kept'
+  return decidedBy === envRules ? 'env-blocked' : 'ignored'
 }
 
-/** `parentScopes` is null when `.gitignore` files are not honoured. */
 function copyDirRecursive(
   srcDir: string,
   destDir: string,
-  rootDir: string,
-  alwaysIgnored: ReturnType<typeof ignore>,
-  parentScopes: GitignoreScope[] | null
+  context: CopyContext,
+  parentScopes: IgnoreScopes = { gitignore: [], gantryignore: [] }
 ): void {
-  const ownScope = parentScopes ? loadGitignoreScope(srcDir, rootDir) : null
-  const scopes = parentScopes && ownScope ? [...parentScopes, ownScope] : parentScopes
+  const { rootDir, alwaysIgnored, useGitignore, envRules, envBlocked } = context
+  const scopes: IgnoreScopes = {
+    gitignore: useGitignore
+      ? [...parentScopes.gitignore, ...loadIgnoreScope(srcDir, rootDir, '.gitignore')]
+      : [],
+    gantryignore: [
+      ...parentScopes.gantryignore,
+      ...loadIgnoreScope(srcDir, rootDir, '.gantryignore'),
+    ],
+  }
 
-  const isIgnored = (relativePath: string, isDir: boolean): boolean =>
-    alwaysIgnored.ignores(isDir ? `${relativePath}/` : relativePath) ||
-    (scopes !== null && isGitignored(relativePath, isDir, scopes))
+  const isIgnored = (relativePath: string, isDir: boolean): boolean => {
+    if (alwaysIgnored.ignores(isDir ? `${relativePath}/` : relativePath)) return true
+    const verdict = ignoreVerdict(relativePath, isDir, envRules, scopes)
+    if (verdict === 'env-blocked') envBlocked.push(relativePath)
+    return verdict !== 'kept'
+  }
 
   const entries = fs.readdirSync(srcDir, { withFileTypes: true })
 
@@ -773,7 +821,7 @@ function copyDirRecursive(
       }
 
       fs.mkdirSync(destPath, { recursive: true })
-      copyDirRecursive(srcPath, destPath, rootDir, alwaysIgnored, scopes)
+      copyDirRecursive(srcPath, destPath, context, scopes)
     } else {
       if (isIgnored(relativePath, false)) {
         continue

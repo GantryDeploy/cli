@@ -683,22 +683,22 @@ describe('copyToStagingDir', () => {
   it('applies a nested .gitignore relative to its own directory', () => {
     fs.writeFileSync(path.join(projectDir, '.gitignore'), 'node_modules/\n')
     fs.mkdirSync(path.join(projectDir, 'nested', 'deeper'), { recursive: true })
-    fs.writeFileSync(path.join(projectDir, 'nested', '.gitignore'), '.env\n/local.txt\n')
-    fs.writeFileSync(path.join(projectDir, 'nested', '.env'), 'SECRET=1')
+    fs.writeFileSync(path.join(projectDir, 'nested', '.gitignore'), 'secrets.json\n/local.txt\n')
+    fs.writeFileSync(path.join(projectDir, 'nested', 'secrets.json'), '{"key":"1"}')
     fs.writeFileSync(path.join(projectDir, 'nested', 'local.txt'), 'x')
-    fs.writeFileSync(path.join(projectDir, 'nested', 'deeper', '.env'), 'SECRET=2')
+    fs.writeFileSync(path.join(projectDir, 'nested', 'deeper', 'secrets.json'), '{"key":"2"}')
     fs.writeFileSync(path.join(projectDir, 'nested', 'deeper', 'local.txt'), 'kept')
-    fs.writeFileSync(path.join(projectDir, '.env'), 'ROOT=1')
+    fs.writeFileSync(path.join(projectDir, 'secrets.json'), '{"root":true}')
 
     stage(true)
 
-    expect(fs.existsSync(staged('nested', '.env'))).toBe(false)
-    expect(fs.existsSync(staged('nested', 'deeper', '.env'))).toBe(false)
+    expect(fs.existsSync(staged('nested', 'secrets.json'))).toBe(false)
+    expect(fs.existsSync(staged('nested', 'deeper', 'secrets.json'))).toBe(false)
     expect(fs.existsSync(staged('nested', 'local.txt'))).toBe(false)
     expect(fs.readFileSync(staged('nested', 'deeper', 'local.txt'), 'utf-8')).toBe('kept')
     expect(fs.existsSync(staged('nested', '.gitignore'))).toBe(true)
     // Sibling rules do not leak upward.
-    expect(fs.readFileSync(staged('.env'), 'utf-8')).toBe('ROOT=1')
+    expect(fs.readFileSync(staged('secrets.json'), 'utf-8')).toBe('{"root":true}')
   })
 
   it('lets a child .gitignore negation override its parent', () => {
@@ -754,14 +754,124 @@ describe('copyToStagingDir', () => {
   it('ignores every .gitignore when use_gitignore is false', () => {
     fs.writeFileSync(path.join(projectDir, '.gitignore'), '*.php\n')
     fs.mkdirSync(path.join(projectDir, 'nested'), { recursive: true })
-    fs.writeFileSync(path.join(projectDir, 'nested', '.gitignore'), '.env\n')
+    fs.writeFileSync(path.join(projectDir, 'nested', '.gitignore'), 'cache.db\n')
     fs.writeFileSync(path.join(projectDir, 'index.php'), '<?php')
-    fs.writeFileSync(path.join(projectDir, 'nested', '.env'), 'X=1')
+    fs.writeFileSync(path.join(projectDir, 'nested', 'cache.db'), 'x')
 
     stage(false)
 
     expect(fs.existsSync(staged('index.php'))).toBe(true)
-    expect(fs.existsSync(staged('nested', '.env'))).toBe(true)
+    expect(fs.existsSync(staged('nested', 'cache.db'))).toBe(true)
+  })
+
+  describe('.env files and .gantryignore', () => {
+    const write = (relativePath: string, content: string) => {
+      fs.mkdirSync(path.dirname(path.join(projectDir, relativePath)), { recursive: true })
+      fs.writeFileSync(path.join(projectDir, relativePath), content)
+    }
+
+    const stageReporting = (useGitignore: boolean) => {
+      cleanStagingDir(projectDir)
+      return copyToStagingDir(projectDir, useGitignore)
+    }
+
+    it.each([true, false])(
+      'leaves out .env files at any depth and reports them (use_gitignore %s)',
+      (useGitignore) => {
+        write('.env', 'DB_PASSWORD=hunter2')
+        write('.env.local', 'API_KEY=sk_live_51Hx')
+        write('apps/api/.env.production', 'STRIPE_KEY=sk_live_51Hy')
+
+        const blocked = stageReporting(useGitignore)
+
+        expect(fs.existsSync(staged('.env'))).toBe(false)
+        expect(fs.existsSync(staged('.env.local'))).toBe(false)
+        expect(fs.existsSync(staged('apps', 'api', '.env.production'))).toBe(false)
+        expect(blocked.sort()).toEqual(['.env', '.env.local', 'apps/api/.env.production'])
+      }
+    )
+
+    it('stages .env.example', () => {
+      write('.env.example', 'DB_PASSWORD=')
+
+      expect(stageReporting(true)).toEqual([])
+      expect(fs.readFileSync(staged('.env.example'), 'utf-8')).toBe('DB_PASSWORD=')
+    })
+
+    it('does not report an .env file the project already gitignores', () => {
+      write('.gitignore', '.env\n')
+      write('.env', 'DB_PASSWORD=hunter2')
+
+      expect(stageReporting(true)).toEqual([])
+      expect(fs.existsSync(staged('.env'))).toBe(false)
+    })
+
+    it.each([true, false])(
+      're-includes an .env file negated in .gantryignore (use_gitignore %s)',
+      (useGitignore) => {
+        write('.gantryignore', '!.env.production\n')
+        write('.env.production', 'NEXT_PUBLIC_API_URL=https://api.example.com')
+        write('.env', 'DB_PASSWORD=hunter2')
+
+        expect(stageReporting(useGitignore)).toEqual(['.env'])
+        expect(fs.readFileSync(staged('.env.production'), 'utf-8')).toBe(
+          'NEXT_PUBLIC_API_URL=https://api.example.com'
+        )
+      }
+    )
+
+    it('re-includes an .env file negated in .gitignore', () => {
+      write('.gitignore', '!.env.production\n')
+      write('.env.production', 'NEXT_PUBLIC_API_URL=https://api.example.com')
+
+      expect(stageReporting(true)).toEqual([])
+      expect(fs.existsSync(staged('.env.production'))).toBe(true)
+    })
+
+    it('lets a root .gantryignore re-include a file a nested .gitignore ignores', () => {
+      write('wp-content/plugins/.gitignore', '*.php\n')
+      write('wp-content/plugins/mine.php', '<?php')
+      write('wp-content/plugins/vendor.php', '<?php')
+      write('.gantryignore', '!wp-content/plugins/mine.php\n')
+
+      stageReporting(true)
+
+      expect(fs.existsSync(staged('wp-content', 'plugins', 'mine.php'))).toBe(true)
+      expect(fs.existsSync(staged('wp-content', 'plugins', 'vendor.php'))).toBe(false)
+    })
+
+    it('excludes a committed file listed in .gantryignore', () => {
+      write('docs/.gantryignore', 'drafts/\n')
+      write('docs/drafts/launch.md', '# Draft')
+      write('docs/index.md', '# Docs')
+
+      stageReporting(true)
+
+      expect(fs.existsSync(staged('docs', 'drafts'))).toBe(false)
+      expect(fs.existsSync(staged('docs', 'index.md'))).toBe(true)
+    })
+
+    it('re-includes a file inside an ignored directory with the parent-directory workaround', () => {
+      write('.gitignore', 'vendor/\n')
+      write('vendor/autoload.php', '<?php')
+      write('vendor/composer/installed.php', '<?php')
+      write('.gantryignore', '!vendor/\nvendor/*\n!vendor/autoload.php\n')
+
+      stageReporting(true)
+
+      expect(fs.existsSync(staged('vendor', 'autoload.php'))).toBe(true)
+      expect(fs.existsSync(staged('vendor', 'composer'))).toBe(false)
+    })
+
+    it('cannot re-include a file inside an ignored directory directly', () => {
+      write('.gitignore', 'vendor/\n')
+      write('vendor/autoload.php', '<?php')
+      write('.gantryignore', '!vendor/autoload.php\n')
+
+      stageReporting(true)
+
+      expect(fs.existsSync(staged('vendor'))).toBe(false)
+    })
   })
 
   it('always excludes .git even when a .gitignore negates it', () => {

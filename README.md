@@ -115,7 +115,7 @@ Pull request titles must follow [Conventional Commits](https://www.conventionalc
 
 Releases are automated with [release-please](https://github.com/googleapis/release-please). It keeps a release PR open that bumps the version and updates `CHANGELOG.md` from the merged PR titles. Merging that PR tags the release, and the release workflow runs the full check suite, packs the tarball once, smoke-tests it on every supported Node version, and publishes that exact tarball to npm with provenance after a maintainer approves the `release` environment.
 
-Dependabot opens weekly, grouped update PRs for npm dependencies and GitHub Actions (`.github/dependabot.yml`). Production dependency updates are titled `deps:` and cut a patch release; development dependency and action updates are titled `chore:` and `ci:` and do not.
+Dependabot opens grouped update PRs weekly for npm dependencies and monthly for GitHub Actions (`.github/dependabot.yml`). Production dependency updates are titled `deps:` and cut a patch release; development dependency and action updates are titled `chore:` and `ci:` and do not.
 
 `npm run test:coverage` enforces the thresholds in `vitest.config.ts`, and CI fails when coverage drops below them: at least 80% lines, branches, functions, and statements for `src/lib/**`, `src/commands/**`, and the package as a whole. Never lower them. On every CI run, the Node 24.x job writes a coverage table (totals and per file) to the run's summary page and uploads the full HTML report as the `coverage-report` artifact. Locally, open `coverage/index.html` after `npm run test:coverage`.
 

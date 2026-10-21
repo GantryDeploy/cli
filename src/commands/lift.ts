@@ -399,6 +399,11 @@ function topoSortBuilds(builds: Record<string, NamedBuildConfig>): [string, Name
   return queue.map((name) => [name, builds[name]])
 }
 
+export function envBlockedTitle(paths: string[]): string {
+  const noun = paths.length === 1 ? 'env file' : 'env files'
+  return `Copy project files (left out ${noun}: ${paths.join(', ')}; add "!<path>" to .gantryignore to deploy one)`
+}
+
 const PHASE_LABELS: Record<DeploymentPhase, string> = {
   BUILDING: 'Building',
   SETUP: 'Setup',
@@ -777,9 +782,12 @@ export function registerLiftCommand(program: Command): void {
 
             {
               title: 'Copy project files',
-              task: () => {
+              task: (_ctx, task) => {
                 // Projects that ship untracked-but-required files (e.g. WordPress core) set `use_gitignore: false`.
-                copyToStagingDir(workingDir, config.setup?.use_gitignore ?? true)
+                const envBlocked = copyToStagingDir(workingDir, config.setup?.use_gitignore ?? true)
+                if (envBlocked.length > 0) {
+                  task.title = sanitizeTerminal(envBlockedTitle(envBlocked))
+                }
               },
             },
 

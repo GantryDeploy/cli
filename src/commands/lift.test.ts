@@ -63,7 +63,7 @@ vi.mock(import('../lib/output'), async (importOriginal) => ({
 }))
 
 const { GantryApiError } = await import('../lib/client')
-const { getPhaseDisplay, registerLiftCommand } = await import('./lift')
+const { envBlockedTitle, getPhaseDisplay, registerLiftCommand } = await import('./lift')
 
 class ExitError extends Error {
   constructor(readonly code: number | undefined) {
@@ -157,6 +157,7 @@ describe('lift command', () => {
     fs.writeFileSync(path.join(workingDir, 'gantry.yml'), 'type: project\nid: proj_1\n')
 
     for (const mock of Object.values(mocks)) mock.mockReset()
+    mocks.copyToStagingDir.mockReturnValue([])
     mocks.executeCliTask.mockResolvedValue(S3_RESULT)
     mocks.runDocker.mockResolvedValue(undefined)
     mocks.spawn.mockImplementation((() => {
@@ -1216,6 +1217,20 @@ describe('lift command', () => {
 
     expect(mocks.printError).toHaveBeenCalledWith(
       `No gantry.yml or gantry.yaml found in ${workingDir}`
+    )
+  })
+})
+
+describe('envBlockedTitle', () => {
+  it('names one blocked file and the .gantryignore line that re-includes it', () => {
+    expect(envBlockedTitle(['.env'])).toBe(
+      'Copy project files (left out env file: .env; add "!<path>" to .gantryignore to deploy one)'
+    )
+  })
+
+  it('lists every blocked file', () => {
+    expect(envBlockedTitle(['.env', 'apps/api/.env.local'])).toBe(
+      'Copy project files (left out env files: .env, apps/api/.env.local; add "!<path>" to .gantryignore to deploy one)'
     )
   })
 })

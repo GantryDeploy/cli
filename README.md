@@ -64,6 +64,37 @@ Two commands print secrets on purpose, because that is their job. Avoid running 
 - `gantry databases credentials` prints the connection details, including the password.
 - `gantry resolve` prints the resolved configuration, including variable values.
 
+## What gets deployed
+
+`gantry lift` copies your project into a staging directory and builds the deployment from that copy. Three things decide which files are copied:
+
+1. **`.env` files are left out by default:** `.env` and `.env.*` in any directory, except `.env.example`. `gantry lift` names each file it left out. Put values your app needs at runtime in Gantry secrets.
+2. **`.gitignore` files** are honoured the way git honours them: each applies to its own directory, and deeper files override their parents. Set `setup.use_gitignore: false` in `gantry.yml` to skip them, for example when the project gitignores WordPress core.
+3. **`.gantryignore` files** use the same syntax, apply only to deployments, and are read whatever `use_gitignore` says. They are evaluated after every `.gitignore`, so a `.gantryignore` rule always wins.
+
+Use `.gantryignore` to keep committed files out of a deployment, or to deploy a file that is otherwise left out:
+
+```gitignore
+# Ship the file a Next.js or Vite build reads
+!.env.production
+
+# Ship a plugin the repository gitignores
+!wp-content/plugins/my-plugin.php
+
+# Keep drafts out of the deployment
+docs/drafts/
+```
+
+Within the rules, the last match wins. A file inside an ignored directory can't be re-included on its own, because the directory is never entered. Re-include the directory, ignore its contents, then re-include the file:
+
+```gitignore
+!vendor/
+vendor/*
+!vendor/autoload.php
+```
+
+`.git` and the `.gantry` staging directory are never copied.
+
 ## Tunnels and bastion host keys
 
 `gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH. The CLI checks the bastion's SSH host key before forwarding anything, the way `ssh` does:

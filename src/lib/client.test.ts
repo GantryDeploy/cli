@@ -300,34 +300,128 @@ describe('client', () => {
       })
     })
 
-    describe('mutations (no idempotency key, so no blind retries)', () => {
+    describe('mutations', () => {
       const MUTATION = 'mutation StartDeployment { startDeployment { id } }'
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+      const deployed = { data: { startDeployment: { id: 'dep_8Kq2mZ' } } }
 
       function undiciError(code: string, message: string): TypeError {
         const cause = Object.assign(new Error(message), { code })
         return new TypeError('fetch failed', { cause })
       }
 
-      it('does not retry a 502 that may follow a committed write', async () => {
-        mockFetch.mockResolvedValue(textResponse('Bad Gateway', 502))
+      function sentKeys(): (string | undefined)[] {
+        return mockFetch.mock.calls.map(
+          ([, init]) => (init as { headers: Record<string, string> }).headers['Idempotency-Key']
+        )
+      }
 
-        await expect(runWithTimers(graphqlRequest(MUTATION))).rejects.toThrow(GantryApiError)
-        expect(mockFetch).toHaveBeenCalledTimes(1)
+      it('sends the same idempotency key on every attempt of one call', async () => {
+        mockFetch
+          .mockResolvedValueOnce(textResponse('Bad Gateway', 502))
+          .mockResolvedValueOnce(jsonResponse(deployed))
+
+        const result = await runWithTimers(graphqlRequest(MUTATION))
+
+        expect(result).toEqual(deployed.data)
+        const [first, second] = sentKeys()
+        expect(first).toMatch(UUID)
+        expect(second).toBe(first)
       })
 
-      it('does not retry a request timeout', async () => {
-        mockFetch.mockRejectedValue(
-          new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+      it('uses a new idempotency key for each call', async () => {
+        mockFetch.mockImplementation(() => Promise.resolve(jsonResponse(deployed)))
+
+        await runWithTimers(graphqlRequest(MUTATION))
+        await runWithTimers(graphqlRequest(MUTATION))
+
+        const [first, second] = sentKeys()
+        expect(first).toMatch(UUID)
+        expect(second).toMatch(UUID)
+        expect(second).not.toBe(first)
+      })
+
+      it('sends no idempotency key with a query', async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ data: { test: 'ok' } }))
+
+        await runWithTimers(graphqlRequest('query { test }'))
+
+        expect(sentKeys()).toEqual([undefined])
+      })
+
+      it('detects a mutation behind comments and fragments', async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ data: { runDeploy: { output: 'ok' } } }))
+        const document = `# deploys the service
+          fragment Out on DeployResult { output }
+          mutation { runDeploy(command: "query") { ...Out } }`
+
+        await runWithTimers(graphqlRequest(document))
+
+        expect(sentKeys()[0]).toMatch(UUID)
+      })
+
+      it.each([
+        ['a 502', () => textResponse('Bad Gateway', 502)],
+        [
+          'a request timeout',
+          () => {
+            throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+          },
+        ],
+        [
+          'a connection reset after sending',
+          () => {
+            throw undiciError('ECONNRESET', 'read ECONNRESET')
+          },
+        ],
+      ])('retries %s', async (_label, fail) => {
+        mockFetch
+          .mockImplementationOnce(() => Promise.resolve().then(fail))
+          .mockResolvedValueOnce(jsonResponse(deployed))
+
+        const result = await runWithTimers(graphqlRequest(MUTATION))
+
+        expect(result).toEqual(deployed.data)
+        expect(mockFetch).toHaveBeenCalledTimes(2)
+      })
+
+      it('retries while the API is still running the first attempt', async () => {
+        mockFetch
+          .mockResolvedValueOnce(
+            jsonResponse({
+              data: null,
+              errors: [
+                {
+                  message: 'This request is already being processed.',
+                  extensions: { code: 'IDEMPOTENCY_IN_PROGRESS' },
+                },
+              ],
+            })
+          )
+          .mockResolvedValueOnce(jsonResponse(deployed))
+
+        const result = await runWithTimers(graphqlRequest(MUTATION))
+
+        expect(result).toEqual(deployed.data)
+        expect(mockFetch).toHaveBeenCalledTimes(2)
+      })
+
+      it('does not retry a key the API says was used for a different request', async () => {
+        mockFetch.mockResolvedValue(
+          jsonResponse({
+            data: null,
+            errors: [
+              {
+                message: 'This idempotency key was already used for a different request.',
+                extensions: { code: 'IDEMPOTENCY_KEY_REUSED' },
+              },
+            ],
+          })
         )
 
-        await expect(runWithTimers(graphqlRequest(MUTATION))).rejects.toThrow(NetworkError)
-        expect(mockFetch).toHaveBeenCalledTimes(1)
-      })
-
-      it('does not retry a connection reset after sending', async () => {
-        mockFetch.mockRejectedValue(undiciError('ECONNRESET', 'read ECONNRESET'))
-
-        await expect(runWithTimers(graphqlRequest(MUTATION))).rejects.toThrow(NetworkError)
+        await expect(runWithTimers(graphqlRequest(MUTATION))).rejects.toMatchObject({
+          errors: [{ code: 'IDEMPOTENCY_KEY_REUSED' }],
+        })
         expect(mockFetch).toHaveBeenCalledTimes(1)
       })
 
@@ -339,6 +433,57 @@ describe('client', () => {
         await expect(runWithTimers(graphqlRequest(MUTATION))).rejects.toThrow(NetworkError)
         expect(mockFetch).toHaveBeenCalledTimes(1)
       })
+    })
+
+    describe('mutations marked idempotent: false (no blind retries)', () => {
+      const MUTATION =
+        'mutation RunConsoleCommand { runConsoleCommand(command: "migrate") { output } }'
+      const unkeyed = { idempotent: false } as const
+
+      function undiciError(code: string, message: string): TypeError {
+        const cause = Object.assign(new Error(message), { code })
+        return new TypeError('fetch failed', { cause })
+      }
+
+      it('sends no idempotency key', async () => {
+        mockFetch.mockResolvedValueOnce(
+          jsonResponse({ data: { runConsoleCommand: { output: 'ok' } } })
+        )
+
+        await runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))
+
+        const [, init] = mockFetch.mock.calls[0] as [string, { headers: Record<string, string> }]
+        expect(init.headers['Idempotency-Key']).toBeUndefined()
+      })
+
+      it('does not retry a 502 that may follow a committed write', async () => {
+        mockFetch.mockResolvedValue(textResponse('Bad Gateway', 502))
+
+        await expect(runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))).rejects.toThrow(
+          GantryApiError
+        )
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      })
+
+      it('does not retry a request timeout', async () => {
+        mockFetch.mockRejectedValue(
+          new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+        )
+
+        await expect(runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))).rejects.toThrow(
+          NetworkError
+        )
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      })
+
+      it('does not retry a connection reset after sending', async () => {
+        mockFetch.mockRejectedValue(undiciError('ECONNRESET', 'read ECONNRESET'))
+
+        await expect(runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))).rejects.toThrow(
+          NetworkError
+        )
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      })
 
       it.each([
         ['EHOSTUNREACH', 'connect EHOSTUNREACH 10.0.0.1:443'],
@@ -347,11 +492,11 @@ describe('client', () => {
       ])('retries %s, where the request never left the machine', async (code, message) => {
         mockFetch
           .mockRejectedValueOnce(undiciError(code, message))
-          .mockResolvedValueOnce(jsonResponse({ data: { startDeployment: { id: 'd1' } } }))
+          .mockResolvedValueOnce(jsonResponse({ data: { runConsoleCommand: { output: 'ok' } } }))
 
-        const result = await runWithTimers(graphqlRequest(MUTATION))
+        const result = await runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))
 
-        expect(result).toEqual({ startDeployment: { id: 'd1' } })
+        expect(result).toEqual({ runConsoleCommand: { output: 'ok' } })
         expect(mockFetch).toHaveBeenCalledTimes(2)
       })
 
@@ -361,26 +506,14 @@ describe('client', () => {
           new DOMException('The operation was aborted due to timeout', 'TimeoutError')
         )
 
-        await expect(runWithTimers(graphqlRequest(MUTATION))).rejects.toThrow(
+        await expect(runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))).rejects.toThrow(
           /ehostunreach\.example\.com/
         )
         expect(mockFetch).toHaveBeenCalledTimes(1)
-
-        mockFetch.mockResolvedValueOnce(textResponse('Bad Gateway', 502))
-        await expect(runWithTimers(graphqlRequest(MUTATION))).rejects.toThrow(GantryApiError)
-        expect(mockFetch).toHaveBeenCalledTimes(2)
       })
+    })
 
-      it('detects a mutation behind comments and fragments', async () => {
-        mockFetch.mockResolvedValue(textResponse('Bad Gateway', 502))
-        const document = `# runs the command
-          fragment Out on ConsoleResult { output }
-          mutation { runConsoleCommand(command: "query") { ...Out } }`
-
-        await expect(runWithTimers(graphqlRequest(document))).rejects.toThrow(GantryApiError)
-        expect(mockFetch).toHaveBeenCalledTimes(1)
-      })
-
+    describe('queries', () => {
       it('still retries a query on 502', async () => {
         mockFetch
           .mockResolvedValueOnce(textResponse('Bad Gateway', 502))

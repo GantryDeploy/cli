@@ -76,13 +76,18 @@ export function registerConsoleCommand(program: Command): void {
           const data = await graphqlRequest<
             RunConsoleCommandMutation,
             RunConsoleCommandMutationVariables
-          >(RUN_CONSOLE_COMMAND, {
-            projectId: identity.id,
-            environmentSlug: envSlug,
-            service,
-            command: consoleCommand,
-            variant: options.variant ?? 'console',
-          })
+          >(
+            RUN_CONSOLE_COMMAND,
+            {
+              projectId: identity.id,
+              environmentSlug: envSlug,
+              service,
+              command: consoleCommand,
+              variant: options.variant ?? 'console',
+            },
+            // The API does not deduplicate console runs, so a replay would run the command twice.
+            { idempotent: false }
+          )
           result = data.runConsoleCommand
           spinner.stop()
         } catch (error) {

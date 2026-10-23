@@ -92,6 +92,18 @@ describe('console command', () => {
     expect(exit.code).toBe(0)
   })
 
+  it('opts out of mutation retries, since the API does not deduplicate console runs', async () => {
+    succeed({ output: 'ok\n' })
+
+    await consoleRun('web', '--', 'migrate')
+
+    expect(mocks.graphqlRequest).toHaveBeenCalledWith(
+      expect.stringContaining('runConsoleCommand'),
+      expect.objectContaining({ command: ['migrate'] }),
+      { idempotent: false }
+    )
+  })
+
   it('passes the command through verbatim, dropping only the leading separator', async () => {
     succeed({ output: 'ok\n' })
 

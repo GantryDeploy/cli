@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { getApiUrl, getTeam, loadToken } from './config'
 import { isRecord } from './is-record'
 import { redact, sanitizeTerminal } from './sanitize'
@@ -5,6 +7,7 @@ import { redact, sanitizeTerminal } from './sanitize'
 interface GraphqlError {
   message: string
   path?: string[]
+  code?: string
 }
 
 /** Returns undefined when `value` is not a well-formed GraphQL `errors` array. */
@@ -13,12 +16,15 @@ function parseGraphqlErrors(value: unknown): GraphqlError[] | undefined {
   const errors: GraphqlError[] = []
   for (const entry of value) {
     if (!isRecord(entry) || typeof entry.message !== 'string') return undefined
-    const { path } = entry
-    errors.push(
-      Array.isArray(path) && path.every((p) => typeof p === 'string' || typeof p === 'number')
-        ? { message: entry.message, path: path.map(String) }
-        : { message: entry.message }
-    )
+    const { path, extensions } = entry
+    const error: GraphqlError = { message: entry.message }
+    if (Array.isArray(path) && path.every((p) => typeof p === 'string' || typeof p === 'number')) {
+      error.path = path.map(String)
+    }
+    if (isRecord(extensions) && typeof extensions.code === 'string') {
+      error.code = extensions.code
+    }
+    errors.push(error)
   }
   return errors
 }
@@ -26,7 +32,7 @@ function parseGraphqlErrors(value: unknown): GraphqlError[] | undefined {
 export class GantryApiError extends Error {
   constructor(
     message: string,
-    public errors?: { message: string; path?: string[] }[],
+    public errors?: GraphqlError[],
     public statusCode?: number,
     public responseBody?: string
   ) {
@@ -181,6 +187,8 @@ function isRetryable(error: unknown): boolean {
     return true
   }
   if (error instanceof GantryApiError) {
+    // The API is still running the first attempt under this idempotency key.
+    if (error.errors?.some((e) => e.code === 'IDEMPOTENCY_IN_PROGRESS')) return true
     return error.statusCode !== undefined && error.statusCode >= 500
   }
   return false
@@ -222,9 +230,9 @@ function failedBeforeSending(error: unknown): boolean {
   return collectErrorCodes(error).some((code) => PRE_SEND_ERROR_CODES.includes(code))
 }
 
-function shouldRetry(error: unknown, mutation: boolean): boolean {
+function shouldRetry(error: unknown, unkeyedMutation: boolean): boolean {
   if (!isRetryable(error)) return false
-  return !mutation || failedBeforeSending(error)
+  return !unkeyedMutation || failedBeforeSending(error)
 }
 
 /**
@@ -293,10 +301,14 @@ function skipString(document: string, start: number): number {
 /**
  * Make a GraphQL request to the Gantry Public API with retry logic.
  *
- * Queries retry up to MAX_RETRIES times with exponential backoff on transient
- * network errors (timeout, reset) and 5xx responses. Mutations carry no
- * idempotency key, so they retry only when the connection was never
- * established; any other failure surfaces after one attempt.
+ * Retries up to MAX_RETRIES times with exponential backoff on transient
+ * network errors (timeout, reset) and 5xx responses. Each mutation call sends
+ * one `Idempotency-Key` on every attempt, so the API runs it at most once; a
+ * retry that arrives while the first attempt is still running is retried too.
+ *
+ * Pass `idempotent: false` for a mutation the API does not deduplicate
+ * (`runConsoleCommand`). It sends no key and retries only when the connection
+ * was never established.
  *
  * Never retries 4xx responses, authentication errors, or connection refused /
  * host not found.
@@ -310,7 +322,7 @@ export async function graphqlRequest<
   variables?: TVariables,
   // `gantry login` verifies a token before it is written to disk, so it has one
   // in hand that `loadToken` cannot see yet.
-  options?: { token?: string }
+  options?: { token?: string; idempotent?: false }
 ): Promise<TData> {
   const token = options?.token ?? loadToken()
 
@@ -322,15 +334,16 @@ export async function graphqlRequest<
 
   const apiUrl = getApiUrl()
   const mutation = isMutationDocument(query)
+  const idempotencyKey = mutation && options?.idempotent !== false ? randomUUID() : undefined
   let lastError: Error | undefined
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      return await executeGraphqlRequest<TData>(apiUrl, token, query, variables)
+      return await executeGraphqlRequest<TData>(apiUrl, token, query, variables, idempotencyKey)
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
 
-      if (!shouldRetry(error, mutation)) {
+      if (!shouldRetry(error, mutation && !idempotencyKey)) {
         throw error
       }
 
@@ -348,7 +361,8 @@ async function executeGraphqlRequest<T>(
   apiUrl: string,
   token: string,
   query: string,
-  variables?: Record<string, unknown>
+  variables?: Record<string, unknown>,
+  idempotencyKey?: string
 ): Promise<T> {
   const team = getTeam()
 
@@ -363,6 +377,7 @@ async function executeGraphqlRequest<T>(
         // command. A `team` argument on the operation still wins, for a client
         // that wants to name the team per call.
         ...(team ? { 'X-Gantry-Team': team } : {}),
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
       },
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(30_000),

@@ -103,10 +103,10 @@ function setTty(value: boolean) {
   Object.defineProperty(process.stdout, 'isTTY', { value, configurable: true })
 }
 
-function open(trustHostKey?: boolean) {
+function open(trustHostKey?: boolean, expectedFingerprint: string | null = null) {
   const tunnel = openSshTunnel({
     bastionHost: '1.2.3.4',
-    hostKey: { hostId: 'i-0abc', label: 'my-bastion', trustHostKey },
+    hostKey: { hostId: 'i-0abc', label: 'my-bastion', expectedFingerprint, trustHostKey },
     privateKey: 'fake-key',
     remoteHost: 'db.internal',
     remotePort: 5432,
@@ -159,9 +159,31 @@ describe('openSshTunnel host key verification', () => {
     expect(typeof config.hostVerifier).toBe('function')
     expect(config.hostHash).toBeUndefined()
     expect(config.readyTimeout).toBe(0)
+    expect(config.algorithms).toBeUndefined()
 
     client.emit('error', new Error('boom'))
     return expect(tunnel).rejects.toThrow('SSH connection failed: boom')
+  })
+
+  it('accepts the key Gantry recorded at provisioning without prompting, and records it', async () => {
+    const { tunnel, client, config } = open(false, fingerprintHostKey(KEY))
+
+    expect(config.algorithms).toEqual({ serverHostKey: ['ssh-ed25519'] })
+    await expect(runVerifier(config, KEY)).resolves.toBe(true)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(readKnownHost('i-0abc')).toBe(fingerprintHostKey(KEY))
+
+    client.emit('error', new Error('closed'))
+    await expect(tunnel).rejects.toThrow()
+  })
+
+  it('refuses a key that differs from the one Gantry recorded, even with --trust-host-key', async () => {
+    const { tunnel, client, config } = open(true, fingerprintHostKey(KEY))
+
+    await expect(runVerifier(config, OTHER_KEY)).resolves.toBe(false)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(readKnownHost('i-0abc')).toBeNull()
+    await expectRejectedWith(client, tunnel, /does not match the one Gantry recorded/)
   })
 
   it('accepts and records an unknown key the user trusts', async () => {
@@ -312,7 +334,7 @@ describe('openSshTunnel forwarding', () => {
       bastionHost: '1.2.3.4',
       bastionPort: 2222,
       bastionUsername: 'ubuntu',
-      hostKey: { hostId: 'i-0abc', label: 'my-bastion' },
+      hostKey: { hostId: 'i-0abc', label: 'my-bastion', expectedFingerprint: null },
       privateKey: 'fake-key',
       remoteHost: 'db.internal',
       remotePort: 5432,
@@ -334,7 +356,7 @@ describe('openSshTunnel forwarding', () => {
   it('defaults to port 22 as ec2-user', () => {
     const tunnel = openSshTunnel({
       bastionHost: '1.2.3.4',
-      hostKey: { hostId: 'i-0abc', label: 'b' },
+      hostKey: { hostId: 'i-0abc', label: 'b', expectedFingerprint: null },
       privateKey: 'k',
       remoteHost: 'db',
       remotePort: 5432,

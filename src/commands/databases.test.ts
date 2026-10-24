@@ -13,7 +13,7 @@ const promptMocks = vi.hoisted(() => ({ input: vi.fn(), select: vi.fn() }))
 const bastionMocks = vi.hoisted(() => ({
   activeOnly: vi.fn(),
   createBastionInteractive: vi.fn(),
-  fetchBastionPrivateKey: vi.fn(),
+  fetchBastionCredentials: vi.fn(),
   selectBastion: vi.fn(),
 }))
 const tunnelMocks = vi.hoisted(() => ({ openDirectTunnel: vi.fn(), openSshTunnel: vi.fn() }))
@@ -743,7 +743,11 @@ describe('databases command', () => {
         return realOn(event, listener)
       }) as typeof process.on)
       close.mockResolvedValue(undefined)
-      bastionMocks.fetchBastionPrivateKey.mockResolvedValue('fake-bastion-private-key')
+      bastionMocks.fetchBastionCredentials.mockResolvedValue({
+        privateKey: 'fake-bastion-private-key',
+        hostPublicKey: null,
+        hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
+      })
       tunnelMocks.openSshTunnel.mockResolvedValue({ localPort: 15432, close })
       tunnelMocks.openDirectTunnel.mockResolvedValue({ localPort: 13306, close })
     })
@@ -773,7 +777,7 @@ describe('databases command', () => {
 
       expect(bastionMocks.selectBastion).not.toHaveBeenCalled()
       expect(promptMocks.input).not.toHaveBeenCalled()
-      expect(bastionMocks.fetchBastionPrivateKey).toHaveBeenCalledWith('ops-bastion')
+      expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('ops-bastion')
       expect(sentQuery(1)).toContain('query GetDatabaseTunnelBastion($slug: String!)')
       expect(sentVariables(1)).toEqual({ slug: 'ops-bastion' })
 
@@ -785,6 +789,7 @@ describe('databases command', () => {
         hostKey: {
           hostId: 'i-0abc123',
           label: 'ops-bastion',
+          expectedFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
           trustHostKey: true,
           pauseOutput: expect.any(Function) as unknown,
           resumeOutput: expect.any(Function) as unknown,
@@ -838,7 +843,7 @@ describe('databases command', () => {
         includeCreateOption: true,
         filter: bastionMocks.activeOnly,
       })
-      expect(bastionMocks.fetchBastionPrivateKey).toHaveBeenCalledWith('net-bastion')
+      expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('net-bastion')
     })
 
     it('creates a bastion when asked and waits for it', async () => {
@@ -853,7 +858,7 @@ describe('databases command', () => {
         networkId: 'h4nw8r',
         waitForActive: true,
       })
-      expect(bastionMocks.fetchBastionPrivateKey).toHaveBeenCalledWith('new-bastion')
+      expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('new-bastion')
     })
 
     it.each([

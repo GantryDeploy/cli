@@ -19,7 +19,7 @@ const promptMocks = vi.hoisted(() => ({
   activeOnly: vi.fn(),
   createBastionInteractive: vi.fn(),
   fetchBastion: vi.fn(),
-  fetchBastionPrivateKey: vi.fn(),
+  fetchBastionCredentials: vi.fn(),
   fetchBastions: vi.fn(),
   nonDestroyed: vi.fn(),
   selectBastion: vi.fn(),
@@ -85,7 +85,11 @@ describe('bastions command', () => {
     initialListeners = listenerCounts()
     fsMocks.mkdtempSync.mockReturnValue(TEMP_DIR)
     promptMocks.fetchBastion.mockResolvedValue(bastion)
-    promptMocks.fetchBastionPrivateKey.mockResolvedValue(PRIVATE_KEY)
+    promptMocks.fetchBastionCredentials.mockResolvedValue({
+      privateKey: PRIVATE_KEY,
+      hostPublicKey: null,
+      hostKeyFingerprint: null,
+    })
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
       throw new ExitError(code as number | undefined)
     })
@@ -292,6 +296,60 @@ describe('bastions command', () => {
     })
   })
 
+  describe('ssh host key pinning', () => {
+    const hostPublicKey =
+      'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICYYpJ9NxY3QwueHe9yfjYTdR8TqLEhJ5iV1nJjM/dj2'
+
+    it('pins ssh to the host key Gantry recorded through a temporary known_hosts file', async () => {
+      spawnMock.mockReturnValue(fakeChild())
+      promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
+        privateKey: PRIVATE_KEY,
+        hostPublicKey,
+        hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
+      })
+
+      await run(['ssh', 'edge'])
+
+      const knownHosts = join(TEMP_DIR, 'known_hosts')
+      expect(fsMocks.writeFileSync).toHaveBeenCalledWith(
+        knownHosts,
+        `203.0.113.10 ${hostPublicKey}\n`,
+        { mode: 0o600, flag: 'wx' }
+      )
+      expect(spawnMock).toHaveBeenCalledWith(
+        'ssh',
+        [
+          '-i',
+          join(TEMP_DIR, 'key.pem'),
+          '-o',
+          `UserKnownHostsFile=${knownHosts}`,
+          '-o',
+          'GlobalKnownHostsFile=/dev/null',
+          '-o',
+          'StrictHostKeyChecking=yes',
+          '-o',
+          'HostKeyAlgorithms=ssh-ed25519',
+          'ec2-user@203.0.113.10',
+        ],
+        { stdio: 'inherit' }
+      )
+    })
+
+    it('refuses a malformed host key and removes the temporary key', async () => {
+      promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
+        privateKey: PRIVATE_KEY,
+        hostPublicKey: `${hostPublicKey}\n203.0.113.66 ssh-ed25519 AAAA`,
+        hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
+      })
+
+      await expect(run(['ssh', 'edge'])).rejects.toThrow(ExitError)
+
+      expect(spawnMock).not.toHaveBeenCalled()
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('not a valid ed25519 key'))
+      expect(fsMocks.rmSync).toHaveBeenCalledWith(TEMP_DIR, { recursive: true, force: true })
+    })
+  })
+
   describe('ssh preconditions', () => {
     it('connects as a custom user to an interactively selected bastion', async () => {
       const child = fakeChild()
@@ -301,7 +359,7 @@ describe('bastions command', () => {
       await run(['ssh', '--user', 'ubuntu'])
 
       expect(promptMocks.selectBastion).toHaveBeenCalledWith({ filter: promptMocks.activeOnly })
-      expect(promptMocks.fetchBastionPrivateKey).toHaveBeenCalledWith('edge')
+      expect(promptMocks.fetchBastionCredentials).toHaveBeenCalledWith('edge')
       expect(spawnMock).toHaveBeenCalledWith(
         'ssh',
         [
@@ -350,7 +408,7 @@ describe('bastions command', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('Bastion host not found: ghost')
       )
-      expect(promptMocks.fetchBastionPrivateKey).not.toHaveBeenCalled()
+      expect(promptMocks.fetchBastionCredentials).not.toHaveBeenCalled()
       expect(spawnMock).not.toHaveBeenCalled()
     })
 
@@ -373,7 +431,7 @@ describe('bastions command', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('Bastion host is not active. Current status: CREATING')
       )
-      expect(promptMocks.fetchBastionPrivateKey).not.toHaveBeenCalled()
+      expect(promptMocks.fetchBastionCredentials).not.toHaveBeenCalled()
     })
 
     it.each([undefined, null])('refuses a bastion without a public IP (%j)', async (publicIp) => {
@@ -388,7 +446,7 @@ describe('bastions command', () => {
     })
 
     it('writes no temp key when the private key cannot be fetched', async () => {
-      promptMocks.fetchBastionPrivateKey.mockRejectedValueOnce(new Error('Key not available'))
+      promptMocks.fetchBastionCredentials.mockRejectedValueOnce(new Error('Key not available'))
 
       await expect(run(['ssh', 'edge'])).rejects.toThrow(ExitError)
 
@@ -406,12 +464,48 @@ describe('bastions command', () => {
         expect.stringContaining(`Private key written to ${resolve('edge.pem')}`)
       )
       expect(errorSpy).toHaveBeenCalledWith(
-        `  Connect: ssh -i ${resolve('edge.pem')} ec2-user@203.0.113.10`
+        `  Connect:         ssh -i ${resolve('edge.pem')} ec2-user@203.0.113.10`
       )
     })
 
+    it('pins the recorded host key in the connect hints', async () => {
+      const hostPublicKey =
+        'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICYYpJ9NxY3QwueHe9yfjYTdR8TqLEhJ5iV1nJjM/dj2'
+      promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
+        privateKey: PRIVATE_KEY,
+        hostPublicKey,
+        hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
+      })
+
+      await run(['key', 'edge'])
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `  Trust host key:  echo '203.0.113.10 ${hostPublicKey}' >> ~/.ssh/known_hosts`
+      )
+      expect(errorSpy).toHaveBeenCalledWith(
+        '  Connect:         ssh -i ~/.ssh/edge.pem -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 ec2-user@203.0.113.10'
+      )
+    })
+
+    it('prints no key when the recorded host key is malformed', async () => {
+      promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
+        privateKey: PRIVATE_KEY,
+        hostPublicKey: "ssh-ed25519 AAAA' >> ~/.bashrc; echo '",
+        hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
+      })
+
+      await expect(run(['key', 'edge'])).rejects.toThrow(ExitError)
+
+      expect(console.log).not.toHaveBeenCalledWith(PRIVATE_KEY)
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('not a valid ed25519 key'))
+    })
+
     it('keeps a key that already ends with a newline unchanged', async () => {
-      promptMocks.fetchBastionPrivateKey.mockResolvedValueOnce(`${PRIVATE_KEY}\n`)
+      promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
+        privateKey: `${PRIVATE_KEY}\n`,
+        hostPublicKey: null,
+        hostKeyFingerprint: null,
+      })
       promptMocks.fetchBastion.mockResolvedValueOnce({ ...bastion, publicIp: null })
 
       await run(['key', 'edge', '--output', 'edge.pem'])
@@ -450,7 +544,7 @@ describe('bastions command', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('Bastion host not found: ghost')
       )
-      expect(promptMocks.fetchBastionPrivateKey).not.toHaveBeenCalled()
+      expect(promptMocks.fetchBastionCredentials).not.toHaveBeenCalled()
     })
 
     it('refuses the create choice', async () => {

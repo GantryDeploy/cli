@@ -10,6 +10,8 @@ import { isInteractive } from './terminal'
 export interface HostKeyPolicy {
   hostId: string
   label: string
+  /** Fingerprint Gantry recorded when it provisioned the bastion; null for older bastions */
+  expectedFingerprint: string | null
   trustHostKey?: boolean
   pauseOutput?: () => void
   resumeOutput?: () => void
@@ -89,6 +91,20 @@ async function withPausedOutput<T>(policy: HostKeyPolicy, fn: () => Promise<T>):
 export async function verifyHostKey(key: Buffer, policy: HostKeyPolicy): Promise<void> {
   const fingerprint = fingerprintHostKey(key)
   const known = readKnownHost(policy.hostId)
+
+  // The API's record is authoritative, so it overrides a stale or
+  // first-use entry in known_hosts and there is nothing to prompt for.
+  if (policy.expectedFingerprint) {
+    if (fingerprint !== policy.expectedFingerprint) {
+      throw new HostKeyError(
+        `The host key for bastion ${policy.label} (${policy.hostId}) does not match the one Gantry recorded when it provisioned the bastion. ` +
+          `Someone may be intercepting the connection, so the tunnel was not opened. ` +
+          `A bastion created in the last few minutes may not have installed its recorded host key yet.`
+      )
+    }
+    if (known !== fingerprint) recordKnownHost(policy.hostId, fingerprint)
+    return
+  }
 
   if (known === fingerprint) return
 

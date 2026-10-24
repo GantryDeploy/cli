@@ -164,6 +164,11 @@ export function openSshTunnel(config: SshTunnelConfig): Promise<TunnelConnection
       username: config.bastionUsername ?? 'ec2-user',
       privateKey: config.privateKey,
       hostVerifier,
+      // Gantry records only the ed25519 host key. Older bastions keep ssh2's
+      // default order so their first-use entries in known_hosts still match.
+      ...(config.hostKey.expectedFingerprint
+        ? { algorithms: { serverHostKey: ['ssh-ed25519'] } }
+        : {}),
       // Our own timer covers the handshake so it can pause while the user answers the trust prompt.
       readyTimeout: 0,
       keepaliveInterval: 10_000,

@@ -55,6 +55,8 @@ export const BASTION_PRIVATE_KEY_QUERY = /* GraphQL */ `
       success
       message
       privateKey
+      hostPublicKey
+      hostKeyFingerprint
     }
   }
 `
@@ -116,15 +118,27 @@ export async function fetchBastion(slug: string): Promise<Bastion | null> {
   return data.bastion
 }
 
-export async function fetchBastionPrivateKey(slug: string): Promise<string> {
+export interface BastionCredentials {
+  privateKey: string
+  /** Null for a bastion provisioned before Gantry recorded host keys */
+  hostPublicKey: string | null
+  hostKeyFingerprint: string | null
+}
+
+export async function fetchBastionCredentials(slug: string): Promise<BastionCredentials> {
   const data = await graphqlRequest<GetBastionPrivateKeyQuery, GetBastionPrivateKeyQueryVariables>(
     BASTION_PRIVATE_KEY_QUERY,
     { slug }
   )
-  if (!data.bastionPrivateKey.success || !data.bastionPrivateKey.privateKey) {
-    throw new Error(data.bastionPrivateKey.message ?? 'Failed to retrieve SSH key')
+  const result = data.bastionPrivateKey
+  if (!result.success || !result.privateKey) {
+    throw new Error(result.message ?? 'Failed to retrieve SSH key')
   }
-  return data.bastionPrivateKey.privateKey
+  return {
+    privateKey: result.privateKey,
+    hostPublicKey: result.hostPublicKey,
+    hostKeyFingerprint: result.hostKeyFingerprint,
+  }
 }
 
 export async function selectBastion(

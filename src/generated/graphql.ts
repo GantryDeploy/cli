@@ -935,7 +935,7 @@ export type GetBastionPrivateKeyQueryVariables = Exact<{
 }>;
 
 
-export type GetBastionPrivateKeyQuery = { bastionPrivateKey: { success: boolean, message: string | null, privateKey: string | null } };
+export type GetBastionPrivateKeyQuery = { bastionPrivateKey: { success: boolean, message: string | null, privateKey: string | null, hostPublicKey: string | null, hostKeyFingerprint: string | null } };
 
 export type CreateBastionMutationVariables = Exact<{
   input: CreateBastionInput;

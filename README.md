@@ -97,7 +97,11 @@ vendor/*
 
 ## Tunnels and bastion host keys
 
-`gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH. The CLI checks the bastion's SSH host key before forwarding anything, the way `ssh` does:
+`gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH. The CLI checks the bastion's SSH host key before forwarding anything.
+
+Gantry generates each bastion's host key when it provisions the bastion and returns the key's fingerprint with the bastion's SSH credentials. The CLI checks the key the bastion presents against that fingerprint, so even the first connection is verified and there is nothing to confirm. A key that doesn't match is refused, `--trust-host-key` included. `gantry bastions ssh` does the same by passing `ssh` a known_hosts file holding only that key.
+
+Bastions provisioned before Gantry recorded host keys have no fingerprint until they are re-provisioned. For those, the CLI falls back to trust on first use, the way `ssh` does:
 
 - **First connection to a bastion:** the CLI shows the key's fingerprint (`SHA256:...`, the same format `ssh-keygen -lf` prints) and asks `Trust this bastion? (y/N)`. If you answer yes, the fingerprint is saved. If you answer no, the tunnel is not opened.
 - **Later connections:** the key must match the saved fingerprint. If it doesn't, the CLI refuses to open the tunnel and does not prompt. A changed key can mean someone is intercepting the connection.
@@ -114,6 +118,8 @@ To reset a bastion whose key legitimately changed, delete its line from `~/.gant
 ```bash
 (umask 077; gantry bastions key <slug> > ~/.ssh/<slug>.pem)
 ```
+
+The command then prints the `ssh` commands for connecting by hand: one line adds the host key Gantry recorded to `~/.ssh/known_hosts`, and the connect line uses `StrictHostKeyChecking=yes`, so `ssh` refuses any other key.
 
 ## Environment variables
 

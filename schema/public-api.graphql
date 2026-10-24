@@ -55,6 +55,12 @@ input ArtifactUploadCliOutputsInput {
 type Bastion {
   cloudAccountId: String!
   createdAt: String!
+
+  """`SHA256:` fingerprint of the bastion's SSH host key, set once provisioned"""
+  hostKeyFingerprint: String
+
+  """The bastion's SSH host public key (`ssh-ed25519 ...`), set once provisioned"""
+  hostPublicKey: String
   id: String!
 
   """Cloud instance ID, set once provisioned"""
@@ -86,6 +92,13 @@ type BastionMutationResult {
 }
 
 type BastionPrivateKeyResult {
+  """`SHA256:` fingerprint of the bastion's SSH host key, for verifying the host"""
+  hostKeyFingerprint: String
+
+  """
+  The bastion's SSH host public key (`ssh-ed25519 ...`). Unset for a bastion provisioned before host keys were recorded.
+  """
+  hostPublicKey: String
   message: String
 
   """SSH private key in PEM format"""

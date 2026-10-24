@@ -19,7 +19,7 @@ import type {
 import {
   activeOnly,
   createBastionInteractive,
-  fetchBastionPrivateKey,
+  fetchBastionCredentials,
   selectBastion,
 } from '../lib/bastion-prompts'
 import { formatApiError, graphqlRequest } from '../lib/client'
@@ -514,7 +514,7 @@ export function registerCachesCommand(program: Command): void {
         const spinner = ora('Connecting tunnel...').start()
 
         try {
-          const privateKey = await fetchBastionPrivateKey(bastionSlug)
+          const credentials = await fetchBastionCredentials(bastionSlug)
           const bastionData = await graphqlRequest<
             GetCacheTunnelBastionQuery,
             GetCacheTunnelBastionQueryVariables
@@ -545,11 +545,12 @@ export function registerCachesCommand(program: Command): void {
             hostKey: {
               hostId: bastionHostId(bastion),
               label: bastionSlug,
+              expectedFingerprint: credentials.hostKeyFingerprint,
               trustHostKey: options?.trustHostKey,
               pauseOutput: () => spinner.stop(),
               resumeOutput: () => spinner.start(),
             },
-            privateKey,
+            privateKey: credentials.privateKey,
             remoteHost,
             remotePort,
             localPort,

@@ -126,7 +126,7 @@ describe('known-hosts', () => {
   })
 
   describe('verifyHostKey', () => {
-    const policy = { hostId: 'i-0abc', label: 'my-bastion' }
+    const policy = { hostId: 'i-0abc', label: 'my-bastion', expectedFingerprint: null }
 
     it('accepts a key that matches the recorded fingerprint without prompting', async () => {
       recordKnownHost('i-0abc', fingerprintHostKey(KEY))
@@ -185,6 +185,38 @@ describe('known-hosts', () => {
 
       await expect(verifyHostKey(KEY, policy)).rejects.toThrow(/Pass --trust-host-key/)
       expect(confirm).not.toHaveBeenCalled()
+    })
+
+    describe('with a fingerprint recorded by Gantry', () => {
+      const pinned = { ...policy, expectedFingerprint: fingerprintHostKey(KEY) }
+
+      it('accepts the matching key without prompting, even with no TTY', async () => {
+        setTty(false)
+
+        await expect(verifyHostKey(KEY, pinned)).resolves.toBeUndefined()
+        expect(confirm).not.toHaveBeenCalled()
+        expect(readKnownHost('i-0abc')).toBe(fingerprintHostKey(KEY))
+      })
+
+      it('replaces a stale first-use entry with the recorded key', async () => {
+        recordKnownHost('i-0abc', fingerprintHostKey(OTHER_KEY))
+
+        await verifyHostKey(KEY, pinned)
+
+        expect(readKnownHost('i-0abc')).toBe(fingerprintHostKey(KEY))
+      })
+
+      it.each([
+        ['no local entry', null],
+        ['a local entry for the presented key', OTHER_KEY],
+      ])('refuses a different key with %s', async (_case, localKey) => {
+        if (localKey) recordKnownHost('i-0abc', fingerprintHostKey(localKey))
+
+        await expect(verifyHostKey(OTHER_KEY, { ...pinned, trustHostKey: true })).rejects.toThrow(
+          /does not match the one Gantry recorded.*created in the last few minutes/
+        )
+        expect(confirm).not.toHaveBeenCalled()
+      })
     })
 
     it('records the key and prints the fingerprint with --trust-host-key and no TTY', async () => {

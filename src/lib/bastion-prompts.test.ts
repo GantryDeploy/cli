@@ -7,7 +7,7 @@ import {
   activeOnly,
   createBastionInteractive,
   fetchBastion,
-  fetchBastionPrivateKey,
+  fetchBastionCredentials,
   fetchBastions,
   nonDestroyed,
   pollBastionUntilActive,
@@ -15,6 +15,10 @@ import {
 } from './bastion-prompts'
 import { graphqlRequest } from './client'
 import { printError } from './output'
+
+const HOST_PUBLIC_KEY =
+  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICYYpJ9NxY3QwueHe9yfjYTdR8TqLEhJ5iV1nJjM/dj2'
+const HOST_FINGERPRINT = 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs'
 
 const spinner = vi.hoisted(() => ({
   start: vi.fn(),
@@ -100,23 +104,51 @@ describe('bastion prompts', () => {
     })
   })
 
-  describe('fetchBastionPrivateKey', () => {
-    it('returns the key on success', async () => {
-      respond({ bastionPrivateKey: { success: true, privateKey: 'KEY' } })
+  describe('fetchBastionCredentials', () => {
+    it('returns the key and the recorded host key on success', async () => {
+      respond({
+        bastionPrivateKey: {
+          success: true,
+          privateKey: 'KEY',
+          hostPublicKey: HOST_PUBLIC_KEY,
+          hostKeyFingerprint: HOST_FINGERPRINT,
+        },
+      })
 
-      await expect(fetchBastionPrivateKey('edge')).resolves.toBe('KEY')
+      await expect(fetchBastionCredentials('edge')).resolves.toEqual({
+        privateKey: 'KEY',
+        hostPublicKey: HOST_PUBLIC_KEY,
+        hostKeyFingerprint: HOST_FINGERPRINT,
+      })
+    })
+
+    it('returns null host key fields for a bastion provisioned before host keys', async () => {
+      respond({
+        bastionPrivateKey: {
+          success: true,
+          privateKey: 'KEY',
+          hostPublicKey: null,
+          hostKeyFingerprint: null,
+        },
+      })
+
+      await expect(fetchBastionCredentials('edge')).resolves.toEqual({
+        privateKey: 'KEY',
+        hostPublicKey: null,
+        hostKeyFingerprint: null,
+      })
     })
 
     it('throws the server’s message when retrieval fails', async () => {
       respond({ bastionPrivateKey: { success: false, message: 'Bastion is not active.' } })
 
-      await expect(fetchBastionPrivateKey('edge')).rejects.toThrow('Bastion is not active.')
+      await expect(fetchBastionCredentials('edge')).rejects.toThrow('Bastion is not active.')
     })
 
     it('throws a generic message when success carries no key', async () => {
       respond({ bastionPrivateKey: { success: true, privateKey: null } })
 
-      await expect(fetchBastionPrivateKey('edge')).rejects.toThrow('Failed to retrieve SSH key')
+      await expect(fetchBastionCredentials('edge')).rejects.toThrow('Failed to retrieve SSH key')
     })
   })
 

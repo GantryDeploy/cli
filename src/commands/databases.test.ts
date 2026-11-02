@@ -342,6 +342,28 @@ describe('databases command', () => {
       expect(output).toContain('  Deployment: m2xa5q')
     })
 
+    it('turns master password rotation off with --no-master-rotation', async () => {
+      graphqlRequest.mockResolvedValueOnce({
+        createDatabase: { success: true, database, deploymentId: 'm2xa5q' },
+      })
+
+      await run([
+        ...createArgs,
+        '--engine',
+        'aurora-postgresql',
+        '--instance-class',
+        'db.r6g.large',
+        '--engine-version',
+        '16.4',
+        '--serverless',
+        '--no-master-rotation',
+      ])
+
+      expect(sentVariables(0)).toMatchObject({
+        input: { providerData: { masterPasswordRotation: false } },
+      })
+    })
+
     it('prompts for everything when no flags are given', async () => {
       const databaseTypes = [
         {

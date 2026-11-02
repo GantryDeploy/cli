@@ -374,6 +374,10 @@ export function registerDatabasesCommand(program: Command): void {
     .option('--instance-class <class>', 'Instance class (see "gantry db instance-classes")')
     .option('--engine-version <version>', 'Engine version (see "gantry db engine-versions")')
     .option('--serverless', 'Use serverless mode (Aurora only)')
+    .option(
+      '--no-master-rotation',
+      'Keep the master password in a Gantry secret that never rotates, instead of the cloud provider rotating it (cannot be changed later)'
+    )
     .action(
       async (options: {
         cloud?: string
@@ -384,6 +388,7 @@ export function registerDatabasesCommand(program: Command): void {
         instanceClass?: string
         engineVersion?: string
         serverless?: boolean
+        masterRotation: boolean
       }) => {
         try {
           const cloudAccountId = options.cloud ?? (await selectCloud())
@@ -484,6 +489,7 @@ export function registerDatabasesCommand(program: Command): void {
           }
           if (instanceClass) providerData.instanceClass = instanceClass
           if (engineVersion) providerData.engineVersion = engineVersion
+          if (!options.masterRotation) providerData.masterPasswordRotation = false
 
           const data = await graphqlRequest<
             CreateDatabaseMutation,

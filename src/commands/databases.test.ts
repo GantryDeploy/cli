@@ -9,7 +9,8 @@ const spinner = vi.hoisted(() => ({
   stop: vi.fn(),
   succeed: vi.fn(),
 }))
-const promptMocks = vi.hoisted(() => ({ input: vi.fn(), select: vi.fn() }))
+const promptMocks = vi.hoisted(() => ({ confirm: vi.fn(), input: vi.fn(), select: vi.fn() }))
+const isInteractive = vi.hoisted(() => vi.fn())
 const bastionMocks = vi.hoisted(() => ({
   activeOnly: vi.fn(),
   createBastionInteractive: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('../lib/client', () => ({
 vi.mock('../lib/bastion-prompts', () => bastionMocks)
 vi.mock('../lib/interactive-prompts', () => cloudMocks)
 vi.mock('../lib/ssh-tunnel', () => tunnelMocks)
+vi.mock('../lib/terminal', () => ({ isInteractive }))
 
 const { registerDatabasesCommand } = await import('./databases')
 
@@ -518,6 +520,125 @@ describe('databases command', () => {
       ).rejects.toThrow('process.exit(1)')
 
       expect(errorOutput()).toContain(message)
+    })
+  })
+
+  describe('users', () => {
+    it('lists each service user on the server', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce({
+        databaseServiceUsers: [
+          {
+            databaseName: 'wordpress',
+            username: 'g_web_3f9a0c1e',
+            auth: 'password',
+            access: 'admin',
+            status: 'active',
+            serviceName: 'web',
+            environmentSlug: 'production',
+          },
+        ],
+      })
+
+      await run(['users', 'primary'])
+
+      expect(sentQuery(1)).toContain('query GetDatabaseServiceUsers($id: String!)')
+      expect(sentVariables(1)).toEqual({ id: 'db-id-1' })
+      expect(logOutput()).toContain('g_web_3f9a0c1e')
+      expect(logOutput()).toContain('production')
+    })
+
+    it('says so when Gantry created no users on the server', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce({ databaseServiceUsers: [] })
+
+      await run(['users', 'primary'])
+
+      expect(logLines()).toEqual(['No service database users on this server.'])
+    })
+  })
+
+  describe('adopt', () => {
+    const started = {
+      adoptDatabase: {
+        success: true,
+        message: 'Database adopt started.',
+        deploymentId: 'dep_4kq8zt',
+      },
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    async function runToEnd(args: string[]): Promise<void> {
+      const outcome = run(args).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
+      )
+      await vi.advanceTimersByTimeAsync(2000)
+      const error = await outcome
+      if (error) throw error
+    }
+
+    it('adopts with --yes and reports the finished operation', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({
+          deployment: { status: 'COMPLETE', lastMessage: 'Database "wordpress" adopted.' },
+        })
+
+      await runToEnd(['adopt', 'primary', 'wordpress', '--yes'])
+
+      expect(sentQuery(1)).toContain('mutation AdoptDatabase($id: String!, $database: String!)')
+      expect(sentVariables(1)).toEqual({ id: 'db-id-1', database: 'wordpress' })
+      expect(sentVariables(2)).toEqual({ id: 'dep_4kq8zt' })
+      expect(spinner.succeed).toHaveBeenCalledWith('Database "wordpress" adopted.')
+      expect(promptMocks.confirm).not.toHaveBeenCalled()
+    })
+
+    it('exits with the operation message when the adopt fails', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({
+          deployment: {
+            status: 'FAILED',
+            lastMessage: 'There was an error while updating the database.',
+          },
+        })
+
+      await expect(runToEnd(['adopt', 'primary', 'wordpress', '--yes'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+      expect(spinner.fail).toHaveBeenCalledWith('There was an error while updating the database.')
+    })
+
+    it('asks before adopting and stops when declined', async () => {
+      isInteractive.mockReturnValue(true)
+      promptMocks.confirm.mockResolvedValue(false)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
+
+      await run(['adopt', 'primary', 'wordpress'])
+
+      expect(logOutput()).toContain('becomes a member of that role')
+      expect(logLines()).toContain('Adopt cancelled.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses to adopt without --yes when it cannot ask', async () => {
+      isInteractive.mockReturnValue(false)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
+
+      await expect(run(['adopt', 'primary', 'wordpress'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('Re-run with --yes to confirm.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
   })
 

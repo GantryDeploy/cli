@@ -1,8 +1,10 @@
-import { input, select } from '@inquirer/prompts'
+import { confirm, input, select } from '@inquirer/prompts'
 import type { Command } from 'commander'
 import ora from 'ora'
 
 import type {
+  AdoptDatabaseMutation,
+  AdoptDatabaseMutationVariables,
   CreateDatabaseMutation,
   CreateDatabaseMutationVariables,
   GetDatabaseCredentialsQuery,
@@ -11,8 +13,12 @@ import type {
   GetDatabaseEngineVersionsQueryVariables,
   GetDatabaseInstanceClassesQuery,
   GetDatabaseInstanceClassesQueryVariables,
+  GetDatabaseOperationQuery,
+  GetDatabaseOperationQueryVariables,
   GetDatabasesQuery,
   GetDatabasesQueryVariables,
+  GetDatabaseServiceUsersQuery,
+  GetDatabaseServiceUsersQueryVariables,
   GetDatabaseTunnelBastionQuery,
   GetDatabaseTunnelBastionQueryVariables,
   GetDatabaseTypesQuery,
@@ -25,6 +31,7 @@ import {
   selectBastion,
 } from '../lib/bastion-prompts'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { isTerminalStatus } from '../lib/deployment-status'
 import {
   getDefaultPort,
   normalizeEngine,
@@ -36,6 +43,7 @@ import { bastionHostId } from '../lib/known-hosts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 import { openDirectTunnel, openSshTunnel } from '../lib/ssh-tunnel'
+import { isInteractive } from '../lib/terminal'
 
 type Database = GetDatabasesQuery['databases'][number]
 
@@ -128,6 +136,87 @@ const CREATE_DATABASE_MUTATION = /* GraphQL */ `
     }
   }
 `
+
+const DATABASE_SERVICE_USERS_QUERY = /* GraphQL */ `
+  query GetDatabaseServiceUsers($id: String!) {
+    databaseServiceUsers(id: $id) {
+      databaseName
+      username
+      auth
+      access
+      status
+      serviceName
+      environmentSlug
+    }
+  }
+`
+
+const ADOPT_DATABASE_MUTATION = /* GraphQL */ `
+  mutation AdoptDatabase($id: String!, $database: String!) {
+    adoptDatabase(id: $id, database: $database) {
+      success
+      message
+      deploymentId
+    }
+  }
+`
+
+const OPERATION_QUERY = /* GraphQL */ `
+  query GetDatabaseOperation($id: String!) {
+    deployment(id: $id) {
+      status
+      lastMessage
+    }
+  }
+`
+
+const OPERATION_POLL_MS = 2000
+const OPERATION_TIMEOUT_MS = 5 * 60 * 1000
+
+async function requireDatabase(slugOrId: string): Promise<Database> {
+  const found = await findDatabase(slugOrId)
+  if (!found) {
+    printError('Database not found.')
+    process.exit(1)
+  }
+  return found
+}
+
+async function confirmAdopt(server: string, database: string, yes: boolean): Promise<boolean> {
+  if (yes) return true
+  const warning =
+    `Every table, view, sequence and schema in "${database}" on "${server}" moves to Gantry's owner role. ` +
+    'Each database user that owned any of them becomes a member of that role, so it keeps working, ' +
+    'but with owner rights over the whole database.'
+  if (!isInteractive()) {
+    printError(`${warning} Re-run with --yes to confirm.`)
+    process.exit(1)
+  }
+  console.log(warning)
+  return confirm({ message: `Adopt "${database}"?`, default: false })
+}
+
+async function waitForOperation(deploymentId: string): Promise<{ ok: boolean; message: string }> {
+  const startTime = Date.now()
+  while (Date.now() - startTime < OPERATION_TIMEOUT_MS) {
+    await new Promise((resolve) => setTimeout(resolve, OPERATION_POLL_MS))
+    try {
+      const { deployment } = await graphqlRequest<
+        GetDatabaseOperationQuery,
+        GetDatabaseOperationQueryVariables
+      >(OPERATION_QUERY, { id: deploymentId })
+      if (deployment && isTerminalStatus(deployment.status)) {
+        return {
+          ok: deployment.status === 'COMPLETE',
+          message: sanitizeTerminal(deployment.lastMessage ?? ''),
+        }
+      }
+    } catch {
+      // Network errors are transient while polling; keep trying.
+    }
+  }
+  return { ok: false, message: 'Timed out waiting for the adopt to finish.' }
+}
 
 async function findDatabase(slugOrId: string): Promise<Database | undefined> {
   const data = await graphqlRequest<GetDatabasesQuery, GetDatabasesQueryVariables>(DATABASES_QUERY)
@@ -493,6 +582,84 @@ export function registerDatabasesCommand(program: Command): void {
         console.log(`  Password: ${password}`)
         console.log(`  Engine:   ${sanitizeTerminal(db.engine)}`)
         console.log(`  Database: ${sanitizeTerminal(db.name)} (${sanitizeTerminal(db.slug)})`)
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  dbCmd
+    .command('users')
+    .description('List the database users Gantry created for services on a server')
+    .argument('<server>', 'Database server slug')
+    .action(async (server: string) => {
+      try {
+        const db = await requireDatabase(server)
+        const data = await graphqlRequest<
+          GetDatabaseServiceUsersQuery,
+          GetDatabaseServiceUsersQueryVariables
+        >(DATABASE_SERVICE_USERS_QUERY, { id: db.id })
+
+        if (data.databaseServiceUsers.length === 0) {
+          console.log('No service database users on this server.')
+          return
+        }
+        const table = createTable({
+          head: ['Database', 'User', 'Service', 'Environment', 'Auth', 'Access', 'Status'],
+        })
+        for (const user of data.databaseServiceUsers) {
+          table.push(
+            [
+              user.databaseName,
+              user.username,
+              user.serviceName,
+              user.environmentSlug,
+              user.auth,
+              user.access,
+              user.status,
+            ].map((value) => sanitizeTerminal(value))
+          )
+        }
+        console.log(table.toString())
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  dbCmd
+    .command('adopt')
+    .description(
+      "Move an existing database's objects to Gantry's owner role so services can bind it"
+    )
+    .argument('<server>', 'Database server slug')
+    .argument('<database>', 'Database inside the server')
+    .option('-y, --yes', 'Skip the confirmation prompt')
+    .action(async (server: string, database: string, options: { yes?: boolean }) => {
+      try {
+        const db = await requireDatabase(server)
+        if (!(await confirmAdopt(db.slug, database, options.yes === true))) {
+          console.log('Adopt cancelled.')
+          return
+        }
+
+        const spinner = ora(`Adopting "${sanitizeTerminal(database)}"...`).start()
+        const data = await graphqlRequest<AdoptDatabaseMutation, AdoptDatabaseMutationVariables>(
+          ADOPT_DATABASE_MUTATION,
+          { id: db.id, database }
+        )
+        const { success, message, deploymentId } = data.adoptDatabase
+        if (!success || !deploymentId) {
+          spinner.fail(message ?? 'There was an error while updating the database.')
+          process.exit(1)
+        }
+
+        const outcome = await waitForOperation(deploymentId)
+        if (!outcome.ok) {
+          spinner.fail(outcome.message || 'There was an error while updating the database.')
+          process.exit(1)
+        }
+        spinner.succeed(outcome.message || `Database "${sanitizeTerminal(database)}" adopted.`)
       } catch (error) {
         printError(formatApiError(error))
         process.exit(1)

@@ -56,10 +56,14 @@ type Bastion {
   cloudAccountId: String!
   createdAt: String!
 
-  """`SHA256:` fingerprint of the bastion's SSH host key, set once provisioned"""
+  """
+  `SHA256:` fingerprint of the bastion's SSH host key, set once provisioned
+  """
   hostKeyFingerprint: String
 
-  """The bastion's SSH host public key (`ssh-ed25519 ...`), set once provisioned"""
+  """
+  The bastion's SSH host public key (`ssh-ed25519 ...`), set once provisioned
+  """
   hostPublicKey: String
   id: String!
 
@@ -92,7 +96,9 @@ type BastionMutationResult {
 }
 
 type BastionPrivateKeyResult {
-  """`SHA256:` fingerprint of the bastion's SSH host key, for verifying the host"""
+  """
+  `SHA256:` fingerprint of the bastion's SSH host key, for verifying the host
+  """
   hostKeyFingerprint: String
 
   """
@@ -131,7 +137,6 @@ type Blueprint {
 }
 
 type BlueprintPublisher {
-  email: String!
   id: String!
   name: String
 }
@@ -686,6 +691,32 @@ type DatabaseMutationResult {
   success: Boolean!
 }
 
+"""A database user Gantry created for one service binding"""
+type DatabaseServiceUser {
+  """admin, read-write, or read-only, on this database only"""
+  access: String!
+
+  """iam or password"""
+  auth: String!
+
+  """Database inside the server"""
+  databaseName: String!
+  environmentId: String!
+  environmentSlug: String!
+  id: String!
+
+  """
+  SSM parameter holding the password, for password users. Never the password.
+  """
+  passwordSecret: String
+  serviceId: String!
+  serviceName: String!
+
+  """pending, active, failed, dropping, or drop_failed"""
+  status: String!
+  username: String!
+}
+
 """Status of a database"""
 enum DatabaseStatusEnum {
   ACTIVE
@@ -711,7 +742,7 @@ scalar DateTime
 type Deployment {
   completedAt: String
 
-  """Deployment type: deploy or teardown"""
+  """Deployment type: deploy, teardown, activation, or operation"""
   deploymentType: String
   environmentId: String
   environmentName: String
@@ -1012,8 +1043,30 @@ input LocalBuildCliOutputsInput {
   success: Boolean!
 }
 
+type LogLine {
+  message: String!
+  timestamp: String!
+}
+
+type LogPage {
+  cursor: String!
+  lines: [LogLine!]!
+}
+
 type Mutation {
   abortCanary(input: ActivationInput!, team: String): ActivationResult!
+
+  """
+  Move a database's objects to Gantry's owner role so service users can be granted access. Each previous owner becomes a member of the owner role, so existing users keep working with owner rights over the whole database. Returns a deploymentId to poll.
+  """
+  adoptDatabase(
+    """Database inside the server"""
+    database: String!
+
+    """Database server id"""
+    id: String!
+    team: String
+  ): DatabaseMutationResult!
   cancelDeployment(id: String!, team: String): CancelDeploymentResult!
   claimStep(stepId: String!, team: String): ClaimStepResult!
   completeCliStep(fileResults: [FileUploadResultInput!], outputs: CliTaskOutputsInput!, stepId: String!, team: String): CompleteCliStepResult!
@@ -1159,6 +1212,10 @@ type Query {
   databaseCredentials(id: String!, team: String): DatabaseCredentialsResult!
   databaseEngineVersions(deploymentMode: String, engine: String, region: String): [DatabaseEngineVersion!]!
   databaseInstanceClasses(engine: String, region: String): [DatabaseInstanceClass!]!
+  databaseLogs(cursor: String, grep: String, id: String!, limit: Int, since: String = "1h", team: String): LogPage!
+
+  """Database users Gantry created on this server, one per service binding"""
+  databaseServiceUsers(id: String!, team: String): [DatabaseServiceUser!]!
   databaseTypes(provider: String): [DatabaseTypeInfo!]!
   databases(team: String): [Database!]!
   deployment(id: String!, team: String): Deployment
@@ -1177,6 +1234,7 @@ type Query {
   resolveProject(input: ResolveProjectInput!): ResolveProjectResult!
   secret(id: String!, team: String): Secret
   secrets(cloudAccountId: String, team: String): [Secret!]!
+  serviceLogs(cursor: String, environmentSlug: String!, grep: String, limit: Int, projectId: String!, service: String!, since: String = "1h", team: String, variant: String): LogPage!
   servicesByProject(projectId: String!, team: String): [Service!]!
   teardownPreview(environmentSlug: String!, projectId: String!, team: String): TeardownPreviewResult!
   versionDnsRecords(team: String, versionId: String!): [VersionDnsRecord!]!

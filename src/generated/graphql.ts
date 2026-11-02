@@ -556,6 +556,28 @@ export type CreateDatabaseMutationVariables = Exact<{
 
 export type CreateDatabaseMutation = { createDatabase: { success: boolean, message: string | null, deploymentId: string | null, database: { id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum } | null } };
 
+export type GetDatabaseServiceUsersQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetDatabaseServiceUsersQuery = { databaseServiceUsers: Array<{ databaseName: string, username: string, auth: string, access: string, status: string, serviceName: string, environmentSlug: string }> };
+
+export type AdoptDatabaseMutationVariables = Exact<{
+  id: string;
+  database: string;
+}>;
+
+
+export type AdoptDatabaseMutation = { adoptDatabase: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type GetDatabaseOperationQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetDatabaseOperationQuery = { deployment: { status: DeploymentStatus, lastMessage: string | null } | null };
+
 export type GetDatabaseTunnelBastionQueryVariables = Exact<{
   slug: string;
 }>;

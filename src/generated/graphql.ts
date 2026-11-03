@@ -561,7 +561,7 @@ export type GetDatabaseServiceUsersQueryVariables = Exact<{
 }>;
 
 
-export type GetDatabaseServiceUsersQuery = { databaseServiceUsers: Array<{ databaseName: string, username: string, auth: string, access: string, status: string, serviceName: string, environmentSlug: string }> };
+export type GetDatabaseServiceUsersQuery = { databaseServiceUsers: Array<{ id: string, databaseName: string, username: string, auth: string, access: string, status: string, serviceName: string, environmentSlug: string }> };
 
 export type AdoptDatabaseMutationVariables = Exact<{
   id: string;
@@ -570,6 +570,14 @@ export type AdoptDatabaseMutationVariables = Exact<{
 
 
 export type AdoptDatabaseMutation = { adoptDatabase: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type RotateDatabaseServiceUserMutationVariables = Exact<{
+  id: string;
+  serviceUserId: string;
+}>;
+
+
+export type RotateDatabaseServiceUserMutation = { rotateDatabaseServiceUser: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type GetDatabaseOperationQueryVariables = Exact<{
   id: string;

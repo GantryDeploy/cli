@@ -703,6 +703,9 @@ type DatabaseServiceUser {
   databaseName: String!
   environmentId: String!
   environmentSlug: String!
+
+  """Blue/green rotations add a new generation; deploys use the newest"""
+  generation: Int!
   id: String!
 
   """
@@ -712,7 +715,9 @@ type DatabaseServiceUser {
   serviceId: String!
   serviceName: String!
 
-  """pending, active, failed, dropping, or drop_failed"""
+  """
+  pending, staged (a blue/green rotation waiting for a deploy), active, failed, dropping, or drop_failed
+  """
   status: String!
   username: String!
 }
@@ -1090,6 +1095,18 @@ type Mutation {
   promoteCanary(input: ActivationInput!, team: String): ActivationResult!
   promoteVersion(input: PromoteVersionInput!, team: String): PromoteVersionResult!
   rollbackDeployment(input: ActivationInput!, team: String): ActivationResult!
+
+  """
+  Give a password service user a new password. Plans with advanced deployments rotate blue/green: a new user takes over on the next deploy while the current one keeps working. Other plans rotate in place, and running instances fail to connect until they restart. Returns a deploymentId to poll.
+  """
+  rotateDatabaseServiceUser(
+    """Database server id"""
+    id: String!
+
+    """Service user id from databaseServiceUsers"""
+    serviceUserId: String!
+    team: String
+  ): DatabaseMutationResult!
   runConsoleCommand(command: [String!]!, environmentSlug: String!, projectId: String!, service: String!, team: String, variant: String = "default"): ConsoleRunResult!
   setCanary(input: ActivationInput!, team: String): ActivationResult!
   startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!

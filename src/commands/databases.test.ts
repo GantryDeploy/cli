@@ -664,6 +664,113 @@ describe('databases command', () => {
     })
   })
 
+  describe('rotate-user', () => {
+    const serviceUsers = {
+      databaseServiceUsers: [
+        {
+          id: 'sdb_7k2m9q',
+          databaseName: 'wordpress',
+          username: 'g_web_3f9a0c1e',
+          auth: 'password',
+          access: 'admin',
+          status: 'active',
+          serviceName: 'web',
+          environmentSlug: 'production',
+        },
+      ],
+    }
+    const started = {
+      rotateDatabaseServiceUser: {
+        success: true,
+        message: 'Database user rotation started.',
+        deploymentId: 'dep_7tq4wx',
+      },
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    async function runToEnd(args: string[]): Promise<void> {
+      const outcome = run(args).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
+      )
+      await vi.advanceTimersByTimeAsync(2000)
+      const error = await outcome
+      if (error) throw error
+    }
+
+    it('rotates the named user with --yes and reports what to do next', async () => {
+      const done =
+        'New database user "g_web_8d41b7c2" is ready. Deploy web in production to switch to it. "g_web_3f9a0c1e" keeps working until no live version uses it.'
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({ deployment: { status: 'COMPLETE', lastMessage: done } })
+
+      await runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--yes'])
+
+      expect(sentQuery(2)).toContain(
+        'mutation RotateDatabaseServiceUser($id: String!, $serviceUserId: String!)'
+      )
+      expect(sentVariables(2)).toEqual({ id: 'db-id-1', serviceUserId: 'sdb_7k2m9q' })
+      expect(sentVariables(3)).toEqual({ id: 'dep_7tq4wx' })
+      expect(spinner.succeed).toHaveBeenCalledWith(done)
+    })
+
+    it('exits with the reason a rotation cannot start', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce({
+          rotateDatabaseServiceUser: {
+            success: false,
+            message: 'A rotation for this database user is already waiting for a deploy.',
+            deploymentId: null,
+          },
+        })
+
+      await expect(runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--yes'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+      expect(spinner.fail).toHaveBeenCalledWith(
+        'A rotation for this database user is already waiting for a deploy.'
+      )
+    })
+
+    it('refuses a user Gantry did not create', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+
+      await expect(run(['rotate-user', 'primary', 'reporting', '--yes'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+      expect(errorOutput()).toContain('Database user not found.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(2)
+    })
+
+    it('warns about both rotation kinds and stops when declined', async () => {
+      isInteractive.mockReturnValue(true)
+      promptMocks.confirm.mockResolvedValue(false)
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+
+      await run(['rotate-user', 'primary', 'g_web_3f9a0c1e'])
+
+      expect(logOutput()).toContain('be ready to redeploy the service')
+      expect(logLines()).toContain('Rotation cancelled.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(2)
+    })
+  })
+
   describe('credentials', () => {
     it.each(['primary', 'db-id-1'])(
       'resolves %s from the database list and requests credentials by id',

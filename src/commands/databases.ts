@@ -23,6 +23,8 @@ import type {
   GetDatabaseTunnelBastionQueryVariables,
   GetDatabaseTypesQuery,
   GetDatabaseTypesQueryVariables,
+  RotateDatabaseServiceUserMutation,
+  RotateDatabaseServiceUserMutationVariables,
 } from '../generated/graphql'
 import {
   activeOnly,
@@ -140,6 +142,7 @@ const CREATE_DATABASE_MUTATION = /* GraphQL */ `
 const DATABASE_SERVICE_USERS_QUERY = /* GraphQL */ `
   query GetDatabaseServiceUsers($id: String!) {
     databaseServiceUsers(id: $id) {
+      id
       databaseName
       username
       auth
@@ -154,6 +157,16 @@ const DATABASE_SERVICE_USERS_QUERY = /* GraphQL */ `
 const ADOPT_DATABASE_MUTATION = /* GraphQL */ `
   mutation AdoptDatabase($id: String!, $database: String!) {
     adoptDatabase(id: $id, database: $database) {
+      success
+      message
+      deploymentId
+    }
+  }
+`
+
+const ROTATE_SERVICE_USER_MUTATION = /* GraphQL */ `
+  mutation RotateDatabaseServiceUser($id: String!, $serviceUserId: String!) {
+    rotateDatabaseServiceUser(id: $id, serviceUserId: $serviceUserId) {
       success
       message
       deploymentId
@@ -196,6 +209,20 @@ async function confirmAdopt(server: string, database: string, yes: boolean): Pro
   return confirm({ message: `Adopt "${database}"?`, default: false })
 }
 
+async function confirmRotate(user: string, yes: boolean): Promise<boolean> {
+  if (yes) return true
+  const username = sanitizeTerminal(user)
+  const warning =
+    `On plans with Advanced Deployments, "${username}" keeps working and a new user takes over on the service's next deploy. ` +
+    `On other plans its password changes now, and running instances fail to connect until they restart, so be ready to redeploy the service.`
+  if (!isInteractive()) {
+    printError(`${warning} Re-run with --yes to confirm.`)
+    process.exit(1)
+  }
+  console.log(warning)
+  return confirm({ message: `Rotate the password for "${username}"?`, default: false })
+}
+
 async function waitForOperation(deploymentId: string): Promise<{ ok: boolean; message: string }> {
   const startTime = Date.now()
   while (Date.now() - startTime < OPERATION_TIMEOUT_MS) {
@@ -215,7 +242,7 @@ async function waitForOperation(deploymentId: string): Promise<{ ok: boolean; me
       // Network errors are transient while polling; keep trying.
     }
   }
-  return { ok: false, message: 'Timed out waiting for the adopt to finish.' }
+  return { ok: false, message: 'Timed out waiting for the operation to finish.' }
 }
 
 async function findDatabase(slugOrId: string): Promise<Database | undefined> {
@@ -666,6 +693,52 @@ export function registerDatabasesCommand(program: Command): void {
           process.exit(1)
         }
         spinner.succeed(outcome.message || `Database "${sanitizeTerminal(database)}" adopted.`)
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  dbCmd
+    .command('rotate-user')
+    .description('Give a password service database user a new password')
+    .argument('<server>', 'Database server slug')
+    .argument('<username>', 'Service user, as `gantry db users` lists it')
+    .option('-y, --yes', 'Skip the confirmation prompt')
+    .action(async (server: string, username: string, options: { yes?: boolean }) => {
+      try {
+        const db = await requireDatabase(server)
+        const { databaseServiceUsers } = await graphqlRequest<
+          GetDatabaseServiceUsersQuery,
+          GetDatabaseServiceUsersQueryVariables
+        >(DATABASE_SERVICE_USERS_QUERY, { id: db.id })
+        const user = databaseServiceUsers.find((u) => u.username === username)
+        if (!user) {
+          printError('Database user not found.')
+          process.exit(1)
+        }
+        if (!(await confirmRotate(user.username, options.yes === true))) {
+          console.log('Rotation cancelled.')
+          return
+        }
+
+        const spinner = ora(`Rotating "${sanitizeTerminal(user.username)}"...`).start()
+        const data = await graphqlRequest<
+          RotateDatabaseServiceUserMutation,
+          RotateDatabaseServiceUserMutationVariables
+        >(ROTATE_SERVICE_USER_MUTATION, { id: db.id, serviceUserId: user.id })
+        const { success, message, deploymentId } = data.rotateDatabaseServiceUser
+        if (!success || !deploymentId) {
+          spinner.fail(message ?? 'There was an error while updating the database user.')
+          process.exit(1)
+        }
+
+        const outcome = await waitForOperation(deploymentId)
+        if (!outcome.ok) {
+          spinner.fail(outcome.message || 'There was an error while updating the database user.')
+          process.exit(1)
+        }
+        spinner.succeed(outcome.message)
       } catch (error) {
         printError(formatApiError(error))
         process.exit(1)

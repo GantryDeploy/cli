@@ -387,6 +387,33 @@ export type SubmitManifestInput = {
   stepId: string;
 };
 
+/** Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; an instance class change restarts it briefly. */
+export type UpdateDatabaseInput = {
+  /** Storage in GB, non-Aurora only. It can only grow. */
+  allocatedStorage?: number | null | undefined;
+  /** Days of automatic backups. 0 turns backups off and deletes existing ones. */
+  backupRetentionPeriod?: number | null | undefined;
+  /** Provisioned servers only. Restarts the server. */
+  instanceClass?: string | null | undefined;
+  /** Required for io1 and io2 storage */
+  iops?: number | null | undefined;
+  /** Changing this either way sets a new master password */
+  masterPasswordRotation?: boolean | null | undefined;
+  /** Serverless only, in steps of 0.5 */
+  maxCapacity?: number | null | undefined;
+  /** Serverless only, in steps of 0.5 */
+  minCapacity?: number | null | undefined;
+  /** Standby copy in a second zone, non-Aurora only */
+  multiAz?: boolean | null | undefined;
+  /** User-friendly name */
+  name?: string | null | undefined;
+  performanceInsightsEnabled?: boolean | null | undefined;
+  /** Serverless with a minimum capacity of 0 only, 300 to 86400 */
+  secondsUntilAutoPause?: number | null | undefined;
+  /** gp3, io1 or io2, non-Aurora only */
+  storageType?: string | null | undefined;
+};
+
 export type UpdateSecretInput = {
   description?: string | null | undefined;
   id: string;
@@ -584,6 +611,14 @@ export type RotateDatabaseServiceUserMutationVariables = Exact<{
 
 
 export type RotateDatabaseServiceUserMutation = { rotateDatabaseServiceUser: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type UpdateDatabaseMutationVariables = Exact<{
+  id: string;
+  input: UpdateDatabaseInput;
+}>;
+
+
+export type UpdateDatabaseMutation = { updateDatabase: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type GetDatabaseOperationQueryVariables = Exact<{
   id: string;

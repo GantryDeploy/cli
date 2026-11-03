@@ -25,6 +25,8 @@ import type {
   GetDatabaseTypesQueryVariables,
   RotateDatabaseServiceUserMutation,
   RotateDatabaseServiceUserMutationVariables,
+  UpdateDatabaseMutation,
+  UpdateDatabaseMutationVariables,
 } from '../generated/graphql'
 import {
   activeOnly,
@@ -33,6 +35,7 @@ import {
   selectBastion,
 } from '../lib/bastion-prompts'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { buildDatabaseUpdate, type DatabaseUpdateOptions } from '../lib/database-update'
 import { isTerminalStatus } from '../lib/deployment-status'
 import {
   getDefaultPort,
@@ -171,6 +174,16 @@ const ROTATE_SERVICE_USER_MUTATION = /* GraphQL */ `
     $mode: DatabaseUserRotationMode
   ) {
     rotateDatabaseServiceUser(id: $id, serviceUserId: $serviceUserId, mode: $mode) {
+      success
+      message
+      deploymentId
+    }
+  }
+`
+
+const UPDATE_DATABASE_MUTATION = /* GraphQL */ `
+  mutation UpdateDatabase($id: String!, $input: UpdateDatabaseInput!) {
+    updateDatabase(id: $id, input: $input) {
       success
       message
       deploymentId
@@ -420,7 +433,7 @@ export function registerDatabasesCommand(program: Command): void {
     .option('--serverless', 'Use serverless mode (Aurora only)')
     .option(
       '--no-master-rotation',
-      'Keep the master password in a Gantry secret that never rotates, instead of the cloud provider rotating it (cannot be changed later)'
+      'Keep the master password in a Gantry secret that never rotates, instead of the cloud provider rotating it'
     )
     .action(
       async (options: {
@@ -788,6 +801,69 @@ export function registerDatabasesCommand(program: Command): void {
         }
       }
     )
+
+  dbCmd
+    .command('update')
+    .description('Change a database server. Setting changes apply right away.')
+    .argument('<server>', 'Database server slug')
+    .option('--name <name>', 'New display name')
+    .option('--instance-class <class>', 'Provisioned servers. Restarts the server briefly.')
+    .option('--min-capacity <acu>', 'Serverless minimum capacity, in steps of 0.5')
+    .option('--max-capacity <acu>', 'Serverless maximum capacity, in steps of 0.5')
+    .option('--pause-after <seconds>', 'Serverless with minimum 0: idle seconds before pausing')
+    .option('--storage <gb>', 'Storage in GB (non-Aurora). It can only grow.')
+    .option('--storage-type <type>', 'gp3, io1 or io2 (non-Aurora)')
+    .option('--iops <iops>', 'Required for io1 and io2 storage')
+    .option('--backup-days <days>', 'Days of automatic backups. 0 turns backups off.')
+    .option('--multi-az', 'Add a standby copy in a second zone (non-Aurora)')
+    .option('--no-multi-az', 'Remove the standby copy')
+    .option('--performance-insights', 'Turn Performance Insights on')
+    .option('--no-performance-insights', 'Turn Performance Insights off')
+    .option('--master-rotation', 'Let the cloud provider rotate the master password')
+    .option(
+      '--no-master-rotation',
+      'Keep the master password in a Gantry secret that never rotates'
+    )
+    .option('-y, --yes', 'Skip the confirmation prompt')
+    .action(async (server: string, options: DatabaseUpdateOptions & { yes?: boolean }) => {
+      try {
+        const update = buildDatabaseUpdate(options)
+        if (!update.ok) {
+          printError(update.message)
+          process.exit(1)
+        }
+        const db = await requireDatabase(server)
+        if (update.warnings.length > 0 && options.yes !== true) {
+          const warning = update.warnings.join(' ')
+          if (!isInteractive()) {
+            printError(`${warning} Re-run with --yes to confirm.`)
+            process.exit(1)
+          }
+          console.log(warning)
+          if (!(await confirm({ message: `Update "${db.slug}"?`, default: false }))) {
+            console.log('Update cancelled.')
+            return
+          }
+        }
+
+        const data = await graphqlRequest<UpdateDatabaseMutation, UpdateDatabaseMutationVariables>(
+          UPDATE_DATABASE_MUTATION,
+          { id: db.id, input: update.input }
+        )
+        const { success, message, deploymentId } = data.updateDatabase
+        if (!success) {
+          printError(message ?? 'There was an error while updating the database.')
+          process.exit(1)
+        }
+        printSuccess(message ?? 'Database updated.')
+        if (deploymentId) {
+          console.log(`  Deployment: ${deploymentId}`)
+        }
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
 
   dbCmd
     .command('tunnel')

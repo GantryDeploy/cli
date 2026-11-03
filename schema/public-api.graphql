@@ -1129,6 +1129,16 @@ type Mutation {
   submitManifest(input: SubmitManifestInput!, team: String): SubmitManifestResult!
   triggerCertificateValidation(id: String!, team: String): CertificateMutationResult!
   triggerReroute(input: TriggerRerouteInput!, team: String): TriggerRerouteResult!
+
+  """
+  Change a database server. A setting change deploys the server right away and returns a deploymentId to poll.
+  """
+  updateDatabase(
+    """Database server id"""
+    id: String!
+    input: UpdateDatabaseInput!
+    team: String
+  ): DatabaseMutationResult!
   updateSecret(input: UpdateSecretInput!, team: String): SecretMutationResult!
 }
 
@@ -1576,6 +1586,47 @@ type TriggerRerouteResult {
 
   """Version number of the live version"""
   versionNumber: Float
+}
+
+"""
+Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; an instance class change restarts it briefly.
+"""
+input UpdateDatabaseInput {
+  """Storage in GB, non-Aurora only. It can only grow."""
+  allocatedStorage: Int
+
+  """
+  Days of automatic backups. 0 turns backups off and deletes existing ones.
+  """
+  backupRetentionPeriod: Int
+
+  """Provisioned servers only. Restarts the server."""
+  instanceClass: String
+
+  """Required for io1 and io2 storage"""
+  iops: Int
+
+  """Changing this either way sets a new master password"""
+  masterPasswordRotation: Boolean
+
+  """Serverless only, in steps of 0.5"""
+  maxCapacity: Float
+
+  """Serverless only, in steps of 0.5"""
+  minCapacity: Float
+
+  """Standby copy in a second zone, non-Aurora only"""
+  multiAz: Boolean
+
+  """User-friendly name"""
+  name: String
+  performanceInsightsEnabled: Boolean
+
+  """Serverless with a minimum capacity of 0 only, 300 to 86400"""
+  secondsUntilAutoPause: Int
+
+  """gp3, io1 or io2, non-Aurora only"""
+  storageType: String
 }
 
 input UpdateSecretInput {

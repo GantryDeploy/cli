@@ -707,7 +707,7 @@ describe('databases command', () => {
 
     it('rotates the named user with --yes and reports what to do next', async () => {
       const done =
-        'New database user "g_web_8d41b7c2" is ready. Deploy web in production to switch to it. "g_web_3f9a0c1e" keeps working until no live version uses it.'
+        'New database user "g_web_3f9a0c1e_b" is ready. Deploy web in production to switch to it. "g_web_3f9a0c1e" keeps working until no live version uses it.'
       graphqlRequest
         .mockResolvedValueOnce({ databases: [database] })
         .mockResolvedValueOnce(serviceUsers)
@@ -717,11 +717,65 @@ describe('databases command', () => {
       await runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--yes'])
 
       expect(sentQuery(2)).toContain(
-        'mutation RotateDatabaseServiceUser($id: String!, $serviceUserId: String!)'
+        'rotateDatabaseServiceUser(id: $id, serviceUserId: $serviceUserId, mode: $mode)'
       )
       expect(sentVariables(2)).toEqual({ id: 'db-id-1', serviceUserId: 'sdb_7k2m9q' })
       expect(sentVariables(3)).toEqual({ id: 'dep_7tq4wx' })
       expect(spinner.succeed).toHaveBeenCalledWith(done)
+    })
+
+    it('rotates in place with --in-place, even on a plan with Advanced Deployments', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({ deployment: { status: 'COMPLETE', lastMessage: 'rotated' } })
+
+      await runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--in-place', '--yes'])
+
+      expect(sentVariables(2)).toEqual({
+        id: 'db-id-1',
+        serviceUserId: 'sdb_7k2m9q',
+        mode: 'IN_PLACE',
+      })
+    })
+
+    it('asks for a staged rotation with --staged', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({ deployment: { status: 'COMPLETE', lastMessage: 'staged' } })
+
+      await runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--staged', '--yes'])
+
+      expect(sentVariables(2)).toEqual({
+        id: 'db-id-1',
+        serviceUserId: 'sdb_7k2m9q',
+        mode: 'STAGED',
+      })
+    })
+
+    it('refuses both --in-place and --staged', async () => {
+      await expect(
+        run(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--in-place', '--staged', '--yes'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('Choose either --in-place or --staged, not both.')
+      expect(graphqlRequest).not.toHaveBeenCalled()
+    })
+
+    it('warns only about the in-place outcome with --in-place', async () => {
+      isInteractive.mockReturnValue(true)
+      promptMocks.confirm.mockResolvedValue(false)
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+
+      await run(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--in-place'])
+
+      expect(logOutput()).toContain('"g_web_3f9a0c1e" gets a new password now')
+      expect(logOutput()).not.toContain('Advanced Deployments')
     })
 
     it('exits with the reason a rotation cannot start', async () => {

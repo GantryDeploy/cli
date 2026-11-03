@@ -165,8 +165,12 @@ const ADOPT_DATABASE_MUTATION = /* GraphQL */ `
 `
 
 const ROTATE_SERVICE_USER_MUTATION = /* GraphQL */ `
-  mutation RotateDatabaseServiceUser($id: String!, $serviceUserId: String!) {
-    rotateDatabaseServiceUser(id: $id, serviceUserId: $serviceUserId) {
+  mutation RotateDatabaseServiceUser(
+    $id: String!
+    $serviceUserId: String!
+    $mode: DatabaseUserRotationMode
+  ) {
+    rotateDatabaseServiceUser(id: $id, serviceUserId: $serviceUserId, mode: $mode) {
       success
       message
       deploymentId
@@ -209,12 +213,25 @@ async function confirmAdopt(server: string, database: string, yes: boolean): Pro
   return confirm({ message: `Adopt "${database}"?`, default: false })
 }
 
-async function confirmRotate(user: string, yes: boolean): Promise<boolean> {
+type RotationMode = 'IN_PLACE' | 'STAGED'
+
+function rotationWarning(username: string, mode: RotationMode | undefined): string {
+  const staged = `a second user with a new password takes over on the service's next deploy, and "${username}" keeps working until no live version uses it.`
+  const inPlace =
+    'running instances keep the old password and fail to connect until they restart, so be ready to redeploy the service.'
+  if (mode === 'IN_PLACE') return `"${username}" gets a new password now, and ${inPlace}`
+  if (mode === 'STAGED') return `With a staged rotation, ${staged}`
+  return `On plans with Advanced Deployments, ${staged} On other plans the password changes now, and ${inPlace}`
+}
+
+async function confirmRotate(
+  user: string,
+  mode: RotationMode | undefined,
+  yes: boolean
+): Promise<boolean> {
   if (yes) return true
   const username = sanitizeTerminal(user)
-  const warning =
-    `On plans with Advanced Deployments, "${username}" keeps working and a new user takes over on the service's next deploy. ` +
-    `On other plans its password changes now, and running instances fail to connect until they restart, so be ready to redeploy the service.`
+  const warning = rotationWarning(username, mode)
   if (!isInteractive()) {
     printError(`${warning} Re-run with --yes to confirm.`)
     process.exit(1)
@@ -704,46 +721,73 @@ export function registerDatabasesCommand(program: Command): void {
     .description('Give a password service database user a new password')
     .argument('<server>', 'Database server slug')
     .argument('<username>', 'Service user, as `gantry db users` lists it')
+    .option(
+      '--in-place',
+      'Change the password on the same user now, even on plans with Advanced Deployments'
+    )
+    .option(
+      '--staged',
+      'Create a second user that the next deploy switches to (Advanced Deployments plans)'
+    )
     .option('-y, --yes', 'Skip the confirmation prompt')
-    .action(async (server: string, username: string, options: { yes?: boolean }) => {
-      try {
-        const db = await requireDatabase(server)
-        const { databaseServiceUsers } = await graphqlRequest<
-          GetDatabaseServiceUsersQuery,
-          GetDatabaseServiceUsersQueryVariables
-        >(DATABASE_SERVICE_USERS_QUERY, { id: db.id })
-        const user = databaseServiceUsers.find((u) => u.username === username)
-        if (!user) {
-          printError('Database user not found.')
-          process.exit(1)
-        }
-        if (!(await confirmRotate(user.username, options.yes === true))) {
-          console.log('Rotation cancelled.')
-          return
-        }
+    .action(
+      async (
+        server: string,
+        username: string,
+        options: { yes?: boolean; inPlace?: boolean; staged?: boolean }
+      ) => {
+        try {
+          if (options.inPlace && options.staged) {
+            printError('Choose either --in-place or --staged, not both.')
+            process.exit(1)
+          }
+          const mode: RotationMode | undefined = options.inPlace
+            ? 'IN_PLACE'
+            : options.staged
+              ? 'STAGED'
+              : undefined
+          const db = await requireDatabase(server)
+          const { databaseServiceUsers } = await graphqlRequest<
+            GetDatabaseServiceUsersQuery,
+            GetDatabaseServiceUsersQueryVariables
+          >(DATABASE_SERVICE_USERS_QUERY, { id: db.id })
+          const user = databaseServiceUsers.find((u) => u.username === username)
+          if (!user) {
+            printError('Database user not found.')
+            process.exit(1)
+          }
+          if (!(await confirmRotate(user.username, mode, options.yes === true))) {
+            console.log('Rotation cancelled.')
+            return
+          }
 
-        const spinner = ora(`Rotating "${sanitizeTerminal(user.username)}"...`).start()
-        const data = await graphqlRequest<
-          RotateDatabaseServiceUserMutation,
-          RotateDatabaseServiceUserMutationVariables
-        >(ROTATE_SERVICE_USER_MUTATION, { id: db.id, serviceUserId: user.id })
-        const { success, message, deploymentId } = data.rotateDatabaseServiceUser
-        if (!success || !deploymentId) {
-          spinner.fail(message ?? 'There was an error while updating the database user.')
-          process.exit(1)
-        }
+          const spinner = ora(`Rotating "${sanitizeTerminal(user.username)}"...`).start()
+          const data = await graphqlRequest<
+            RotateDatabaseServiceUserMutation,
+            RotateDatabaseServiceUserMutationVariables
+          >(ROTATE_SERVICE_USER_MUTATION, {
+            id: db.id,
+            serviceUserId: user.id,
+            mode,
+          })
+          const { success, message, deploymentId } = data.rotateDatabaseServiceUser
+          if (!success || !deploymentId) {
+            spinner.fail(message ?? 'There was an error while updating the database user.')
+            process.exit(1)
+          }
 
-        const outcome = await waitForOperation(deploymentId)
-        if (!outcome.ok) {
-          spinner.fail(outcome.message || 'There was an error while updating the database user.')
+          const outcome = await waitForOperation(deploymentId)
+          if (!outcome.ok) {
+            spinner.fail(outcome.message || 'There was an error while updating the database user.')
+            process.exit(1)
+          }
+          spinner.succeed(outcome.message)
+        } catch (error) {
+          printError(formatApiError(error))
           process.exit(1)
         }
-        spinner.succeed(outcome.message)
-      } catch (error) {
-        printError(formatApiError(error))
-        process.exit(1)
       }
-    })
+    )
 
   dbCmd
     .command('tunnel')

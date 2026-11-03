@@ -243,6 +243,11 @@ export type DatabaseStatusEnum =
   | 'FAILED'
   | 'PENDING';
 
+/** IN_PLACE sets a new password on the same user. STAGED (Advanced Deployments) creates the user in the other slot, which the next deploy switches to */
+export type DatabaseUserRotationMode =
+  | 'IN_PLACE'
+  | 'STAGED';
+
 export type DeploymentOptionsInput = {
   /** Delete stale files after upload */
   deleteStale?: boolean | null | undefined;
@@ -574,6 +579,7 @@ export type AdoptDatabaseMutation = { adoptDatabase: { success: boolean, message
 export type RotateDatabaseServiceUserMutationVariables = Exact<{
   id: string;
   serviceUserId: string;
+  mode?: DatabaseUserRotationMode | null | undefined;
 }>;
 
 

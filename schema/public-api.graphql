@@ -703,9 +703,6 @@ type DatabaseServiceUser {
   databaseName: String!
   environmentId: String!
   environmentSlug: String!
-
-  """Blue/green rotations add a new generation; deploys use the newest"""
-  generation: Int!
   id: String!
 
   """
@@ -716,7 +713,12 @@ type DatabaseServiceUser {
   serviceName: String!
 
   """
-  pending, staged (a blue/green rotation waiting for a deploy), active, failed, dropping, or drop_failed
+  a or b. Users start in slot a; a staged rotation moves the binding to the other slot
+  """
+  slot: String!
+
+  """
+  pending, staged (a staged rotation waiting for a deploy), active, failed, dropping, or drop_failed
   """
   status: String!
   username: String!
@@ -737,6 +739,14 @@ type DatabaseTypeInfo {
   requiresNetwork: Boolean!
   supportsServerless: Boolean!
   type: DatabaseEngineEnum!
+}
+
+"""
+IN_PLACE sets a new password on the same user. STAGED (Advanced Deployments) creates the user in the other slot, which the next deploy switches to
+"""
+enum DatabaseUserRotationMode {
+  IN_PLACE
+  STAGED
 }
 
 """
@@ -1097,11 +1107,16 @@ type Mutation {
   rollbackDeployment(input: ActivationInput!, team: String): ActivationResult!
 
   """
-  Give a password service user a new password. Plans with advanced deployments rotate blue/green: a new user takes over on the next deploy while the current one keeps working. Other plans rotate in place, and running instances fail to connect until they restart. Returns a deploymentId to poll.
+  Give a password service user a new password. IN_PLACE changes it on the same user now, and running instances fail to connect until they restart. STAGED (plans with Advanced Deployments) creates the user in the binding's other slot, which the next deploy switches to, while the current user keeps working. Returns a deploymentId to poll.
   """
   rotateDatabaseServiceUser(
     """Database server id"""
     id: String!
+
+    """
+    Defaults to STAGED on plans with Advanced Deployments, IN_PLACE otherwise
+    """
+    mode: DatabaseUserRotationMode
 
     """Service user id from databaseServiceUsers"""
     serviceUserId: String!

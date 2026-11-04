@@ -63,11 +63,14 @@
     "commander": "^15.0.0",
     "ignore": "^7.0.13",
     "listr2": "^11.4.0",
-    "minimatch": "^10.0.1",
+    "minimatch": "^11.0.1",
     "ora": "^9.4.1",
     "ssh2": "^1.16.0",
     "tldts": "^7.4.18",
     "yaml": "^2.7.1"
+  },
+  "overrides": {
+    "readdir-glob": { "minimatch": "$minimatch" }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

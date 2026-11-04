@@ -11,8 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { graphqlRequest } from './client'
 import {
-  LAMBDA_ZIP_MAX_BYTES,
-  assertLambdaZipFits,
+  assertArtifactFits,
   cleanStagingDir,
   copyToStagingDir,
   executeCliTask,
@@ -24,7 +23,7 @@ import type {
   ArtifactUploadInputs,
   ContainerPushInputs,
   LocalBuildInputs,
-  S3UploadInputs,
+  ObjectUploadInputs,
   TaskContext,
 } from './tasks'
 
@@ -147,8 +146,8 @@ const localBuild = (overrides: Partial<LocalBuildInputs> = {}): LocalBuildInputs
   ...overrides,
 })
 
-const s3Upload = (overrides: Partial<S3UploadInputs> = {}): S3UploadInputs => ({
-  __typename: 'S3UploadCliInputs',
+const objectUpload = (overrides: Partial<ObjectUploadInputs> = {}): ObjectUploadInputs => ({
+  __typename: 'ObjectUploadCliInputs',
   stepId: 'step-1',
   sourcePath: 'dist',
   includePatterns: null,
@@ -161,22 +160,23 @@ const containerPush = (overrides: Partial<ContainerPushInputs> = {}): ContainerP
   stepId: 'step-1',
   imageUri: '123456789.dkr.ecr.us-east-1.amazonaws.com/my-repo:v1',
   localImageTag: 'p9ue62-my-api-api-docker:v3',
-  ecrAuthToken: Buffer.from('AWS:test-password').toString('base64'),
-  ecrEndpoint: 'https://123456789.dkr.ecr.us-east-1.amazonaws.com',
+  registryEndpoint: 'https://123456789.dkr.ecr.us-east-1.amazonaws.com',
+  registryUsername: 'AWS',
+  registryPassword: 'test-password',
   ...overrides,
 })
 
 const artifactUpload = (overrides: Partial<ArtifactUploadInputs> = {}): ArtifactUploadInputs => ({
   __typename: 'ArtifactUploadCliInputs',
   stepId: 'step-1',
+  provider: 'aws',
   bucketName: 'artifacts',
-  s3Key: 'svc/v3.zip',
+  objectKey: 'svc/v3.zip',
   region: 'us-east-1',
-  accessKeyId: 'AKIA',
-  secretAccessKey: 'secret',
-  sessionToken: 'token',
+  maxArtifactBytes: 50 * 1024 * 1024,
   sourcePath: '.',
   excludePatterns: null,
+  aws: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
   ...overrides,
 })
 
@@ -184,9 +184,8 @@ describe('executeCliTask', () => {
   describe('container-push', () => {
     const imageUri = '123456789.dkr.ecr.us-east-1.amazonaws.com/my-repo:v1'
     const localImageTag = 'p9ue62-my-api-api-docker:v3'
-    const ecrEndpoint = 'https://123456789.dkr.ecr.us-east-1.amazonaws.com'
-    const password = 'pa$$word;$(touch pwned)`id`'
-    const ecrAuthToken = Buffer.from(`AWS:${password}`).toString('base64')
+    const registryEndpoint = 'https://123456789.dkr.ecr.us-east-1.amazonaws.com'
+    const registryPassword = 'pa$$word;$(touch pwned)`id`'
 
     it('throws when imageUri is missing', async () => {
       await expect(executeCliTask(containerPush({ imageUri: '' }), context())).rejects.toThrow(
@@ -200,14 +199,10 @@ describe('executeCliTask', () => {
       )
     })
 
-    it.each([
-      { ecrAuthToken: null, ecrEndpoint },
-      { ecrAuthToken, ecrEndpoint: '' },
-      { ecrAuthToken: '', ecrEndpoint: '' },
-    ])('refuses to push without ECR credentials (%j)', async (credentials) => {
-      await expect(executeCliTask(containerPush(credentials), context())).rejects.toThrow(
-        'ECR credentials are required for container-push task'
-      )
+    it.each([null, ''])('refuses to push without a registry password (%j)', async (password) => {
+      await expect(
+        executeCliTask(containerPush({ registryPassword: password }), context())
+      ).rejects.toThrow('Registry credentials are required for container-push task')
       expect(spawnCalls).toEqual([])
     })
 
@@ -221,66 +216,50 @@ describe('executeCliTask', () => {
       )
     })
 
-    it('passes the ECR password on stdin and never in argv', async () => {
-      await executeCliTask(containerPush({ ecrAuthToken, ecrEndpoint }), context())
+    it('signs in with the server-sent username and passes the password on stdin only', async () => {
+      await executeCliTask(
+        containerPush({
+          registryEndpoint,
+          registryUsername: 'oauth2accesstoken',
+          registryPassword,
+        }),
+        context()
+      )
 
       const [login, tag, push] = spawnCalls
-      expect(login.args).toEqual(['login', '--username', 'AWS', '--password-stdin', ecrEndpoint])
+      expect(login.args).toEqual([
+        'login',
+        '--username=oauth2accesstoken',
+        '--password-stdin',
+        registryEndpoint,
+      ])
       expect(login.shell).toBe(false)
-      expect(login.stdin).toBe(password)
+      expect(login.stdin).toBe(registryPassword)
       for (const call of spawnCalls) {
-        expect(call.args.join(' ')).not.toContain(password)
+        expect(call.args.join(' ')).not.toContain(registryPassword)
       }
       expect(tag.args).toEqual(['tag', localImageTag, imageUri])
       expect(push.args).toEqual(['push', imageUri])
     })
 
-    it('keeps a colon inside the ECR password', async () => {
-      const colonPassword = 'part-one:part-two'
-      await executeCliTask(
-        containerPush({
-          ecrAuthToken: Buffer.from(`AWS:${colonPassword}`).toString('base64'),
-          ecrEndpoint,
-        }),
-        context()
-      )
-
-      expect(spawnCalls[0].stdin).toBe(colonPassword)
-    })
-
     it('keeps the password out of the error when docker login fails', async () => {
       exitCodeFor = (args) => (args[0] === 'login' ? 1 : 0)
 
-      const error = await executeCliTask(
-        containerPush({ ecrAuthToken, ecrEndpoint }),
-        context()
-      ).catch((e: unknown) => e as Error)
+      const error = await executeCliTask(containerPush({ registryPassword }), context()).catch(
+        (e: unknown) => e as Error
+      )
 
       expect(error).toBeInstanceOf(Error)
       expect((error as Error).message).toContain('Docker command failed with exit code 1')
-      expect((error as Error).message).not.toContain(password)
+      expect((error as Error).message).not.toContain(registryPassword)
       expect(spawnCalls).toHaveLength(1)
-    })
-
-    it('rejects an undecodable auth token', async () => {
-      await expect(
-        executeCliTask(
-          containerPush({
-            ecrAuthToken: Buffer.from('nocolon').toString('base64'),
-            ecrEndpoint,
-          }),
-          context()
-        )
-      ).rejects.toThrow('Failed to decode ECR authorization token')
     })
 
     it.each([
       [containerPush({ imageUri: 'repo:v1; touch x' }), /Invalid image URI/],
       [containerPush({ localImageTag: '$(touch x)' }), /Invalid local image tag/],
-      [
-        containerPush({ ecrAuthToken, ecrEndpoint: '--help' }),
-        /Invalid container registry endpoint/,
-      ],
+      [containerPush({ registryEndpoint: '--help' }), /Invalid container registry endpoint/],
+      [containerPush({ registryEndpoint: '' }), /Invalid container registry endpoint/],
     ])('rejects invalid references before running docker (%#)', async (inputs, message) => {
       await expect(executeCliTask(inputs, context())).rejects.toThrow(message)
       expect(spawnCalls).toHaveLength(0)
@@ -391,7 +370,7 @@ describe('executeCliTask', () => {
     })
   })
 
-  describe('s3-upload', () => {
+  describe('object-upload', () => {
     let root: string
     let outside: string
     let fetchMock: ReturnType<
@@ -407,13 +386,13 @@ describe('executeCliTask', () => {
 
     const presigned = (p: string) => ({
       path: p,
-      s3Key: `site/${p}`,
+      key: `site/${p}`,
       url: `https://bucket.s3.amazonaws.com/site/${p}?sig=1`,
       contentType: 'text/plain',
     })
 
     const upload = (sourcePath = 'dist') =>
-      executeCliTask(s3Upload({ sourcePath }), context({ stagingDir: root }))
+      executeCliTask(objectUpload({ sourcePath }), context({ stagingDir: root }))
 
     const uploadedBodies = () =>
       Object.fromEntries(
@@ -445,7 +424,7 @@ describe('executeCliTask', () => {
               id: 'step-1',
               status: 'AWAITING_CLI',
               cliInputs: {
-                __typename: 'S3UploadCliInputs',
+                __typename: 'ObjectUploadCliInputs',
                 uploadUrls: { store: uploadsFor(submitted) },
               },
             },
@@ -473,7 +452,7 @@ describe('executeCliTask', () => {
 
       const result = await upload()
 
-      expect(result.outputs.s3Upload?.uploadedFiles).toBe(3)
+      expect(result.outputs.objectUpload?.uploadedFiles).toBe(3)
       expect(uploadedBodies()).toEqual({
         'index.html': '<html></html>',
         'logo.svg': '<svg/>',
@@ -487,7 +466,7 @@ describe('executeCliTask', () => {
       const result = await upload('.')
 
       expect(Object.keys(uploadedBodies())).toEqual(['dist/index.html'])
-      expect(result.outputs.s3Upload?.uploadedFiles).toBe(1)
+      expect(result.outputs.objectUpload?.uploadedFiles).toBe(1)
     })
 
     it('rejects a file symlink that escapes the project', async () => {
@@ -590,21 +569,24 @@ describe('executeCliTask', () => {
     })
   })
 
-  describe('assertLambdaZipFits', () => {
-    it('accepts a zip at or below the limit', () => {
+  describe('assertArtifactFits', () => {
+    const limit = 50 * 1024 * 1024
+
+    it('accepts an artifact at or below the limit', () => {
       expect(() => {
-        assertLambdaZipFits(0, '/work/dist')
+        assertArtifactFits(0, limit, '/work/dist')
       }).not.toThrow()
       expect(() => {
-        assertLambdaZipFits(LAMBDA_ZIP_MAX_BYTES, '/work/dist')
+        assertArtifactFits(limit, limit, '/work/dist')
       }).not.toThrow()
     })
 
-    it('reports size, limit, and source path when the zip exceeds the limit', () => {
-      const oversize = LAMBDA_ZIP_MAX_BYTES + 1
+    it('reports size, limit, and source path when the artifact exceeds the limit', () => {
       expect(() => {
-        assertLambdaZipFits(oversize, '/work/dist')
-      }).toThrow(/Lambda zip is .* MB, which exceeds the 50 MB limit\..*\/work\/dist.*source_dir/s)
+        assertArtifactFits(limit + 1, limit, '/work/dist')
+      }).toThrow(
+        /deployment artifact is .* MB, which exceeds the 50 MB limit\..*\/work\/dist.*source_dir/s
+      )
     })
   })
 })
@@ -996,7 +978,7 @@ describe('local-build without docker', () => {
   })
 })
 
-describe('s3-upload task flow', () => {
+describe('object-upload task flow', () => {
   let root: string
   let fetchMock: ReturnType<typeof vi.fn<(url: string) => Promise<unknown>>>
 
@@ -1007,7 +989,7 @@ describe('s3-upload task flow', () => {
 
   const presigned = (p: string) => ({
     path: p,
-    s3Key: `site/${p}`,
+    key: `site/${p}`,
     url: `https://bucket.s3.amazonaws.com/site/${p}`,
     contentType: 'text/plain',
   })
@@ -1015,11 +997,11 @@ describe('s3-upload task flow', () => {
   const awaitingCli = (store: ReturnType<typeof presigned>[]) => ({
     id: 'step-1',
     status: 'AWAITING_CLI',
-    cliInputs: { __typename: 'S3UploadCliInputs', uploadUrls: { store } },
+    cliInputs: { __typename: 'ObjectUploadCliInputs', uploadUrls: { store } },
   })
 
-  const upload = (inputs: Partial<S3UploadInputs> = {}, overrides: Partial<TaskContext> = {}) =>
-    executeCliTask(s3Upload(inputs), context({ stagingDir: root, ...overrides }))
+  const upload = (inputs: Partial<ObjectUploadInputs> = {}, overrides: Partial<TaskContext> = {}) =>
+    executeCliTask(objectUpload(inputs), context({ stagingDir: root, ...overrides }))
 
   function stepResponses(...steps: unknown[]) {
     mockGraphqlRequest.mockImplementation((query: string) => {
@@ -1055,7 +1037,9 @@ describe('s3-upload task flow', () => {
   })
 
   it('requires a step id', async () => {
-    await expect(upload({ stepId: '' })).rejects.toThrow('stepId is required for s3-upload task')
+    await expect(upload({ stepId: '' })).rejects.toThrow(
+      'stepId is required for object-upload task'
+    )
   })
 
   it('filters the manifest by include and exclude globs and forwards force/delete', async () => {
@@ -1071,7 +1055,7 @@ describe('s3-upload task flow', () => {
     expect(input.force).toBe(true)
     expect(input.delete).toBe(true)
     expect(result).toEqual({
-      outputs: { s3Upload: { uploadedFiles: 1, totalSize: 2, success: true } },
+      outputs: { objectUpload: { uploadedFiles: 1, totalSize: 2, success: true } },
       fileResults: [
         {
           path: 'app.js',
@@ -1090,7 +1074,7 @@ describe('s3-upload task flow', () => {
     const result = await upload({ excludePatterns: ['**'] })
 
     expect(result).toEqual({
-      outputs: { s3Upload: { uploadedFiles: 0, totalSize: 0, success: true } },
+      outputs: { objectUpload: { uploadedFiles: 0, totalSize: 0, success: true } },
       fileResults: [],
     })
     expect(mockGraphqlRequest).not.toHaveBeenCalled()
@@ -1101,18 +1085,21 @@ describe('s3-upload task flow', () => {
 
     const result = await upload()
 
-    expect(result).toMatchObject({ outputs: { s3Upload: { uploadedFiles: 0 } }, fileResults: [] })
+    expect(result).toMatchObject({
+      outputs: { objectUpload: { uploadedFiles: 0 } },
+      fileResults: [],
+    })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('refuses a step that is not an S3 upload', async () => {
+  it('refuses a step that is not an object upload', async () => {
     stepResponses({
       id: 'step-1',
       status: 'AWAITING_CLI',
       cliInputs: { __typename: 'ContainerPushCliInputs' },
     })
 
-    await expect(upload()).rejects.toThrow('Step is not an S3 upload')
+    await expect(upload()).rejects.toThrow('Step is not an object upload')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -1152,7 +1139,7 @@ describe('s3-upload task flow', () => {
     const result = upload()
     await vi.advanceTimersByTimeAsync(2000)
 
-    await expect(result).resolves.toMatchObject({ outputs: { s3Upload: { uploadedFiles: 1 } } })
+    await expect(result).resolves.toMatchObject({ outputs: { objectUpload: { uploadedFiles: 1 } } })
   })
 
   it('gives up after the polling budget is spent', async () => {
@@ -1233,7 +1220,7 @@ describe('artifact-upload task flow', () => {
       outputs: {
         artifactUpload: {
           bucketName: 'artifacts',
-          s3Key: 'svc/v3.zip',
+          objectKey: 'svc/v3.zip',
           zipSize: zip.length,
           success: true,
         },
@@ -1251,16 +1238,27 @@ describe('artifact-upload task flow', () => {
     expect(zip.includes('static/huge-image.png')).toBe(true)
   })
 
-  it('requires the bucket, key, and region', async () => {
+  it('refuses an artifact larger than the limit the server sends', async () => {
     await expect(
-      executeCliTask(artifactUpload({ region: '' }), context({ stagingDir: root }))
-    ).rejects.toThrow('bucketName, s3Key, and region are required for artifact-upload task')
+      executeCliTask(
+        artifactUpload({ sourcePath: 'build', maxArtifactBytes: 10 }),
+        context({ stagingDir: root })
+      )
+    ).rejects.toThrow(/exceeds the 0 MB limit/)
+    expect(s3.send).not.toHaveBeenCalled()
   })
 
-  it('requires the full set of session credentials', async () => {
+  it('refuses a cloud the CLI cannot upload to yet', async () => {
     await expect(
-      executeCliTask(artifactUpload({ sessionToken: '' }), context({ stagingDir: root }))
-    ).rejects.toThrow('AWS credentials (accessKeyId, secretAccessKey, sessionToken) are required')
+      executeCliTask(artifactUpload({ provider: 'gcp' }), context({ stagingDir: root }))
+    ).rejects.toThrow("This cloud doesn't support artifact uploads yet.")
+    expect(s3.send).not.toHaveBeenCalled()
+  })
+
+  it('requires AWS credentials for an AWS upload', async () => {
+    await expect(
+      executeCliTask(artifactUpload({ aws: null }), context({ stagingDir: root }))
+    ).rejects.toThrow('AWS credentials are required to upload the deployment artifact')
     expect(s3.send).not.toHaveBeenCalled()
   })
 })

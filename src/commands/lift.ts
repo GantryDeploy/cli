@@ -171,7 +171,7 @@ const CLAIM_STEP_MUTATION = /* GraphQL */ `
             dockerTarget
             namedBuildName
           }
-          ... on S3UploadCliInputs {
+          ... on ObjectUploadCliInputs {
             stepId
             sourcePath
             includePatterns
@@ -181,19 +181,24 @@ const CLAIM_STEP_MUTATION = /* GraphQL */ `
             stepId
             imageUri
             localImageTag
-            ecrAuthToken
-            ecrEndpoint
+            registryEndpoint
+            registryUsername
+            registryPassword
           }
           ... on ArtifactUploadCliInputs {
             stepId
+            provider
             bucketName
-            s3Key
+            objectKey
             region
-            accessKeyId
-            secretAccessKey
-            sessionToken
+            maxArtifactBytes
             sourcePath
             excludePatterns
+            aws {
+              accessKeyId
+              secretAccessKey
+              sessionToken
+            }
           }
         }
       }
@@ -670,7 +675,7 @@ export function registerLiftCommand(program: Command): void {
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-f, --file <path>', 'Path to gantry.yml (defaults to ./gantry.yml)')
     .option('--force', 'Force re-upload all files, bypassing deduplication')
-    .option('--delete', 'Delete stale files from S3 that are no longer in the deployment')
+    .option('--delete', 'Delete stale files from storage that are no longer in the deployment')
     .option('-v, --verbose', 'Emit a log line per state change (useful for debugging and CI logs)')
     .option('--wait-for-cleanup', 'Wait for teardown of previous version resources before exiting')
     .option(

@@ -15,7 +15,7 @@ export type ActivationInput = {
 
 export type ArtifactUploadCliOutputsInput = {
   bucketName: string;
-  s3Key: string;
+  objectKey: string;
   success: boolean;
   /** Size of the uploaded zip in bytes */
   zipSize: number;
@@ -186,7 +186,7 @@ export type CliTaskOutputsInput = {
   artifactUpload?: ArtifactUploadCliOutputsInput | null | undefined;
   containerPush?: ContainerPushCliOutputsInput | null | undefined;
   localBuild?: LocalBuildCliOutputsInput | null | undefined;
-  s3Upload?: S3UploadCliOutputsInput | null | undefined;
+  objectUpload?: ObjectUploadCliOutputsInput | null | undefined;
 };
 
 /** Supported cloud providers */
@@ -502,6 +502,13 @@ export type NetworkSubnetInput = {
   zone?: string | null | undefined;
 };
 
+export type ObjectUploadCliOutputsInput = {
+  success: boolean;
+  /** Total bytes uploaded */
+  totalSize: number;
+  uploadedFiles: number;
+};
+
 export type PromoteVersionInput = {
   /** Source version ID to promote from */
   sourceVersionId: string;
@@ -514,13 +521,6 @@ export type ResolveProjectInput = {
   projectId: string;
   variables?: Array<VariableOverrideInput> | null | undefined;
   yaml: string;
-};
-
-export type S3UploadCliOutputsInput = {
-  success: boolean;
-  /** Total bytes uploaded */
-  totalSize: number;
-  uploadedFiles: number;
 };
 
 export type SecretKeyValueInput = {
@@ -919,10 +919,10 @@ export type ClaimStepMutationVariables = Exact<{
 
 
 export type ClaimStepMutation = { claimStep: { success: boolean, message: string | null, step: { id: string, stepType: string, cliTask: string | null, cliInputs:
-        | { __typename: 'ArtifactUploadCliInputs', stepId: string, bucketName: string, s3Key: string, region: string, accessKeyId: string | null, secretAccessKey: string | null, sessionToken: string | null, sourcePath: string, excludePatterns: Array<string> | null }
-        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string, ecrAuthToken: string | null, ecrEndpoint: string }
+        | { __typename: 'ArtifactUploadCliInputs', stepId: string, provider: string, bucketName: string, objectKey: string, region: string, maxArtifactBytes: number, sourcePath: string, excludePatterns: Array<string> | null, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null }
+        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string, registryEndpoint: string, registryUsername: string, registryPassword: string | null }
         | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, buildArgs: Array<{ name: string, value: string }> | null }
-        | { __typename: 'S3UploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null }
+        | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null }
        | null } | null } };
 
 export type CompleteCliStepMutationVariables = Exact<{
@@ -1258,5 +1258,5 @@ export type GetStepForUploadQuery = { deploymentStep: { id: string, status: Depl
       | { __typename: 'ArtifactUploadCliInputs' }
       | { __typename: 'ContainerPushCliInputs' }
       | { __typename: 'LocalBuildCliInputs' }
-      | { __typename: 'S3UploadCliInputs', uploadUrls: { store: Array<{ path: string, s3Key: string, url: string, contentType: string }> } | null }
+      | { __typename: 'ObjectUploadCliInputs', uploadUrls: { store: Array<{ path: string, key: string, url: string, contentType: string }> } | null }
      | null } | null };

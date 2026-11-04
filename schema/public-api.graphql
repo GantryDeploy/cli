@@ -22,30 +22,28 @@ type ActivationResult {
 """Inputs for an artifact-upload CLI task"""
 type ArtifactUploadCliInputs {
   """
-  Temporary AWS access key ID. Returned only to the CLI that claims the step, by claimStep.
+  Upload credentials when provider is aws. Returned only to the CLI that claims the step, by claimStep.
   """
-  accessKeyId: String
+  aws: AwsUploadCredentials
   bucketName: String!
   excludePatterns: [String!]
+
+  """Largest artifact the deploy target accepts, in bytes"""
+  maxArtifactBytes: Float!
+
+  """Object key the artifact is stored under"""
+  objectKey: String!
+
+  """Cloud the artifact is uploaded to"""
+  provider: String!
   region: String!
-  s3Key: String!
-
-  """
-  Temporary AWS secret access key. Returned only to the CLI that claims the step, by claimStep.
-  """
-  secretAccessKey: String
-
-  """
-  Temporary AWS session token. Returned only to the CLI that claims the step, by claimStep.
-  """
-  sessionToken: String
   sourcePath: String!
   stepId: String!
 }
 
 input ArtifactUploadCliOutputsInput {
   bucketName: String!
-  s3Key: String!
+  objectKey: String!
   success: Boolean!
 
   """Size of the uploaded zip in bytes"""
@@ -175,6 +173,13 @@ input AwsNetworkSettingsInput {
 
   """Defaults to SINGLE with internet access and NONE without"""
   natGatewayOption: NatGatewayOptionEnum
+}
+
+"""Short-lived AWS credentials scoped to writing one artifact"""
+type AwsUploadCredentials {
+  accessKeyId: String!
+  secretAccessKey: String!
+  sessionToken: String!
 }
 
 type Bastion {
@@ -441,7 +446,7 @@ type ClaimStepResult {
 }
 
 """Inputs the CLI needs to run a step, shaped by the step cliTask"""
-union CliInputs = ArtifactUploadCliInputs | ContainerPushCliInputs | LocalBuildCliInputs | S3UploadCliInputs
+union CliInputs = ArtifactUploadCliInputs | ContainerPushCliInputs | LocalBuildCliInputs | ObjectUploadCliInputs
 
 """The status of CLI execution for a step"""
 enum CliStatus {
@@ -458,7 +463,7 @@ input CliTaskOutputsInput {
   artifactUpload: ArtifactUploadCliOutputsInput
   containerPush: ContainerPushCliOutputsInput
   localBuild: LocalBuildCliOutputsInput
-  s3Upload: S3UploadCliOutputsInput
+  objectUpload: ObjectUploadCliOutputsInput
 }
 
 type CloudAccount {
@@ -583,13 +588,19 @@ type ConsoleRunResult {
 
 """Inputs for a container-push CLI task"""
 type ContainerPushCliInputs {
-  """
-  ECR auth token. Returned only to the CLI that claims the step, by claimStep.
-  """
-  ecrAuthToken: String
-  ecrEndpoint: String!
   imageUri: String!
   localImageTag: String!
+
+  """Container registry to sign in to"""
+  registryEndpoint: String!
+
+  """
+  Short-lived registry password. Returned only to the CLI that claims the step, by claimStep.
+  """
+  registryPassword: String
+
+  """Username for the container registry"""
+  registryUsername: String!
   stepId: String!
 }
 
@@ -1471,30 +1482,45 @@ input NetworkSubnetInput {
   zone: String
 }
 
-"""A pre-signed S3 upload for one file"""
+"""Inputs for an object-upload CLI task"""
+type ObjectUploadCliInputs {
+  bucketName: String!
+  deleteStale: Boolean
+  excludePatterns: [String!]
+  force: Boolean
+  includePatterns: [String!]
+  keyPrefix: String!
+
+  """Files submitted through submitManifest"""
+  manifest: [FileManifestEntry!]
+  region: String!
+  sourcePath: String!
+  stepId: String!
+
+  """
+  Pre-signed upload URLs. Returned only while the step is awaiting-cli, once the manifest is processed.
+  """
+  uploadUrls: UploadUrls
+}
+
+input ObjectUploadCliOutputsInput {
+  success: Boolean!
+
+  """Total bytes uploaded"""
+  totalSize: Float!
+  uploadedFiles: Int!
+}
+
+"""A pre-signed upload for one file"""
 type PresignedUpload {
   """Content-Type to use when uploading"""
   contentType: String!
 
-  """Relative file path"""
-  path: String!
-
-  """S3 key for the file"""
-  s3Key: String!
-
-  """Pre-signed PUT URL"""
-  url: String!
-}
-
-type PresignedUploadUrl {
-  """Content-Type to use when uploading"""
-  contentType: String!
+  """Object key the file is stored under"""
+  key: String!
 
   """Relative file path"""
   path: String!
-
-  """S3 key for the file"""
-  s3Key: String!
 
   """Pre-signed PUT URL"""
   url: String!
@@ -1701,35 +1727,6 @@ type RoutingPlanEntryType {
   entryType: String!
   loadBalancer: String
   paths: [RoutingPathEntryType!]!
-}
-
-"""Inputs for an s3-upload CLI task"""
-type S3UploadCliInputs {
-  bucketName: String!
-  deleteStale: Boolean
-  excludePatterns: [String!]
-  force: Boolean
-  includePatterns: [String!]
-  keyPrefix: String!
-
-  """Files submitted through submitManifest"""
-  manifest: [FileManifestEntry!]
-  region: String!
-  sourcePath: String!
-  stepId: String!
-
-  """
-  Pre-signed upload URLs. Returned only while the step is awaiting-cli, once the manifest is processed.
-  """
-  uploadUrls: UploadUrls
-}
-
-input S3UploadCliOutputsInput {
-  success: Boolean!
-
-  """Total bytes uploaded"""
-  totalSize: Float!
-  uploadedFiles: Int!
 }
 
 type Secret {

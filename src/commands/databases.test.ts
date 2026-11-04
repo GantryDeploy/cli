@@ -9,7 +9,8 @@ const spinner = vi.hoisted(() => ({
   stop: vi.fn(),
   succeed: vi.fn(),
 }))
-const promptMocks = vi.hoisted(() => ({ input: vi.fn(), select: vi.fn() }))
+const promptMocks = vi.hoisted(() => ({ confirm: vi.fn(), input: vi.fn(), select: vi.fn() }))
+const isInteractive = vi.hoisted(() => vi.fn())
 const bastionMocks = vi.hoisted(() => ({
   activeOnly: vi.fn(),
   createBastionInteractive: vi.fn(),
@@ -17,7 +18,10 @@ const bastionMocks = vi.hoisted(() => ({
   selectBastion: vi.fn(),
 }))
 const tunnelMocks = vi.hoisted(() => ({ openDirectTunnel: vi.fn(), openSshTunnel: vi.fn() }))
-const cloudMocks = vi.hoisted(() => ({ selectCloud: vi.fn(), selectNetwork: vi.fn() }))
+const cloudMocks = vi.hoisted(() => ({
+  resolveCloud: vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' })),
+  selectNetwork: vi.fn(),
+}))
 
 vi.mock('ora', () => ({ default: () => ({ ...spinner, start: () => spinner }) }))
 vi.mock('@inquirer/prompts', () => promptMocks)
@@ -28,6 +32,7 @@ vi.mock('../lib/client', () => ({
 vi.mock('../lib/bastion-prompts', () => bastionMocks)
 vi.mock('../lib/interactive-prompts', () => cloudMocks)
 vi.mock('../lib/ssh-tunnel', () => tunnelMocks)
+vi.mock('../lib/terminal', () => ({ isInteractive }))
 
 const { registerDatabasesCommand } = await import('./databases')
 
@@ -66,7 +71,7 @@ const credentials = {
 }
 
 const bastion = {
-  bastion: { id: 'r3bq9m', instanceId: 'i-0abc123', publicIp: '203.0.113.10' },
+  bastion: { id: 'r3bq9m', publicIp: '203.0.113.10' },
 }
 
 async function run(args: string[]): Promise<void> {
@@ -94,6 +99,9 @@ describe('databases command', () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    cloudMocks.resolveCloud.mockImplementation((id?: string) =>
+      Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' })
+    )
     vi.spyOn(process, 'exit').mockImplementation((code) => {
       throw new ExitError(code as number | undefined)
     })
@@ -140,167 +148,270 @@ describe('databases command', () => {
   })
 
   describe('engines', () => {
-    it('lists each engine with its serverless support', async () => {
-      graphqlRequest.mockResolvedValueOnce({
-        databaseTypes: [
-          {
-            type: 'AURORA_POSTGRESQL',
-            displayName: 'Aurora PostgreSQL',
-            description: 'Managed Aurora',
-            supportsServerless: true,
-          },
-          {
-            type: 'MYSQL',
-            displayName: 'MySQL',
-            description: 'RDS MySQL',
-            supportsServerless: false,
-          },
-        ],
-      })
+    const types = {
+      databaseTypes: [
+        {
+          engine: 'POSTGRESQL',
+          displayName: 'Aurora PostgreSQL',
+          description: 'Managed Aurora',
+          supportsServerless: true,
+          providerData: { provider: 'aws', flavor: 'aurora' },
+        },
+        {
+          engine: 'MYSQL',
+          displayName: 'MySQL',
+          description: 'RDS MySQL',
+          supportsServerless: false,
+          providerData: { provider: 'aws', flavor: 'rds' },
+        },
+      ],
+    }
 
-      await run(['engines'])
+    it("lists each of the cloud's engines with the AWS service and serverless support", async () => {
+      graphqlRequest.mockResolvedValueOnce(types)
 
+      await run(['engines', '--cloud', 'cloud-1'])
+
+      expect(sentVariables(0)).toEqual({ provider: 'AWS' })
       const output = logOutput()
       expect(output).toContain('Aurora PostgreSQL')
+      expect(output).toContain('aurora')
       expect(output).toContain('Yes')
       expect(output).toContain('No')
+    })
+
+    it('shows only the shared columns for another cloud', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce(types)
+
+      await run(['engines', '--cloud', 'ca_9mx4'])
+
+      expect(logOutput()).not.toContain('AWS Service')
+      expect(logOutput()).not.toContain('Serverless')
+    })
+
+    it('says when the cloud has no database engines', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databaseTypes: [] })
+
+      await run(['engines', '--cloud', 'cloud-1'])
+
+      expect(logLines()).toEqual(["This cloud doesn't support databases yet."])
     })
 
     it('exits non-zero when the API fails', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('boom'))
 
-      await expect(run(['engines'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['engines', '--cloud', 'cloud-1'])).rejects.toThrow('process.exit(1)')
     })
   })
 
   describe('engine-versions', () => {
-    it('sends the catalog engine, region and mode', async () => {
+    it('sends the engine, region and AWS service and mode', async () => {
       graphqlRequest.mockResolvedValueOnce({
         databaseEngineVersions: [
           {
-            engine: 'aurora-postgresql',
+            engine: 'POSTGRESQL',
             version: '16.4',
-            family: 'aurora-postgresql16',
             description: 'Aurora PostgreSQL 16.4',
-            supportedModes: ['provisioned', 'serverless'],
+            providerData: {
+              provider: 'aws',
+              flavor: 'aurora',
+              parameterGroupFamily: 'aurora-postgresql16',
+              deploymentModes: ['provisioned', 'serverless'],
+            },
           },
         ],
       })
 
       await run([
         'engine-versions',
+        '--cloud',
+        'cloud-1',
         '--engine',
-        'AURORA_POSTGRESQL',
+        'POSTGRESQL',
+        '--aws-flavor',
+        'aurora',
         '--region',
         'us-east-1',
-        '--mode',
+        '--aws-mode',
         'serverless',
       ])
 
       expect(sentVariables(0)).toEqual({
-        engine: 'aurora-postgresql',
+        provider: 'AWS',
+        engine: 'POSTGRESQL',
         region: 'us-east-1',
-        deploymentMode: 'serverless',
+        aws: { flavor: 'aurora', deploymentMode: 'SERVERLESS' },
       })
       const output = logOutput()
-      expect(output).toContain('16.4')
-      expect(output).toContain('provisioned, serverless')
+      expect(output).toContain('16.4 (aurora-postgresql16)')
+    })
+
+    it('asks for the AWS service when filtering AWS databases by engine', async () => {
+      await expect(
+        run(['engine-versions', '--cloud', 'cloud-1', '--engine', 'mysql'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain(
+        'Pass --aws-flavor rds or aurora to filter AWS databases by engine.'
+      )
+      expect(graphqlRequest).not.toHaveBeenCalled()
+    })
+
+    it('refuses AWS filters on another cloud', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+
+      await expect(
+        run(['engine-versions', '--cloud', 'ca_9mx4', '--aws-flavor', 'rds'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('--aws-flavor only applies to AWS cloud accounts.')
     })
 
     it('reports when nothing matches', async () => {
       graphqlRequest.mockResolvedValueOnce({ databaseEngineVersions: [] })
 
-      await run(['engine-versions'])
+      await run(['engine-versions', '--cloud', 'cloud-1'])
 
-      expect(sentVariables(0)).toEqual({})
+      expect(sentVariables(0)).toEqual({ provider: 'AWS' })
       expect(logSpy).toHaveBeenCalledWith('No engine versions found matching the filters.')
     })
 
     it('exits non-zero when the API fails', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('boom'))
 
-      await expect(run(['engine-versions'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['engine-versions', '--cloud', 'cloud-1'])).rejects.toThrow(
+        'process.exit(1)'
+      )
     })
   })
 
-  describe('instance-classes', () => {
-    it('sends the catalog engine and region and prints each class', async () => {
+  describe('sizes', () => {
+    it('sends the engine, region and AWS service and prints each size', async () => {
       graphqlRequest.mockResolvedValueOnce({
-        databaseInstanceClasses: [
-          {
-            instanceClass: 'db.t4g.medium',
-            family: 't4g',
-            size: 'medium',
-            vcpu: 2,
-            memoryMb: 4096,
-          },
-        ],
+        databaseSizes: [{ size: 'db.t4g.medium', family: 't4g', vcpu: 2, memoryMb: 4096 }],
       })
 
-      await run(['instance-classes', '--engine', 'POSTGRESQL', '--region', 'eu-west-1'])
+      await run([
+        'sizes',
+        '--cloud',
+        'cloud-1',
+        '--engine',
+        'postgres',
+        '--aws-flavor',
+        'rds',
+        '--region',
+        'eu-west-1',
+      ])
 
-      expect(sentVariables(0)).toEqual({ engine: 'postgres', region: 'eu-west-1' })
+      expect(sentVariables(0)).toEqual({
+        provider: 'AWS',
+        engine: 'POSTGRESQL',
+        region: 'eu-west-1',
+        aws: { flavor: 'rds' },
+      })
       const output = logOutput()
       expect(output).toContain('db.t4g.medium')
       expect(output).toContain('4096')
     })
 
     it('reports when nothing matches', async () => {
-      graphqlRequest.mockResolvedValueOnce({ databaseInstanceClasses: [] })
+      graphqlRequest.mockResolvedValueOnce({ databaseSizes: [] })
 
-      await run(['instance-classes'])
+      await run(['sizes', '--cloud', 'cloud-1'])
 
-      expect(sentVariables(0)).toEqual({})
-      expect(logSpy).toHaveBeenCalledWith('No instance classes found matching the filters.')
+      expect(logSpy).toHaveBeenCalledWith('No sizes found matching the filters.')
     })
 
     it('exits non-zero when the API fails', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('boom'))
 
-      await expect(run(['instance-classes'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['sizes', '--cloud', 'cloud-1'])).rejects.toThrow('process.exit(1)')
     })
   })
 
   describe('create', () => {
     const createArgs = ['create', '--cloud', 'cloud-1', '--network', 'h4nw8r', '--name', 'Primary']
+    const aws = (flavor: string) => ({ provider: 'aws', flavor })
+    const offered = [
+      {
+        engine: 'POSTGRESQL',
+        displayName: 'PostgreSQL',
+        description: 'RDS PostgreSQL',
+        supportsServerless: false,
+        providerData: aws('rds'),
+      },
+      {
+        engine: 'POSTGRESQL',
+        displayName: 'Aurora PostgreSQL',
+        description: 'Managed Aurora',
+        supportsServerless: true,
+        providerData: aws('aurora'),
+      },
+      {
+        engine: 'MYSQL',
+        displayName: 'MySQL',
+        description: 'RDS MySQL',
+        supportsServerless: false,
+        providerData: aws('rds'),
+      },
+      {
+        engine: 'MYSQL',
+        displayName: 'Aurora MySQL',
+        description: 'Aurora MySQL',
+        supportsServerless: true,
+        providerData: aws('aurora'),
+      },
+      {
+        engine: 'MARIADB',
+        displayName: 'MariaDB',
+        description: 'RDS MariaDB',
+        supportsServerless: false,
+        providerData: aws('rds'),
+      },
+    ]
 
     it.each([
-      ['aurora-postgresql', 'AURORA_POSTGRESQL', 'aurora-postgresql'],
-      ['AURORA_POSTGRESQL', 'AURORA_POSTGRESQL', 'aurora-postgresql'],
-      ['postgres', 'POSTGRESQL', 'postgres'],
-      ['postgresql', 'POSTGRESQL', 'postgres'],
-      ['POSTGRESQL', 'POSTGRESQL', 'postgres'],
-      ['aurora-mysql', 'AURORA_MYSQL', 'aurora-mysql'],
-      ['AURORA_MYSQL', 'AURORA_MYSQL', 'aurora-mysql'],
-      ['mysql', 'MYSQL', 'mysql'],
-      ['MARIADB', 'MARIADB', 'mariadb'],
-    ])('--engine %s sends %s and queries the catalogs with %s', async (flag, enumName, catalog) => {
+      [['--engine', 'postgres', '--aws-flavor', 'rds'], 'POSTGRESQL', 'rds'],
+      [['--engine', 'POSTGRESQL', '--aws-flavor', 'aurora'], 'POSTGRESQL', 'aurora'],
+      [['--engine', 'MARIADB'], 'MARIADB', 'rds'],
+    ])('%j sends engine %s on %s', async (flags, engine, flavor) => {
+      promptMocks.select.mockResolvedValueOnce(false)
       graphqlRequest
-        .mockResolvedValueOnce({ databaseTypes: [{ type: enumName, supportsServerless: false }] })
+        .mockResolvedValueOnce({ databaseTypes: offered })
         .mockResolvedValueOnce({ databaseEngineVersions: [] })
-        .mockResolvedValueOnce({ databaseInstanceClasses: [] })
+        .mockResolvedValueOnce({ databaseSizes: [] })
         .mockResolvedValueOnce({ createDatabase: { success: true, database } })
 
-      await run([...createArgs, '--engine', flag])
+      await run([...createArgs, ...flags])
 
-      expect(promptMocks.select).not.toHaveBeenCalled()
-      expect(sentVariables(1)).toEqual({ engine: catalog, deploymentMode: 'provisioned' })
-      expect(sentVariables(2)).toEqual({ engine: catalog })
-      expect(sentQuery(3)).toContain('mutation CreateDatabase')
-      expect(sentVariables(3)).toEqual({
-        input: {
-          cloudAccountId: 'cloud-1',
-          networkId: 'h4nw8r',
-          name: 'Primary',
-          slug: 'primary',
-          engine: enumName,
-          providerData: { deploymentMode: 'provisioned' },
-        },
-      })
+      expect(sentVariables(0)).toEqual({ provider: 'AWS' })
+      expect(sentVariables(1)).toMatchObject({ provider: 'AWS', engine, aws: { flavor } })
+      expect(sentVariables(3)).toMatchObject({ input: { engine, aws: { flavor } } })
     })
 
-    it('uses every flag without prompting or querying the catalogs', async () => {
-      graphqlRequest.mockResolvedValueOnce({
+    it('asks which AWS service runs an engine offered on more than one', async () => {
+      promptMocks.select.mockResolvedValueOnce(offered[1]).mockResolvedValueOnce(false)
+      graphqlRequest
+        .mockResolvedValueOnce({ databaseTypes: offered })
+        .mockResolvedValueOnce({ databaseEngineVersions: [] })
+        .mockResolvedValueOnce({ databaseSizes: [] })
+        .mockResolvedValueOnce({ createDatabase: { success: true, database } })
+
+      await run([...createArgs, '--engine', 'postgres'])
+
+      const { choices } = promptMocks.select.mock.calls[0]?.[0] as {
+        choices: { name: string }[]
+      }
+      expect(choices.map((c) => c.name)).toEqual([
+        'PostgreSQL — RDS PostgreSQL',
+        'Aurora PostgreSQL — Managed Aurora',
+      ])
+      expect(sentVariables(3)).toMatchObject({ input: { aws: { flavor: 'aurora' } } })
+    })
+
+    it('uses every flag without prompting', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databaseTypes: offered }).mockResolvedValueOnce({
         createDatabase: { success: true, database, deploymentId: 'm2xa5q' },
       })
 
@@ -309,29 +420,30 @@ describe('databases command', () => {
         '--slug',
         'main-db',
         '--engine',
-        'aurora-postgresql',
-        '--instance-class',
+        'postgresql',
+        '--aws-flavor',
+        'aurora',
+        '--size',
         'db.r6g.large',
         '--engine-version',
         '16.4',
-        '--serverless',
+        '--aws-serverless',
       ])
 
-      expect(graphqlRequest).toHaveBeenCalledTimes(1)
-      expect(cloudMocks.selectCloud).not.toHaveBeenCalled()
+      expect(graphqlRequest).toHaveBeenCalledTimes(2)
+      expect(cloudMocks.resolveCloud).toHaveBeenCalledWith('cloud-1')
       expect(promptMocks.input).not.toHaveBeenCalled()
-      expect(sentVariables(0)).toEqual({
+      expect(promptMocks.select).not.toHaveBeenCalled()
+      expect(sentVariables(1)).toEqual({
         input: {
           cloudAccountId: 'cloud-1',
           networkId: 'h4nw8r',
           name: 'Primary',
           slug: 'main-db',
-          engine: 'AURORA_POSTGRESQL',
-          providerData: {
-            instanceClass: 'db.r6g.large',
-            engineVersion: '16.4',
-            deploymentMode: 'serverless',
-          },
+          engine: 'POSTGRESQL',
+          engineVersion: '16.4',
+          size: 'db.r6g.large',
+          aws: { flavor: 'aurora', deploymentMode: 'SERVERLESS' },
         },
       })
       const output = logOutput()
@@ -340,46 +452,81 @@ describe('databases command', () => {
       expect(output).toContain('  Deployment: m2xa5q')
     })
 
+    it('sends storage as a shared setting', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databaseTypes: offered })
+        .mockResolvedValueOnce({ createDatabase: { success: true, database } })
+
+      await run([
+        ...createArgs,
+        '--engine',
+        'mysql',
+        '--aws-flavor',
+        'rds',
+        '--size',
+        'db.t4g.micro',
+        '--storage',
+        '100',
+        '--engine-version',
+        '8.0.39',
+      ])
+
+      expect(sentVariables(1)).toMatchObject({
+        input: { storageGb: 100, aws: { flavor: 'rds', deploymentMode: 'PROVISIONED' } },
+      })
+    })
+
+    it('turns master password rotation off with --aws-no-master-rotation', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databaseTypes: offered }).mockResolvedValueOnce({
+        createDatabase: { success: true, database, deploymentId: 'm2xa5q' },
+      })
+
+      await run([
+        ...createArgs,
+        '--engine',
+        'postgresql',
+        '--aws-flavor',
+        'aurora',
+        '--engine-version',
+        '16.4',
+        '--aws-serverless',
+        '--aws-no-master-rotation',
+      ])
+
+      expect(sentVariables(1)).toMatchObject({
+        input: { aws: { masterPasswordRotation: false } },
+      })
+    })
+
     it('prompts for everything when no flags are given', async () => {
-      const databaseTypes = [
-        {
-          type: 'AURORA_POSTGRESQL',
-          displayName: 'Aurora PostgreSQL',
-          description: 'Managed Aurora',
-          supportsServerless: true,
-        },
-      ]
-      cloudMocks.selectCloud.mockResolvedValueOnce('cloud-9')
+      const aurora = offered[1]
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'cloud-9', provider: 'AWS' })
       cloudMocks.selectNetwork.mockResolvedValueOnce('x9mf3d')
       promptMocks.input.mockResolvedValueOnce('Orders DB')
       promptMocks.select
-        .mockResolvedValueOnce('AURORA_POSTGRESQL')
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce('16.4')
         .mockResolvedValueOnce('db.r6g.large')
       graphqlRequest
-        .mockResolvedValueOnce({ databaseTypes })
-        .mockResolvedValueOnce({ databaseTypes })
+        .mockResolvedValueOnce({ databaseTypes: [aurora] })
         .mockResolvedValueOnce({
           databaseEngineVersions: [
-            { version: '16.4', family: 'aurora-postgresql16', description: 'Aurora 16.4' },
+            {
+              engine: 'POSTGRESQL',
+              version: '16.4',
+              description: 'Aurora 16.4',
+              providerData: { provider: 'aws', parameterGroupFamily: 'aurora-postgresql16' },
+            },
           ],
         })
         .mockResolvedValueOnce({
-          databaseInstanceClasses: [
-            {
-              instanceClass: 'db.r6g.large',
-              family: 'r6g',
-              size: 'large',
-              vcpu: 2,
-              memoryMb: 16384,
-            },
-          ],
+          databaseSizes: [{ size: 'db.r6g.large', family: 'r6g', vcpu: 2, memoryMb: 16384 }],
         })
         .mockResolvedValueOnce({ createDatabase: { success: true, database } })
 
       await run(['create'])
 
+      expect(cloudMocks.resolveCloud).toHaveBeenCalledWith(undefined)
       expect(cloudMocks.selectNetwork).toHaveBeenCalledWith('cloud-9')
       const nameValidate = (
         promptMocks.input.mock.calls[0]?.[0] as { validate: (v: string) => unknown }
@@ -390,108 +537,152 @@ describe('databases command', () => {
       const selectChoices = (i: number) =>
         (promptMocks.select.mock.calls[i]?.[0] as { choices: { name: string; value: unknown }[] })
           .choices
-      expect(selectChoices(0)).toEqual([
-        { name: 'Aurora PostgreSQL — Managed Aurora', value: 'AURORA_POSTGRESQL' },
-      ])
-      expect(selectChoices(2)).toEqual([
+      expect(selectChoices(1)).toEqual([
         { name: '16.4 (aurora-postgresql16) — Aurora 16.4', value: '16.4' },
       ])
-      expect(selectChoices(3)).toEqual([
+      expect(selectChoices(2)).toEqual([
         { name: 'db.r6g.large — 2 vCPU, 16384 MB RAM', value: 'db.r6g.large' },
       ])
-      expect(sentVariables(2)).toEqual({
-        engine: 'aurora-postgresql',
-        deploymentMode: 'provisioned',
+      expect(sentVariables(1)).toEqual({
+        provider: 'AWS',
+        engine: 'POSTGRESQL',
+        aws: { flavor: 'aurora', deploymentMode: 'PROVISIONED' },
       })
-      expect(sentVariables(4)).toEqual({
+      expect(sentVariables(2)).toEqual({
+        provider: 'AWS',
+        engine: 'POSTGRESQL',
+        aws: { flavor: 'aurora' },
+      })
+      expect(sentVariables(3)).toEqual({
         input: {
           cloudAccountId: 'cloud-9',
           networkId: 'x9mf3d',
           name: 'Orders DB',
           slug: 'orders-db',
-          engine: 'AURORA_POSTGRESQL',
-          providerData: {
-            deploymentMode: 'provisioned',
-            instanceClass: 'db.r6g.large',
-            engineVersion: '16.4',
-          },
+          engine: 'POSTGRESQL',
+          engineVersion: '16.4',
+          size: 'db.r6g.large',
+          aws: { flavor: 'aurora', deploymentMode: 'PROVISIONED' },
         },
       })
     })
 
-    it('skips the instance class when serverless is chosen interactively', async () => {
-      const databaseTypes = [{ type: 'AURORA_MYSQL', supportsServerless: true }]
+    it('skips the size when serverless is chosen interactively', async () => {
       promptMocks.select.mockResolvedValueOnce(true).mockResolvedValueOnce('3.08.0')
       graphqlRequest
-        .mockResolvedValueOnce({ databaseTypes })
+        .mockResolvedValueOnce({ databaseTypes: offered })
         .mockResolvedValueOnce({
           databaseEngineVersions: [
-            { version: '3.08.0', family: 'aurora-mysql8.0', description: 'Aurora MySQL 3.08' },
+            {
+              engine: 'MYSQL',
+              version: '3.08.0',
+              description: 'Aurora MySQL 3.08',
+              providerData: { provider: 'aws', parameterGroupFamily: 'aurora-mysql8.0' },
+            },
           ],
         })
         .mockResolvedValueOnce({ createDatabase: { success: true, database } })
 
-      await run([...createArgs, '--engine', 'aurora-mysql'])
+      await run([...createArgs, '--engine', 'mysql', '--aws-flavor', 'aurora'])
 
-      expect(sentVariables(1)).toEqual({ engine: 'aurora-mysql', deploymentMode: 'serverless' })
+      expect(sentVariables(1)).toEqual({
+        provider: 'AWS',
+        engine: 'MYSQL',
+        aws: { flavor: 'aurora', deploymentMode: 'SERVERLESS' },
+      })
       expect(sentQuery(2)).toContain('mutation CreateDatabase')
       expect(sentVariables(2)).toMatchObject({
         input: {
-          engine: 'AURORA_MYSQL',
-          providerData: { engineVersion: '3.08.0', deploymentMode: 'serverless' },
+          engine: 'MYSQL',
+          engineVersion: '3.08.0',
+          aws: { flavor: 'aurora', deploymentMode: 'SERVERLESS' },
         },
       })
     })
 
     it('derives the slug from the name when --slug is empty', async () => {
-      graphqlRequest.mockResolvedValueOnce({ createDatabase: { success: true, database } })
+      graphqlRequest
+        .mockResolvedValueOnce({ databaseTypes: offered })
+        .mockResolvedValueOnce({ createDatabase: { success: true, database } })
 
       await run([
         ...createArgs,
         '--slug',
         '',
         '--engine',
-        'mysql',
+        'mariadb',
         '--engine-version',
-        '8.0.39',
-        '--instance-class',
+        '10.11',
+        '--size',
         'db.t4g.micro',
-        '--serverless',
       ])
 
-      expect(sentVariables(0)).toMatchObject({ input: { slug: 'primary' } })
+      expect(sentVariables(1)).toMatchObject({ input: { slug: 'primary' } })
     })
 
-    it('rejects an unknown --engine before calling the API', async () => {
-      await expect(run([...createArgs, '--engine', 'redis'])).rejects.toThrow('process.exit(1)')
+    it('refuses an engine and service pair that is not offered', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databaseTypes: offered })
 
+      await expect(
+        run([...createArgs, '--engine', 'mariadb', '--aws-flavor', 'aurora'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+      expect(errorOutput()).toContain('That engine is not offered. See "gantry db engines".')
+    })
+
+    it('refuses a cloud with no database engines', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ databaseTypes: [] })
+
+      await expect(run([...createArgs, '--engine', 'mysql'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain("This cloud doesn't support databases yet.")
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses AWS flags on another cloud', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+
+      await expect(run([...createArgs, '--aws-serverless'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('--aws-serverless only applies to AWS cloud accounts.')
       expect(graphqlRequest).not.toHaveBeenCalled()
-      expect(errorOutput()).toContain('Unknown database engine.')
     })
 
     it.each(['sqlserver', 'valkey', 'aurora'])(
-      'rejects the unknown --engine %j locally',
+      'rejects the unknown --engine %j before calling the API',
       async (engine) => {
         await expect(run([...createArgs, '--engine', engine])).rejects.toThrow('process.exit(1)')
 
         expect(graphqlRequest).not.toHaveBeenCalled()
         expect(errorOutput()).toContain(
-          'Unknown database engine. Supported engines: aurora-mysql, aurora-postgresql, mariadb, mysql, postgresql'
+          'Unknown database engine. Supported engines: mariadb, mysql, postgresql'
         )
       }
     )
 
+    it('rejects an unknown --aws-flavor before calling the API', async () => {
+      await expect(
+        run([...createArgs, '--engine', 'mysql', '--aws-flavor', 'docdb'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(graphqlRequest).not.toHaveBeenCalled()
+      expect(errorOutput()).toContain('Unknown AWS database service. Use rds or aurora.')
+    })
+
     it('fails without creating anything when no network is selected', async () => {
       cloudMocks.selectNetwork.mockResolvedValueOnce(undefined)
+      graphqlRequest.mockResolvedValueOnce({ databaseTypes: offered })
 
       await expect(
-        run(['create', '--cloud', 'cloud-1', '--name', 'Primary', '--engine', 'postgres'])
+        run(['create', '--cloud', 'cloud-1', '--name', 'Primary', '--engine', 'mariadb'])
       ).rejects.toThrow('process.exit(1)')
 
       expect(cloudMocks.selectNetwork).toHaveBeenCalledWith('cloud-1')
       expect(errorOutput()).toContain('A network is required to create a database.')
       expect(promptMocks.input).not.toHaveBeenCalled()
-      expect(graphqlRequest).not.toHaveBeenCalled()
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
 
     it.each([
@@ -502,22 +693,303 @@ describe('databases command', () => {
       [{ success: false }, 'Failed to create database'],
       [{ success: true }, 'Failed to create database'],
     ])('fails when the mutation result is %j', async (createDatabase, message) => {
-      graphqlRequest.mockResolvedValueOnce({ createDatabase })
+      graphqlRequest
+        .mockResolvedValueOnce({ databaseTypes: offered })
+        .mockResolvedValueOnce({ createDatabase })
 
       await expect(
         run([
           ...createArgs,
           '--engine',
-          'mysql',
+          'mariadb',
           '--engine-version',
-          '8.0.39',
-          '--instance-class',
+          '10.11',
+          '--size',
           'db.t4g.micro',
-          '--serverless',
         ])
       ).rejects.toThrow('process.exit(1)')
 
       expect(errorOutput()).toContain(message)
+    })
+  })
+
+  describe('users', () => {
+    it('lists each service user on the server', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce({
+        databaseServiceUsers: [
+          {
+            databaseName: 'wordpress',
+            username: 'g_web_3f9a0c1e',
+            auth: 'password',
+            access: 'admin',
+            status: 'active',
+            serviceName: 'web',
+            environmentSlug: 'production',
+          },
+        ],
+      })
+
+      await run(['users', 'primary'])
+
+      expect(sentQuery(1)).toContain('query GetDatabaseServiceUsers($id: String!)')
+      expect(sentVariables(1)).toEqual({ id: 'db-id-1' })
+      expect(logOutput()).toContain('g_web_3f9a0c1e')
+      expect(logOutput()).toContain('production')
+    })
+
+    it('says so when Gantry created no users on the server', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce({ databaseServiceUsers: [] })
+
+      await run(['users', 'primary'])
+
+      expect(logLines()).toEqual(['No service database users on this server.'])
+    })
+  })
+
+  describe('adopt', () => {
+    const started = {
+      adoptDatabase: {
+        success: true,
+        message: 'Database adopt started.',
+        deploymentId: 'dep_4kq8zt',
+      },
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    async function runToEnd(args: string[]): Promise<void> {
+      const outcome = run(args).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
+      )
+      await vi.advanceTimersByTimeAsync(2000)
+      const error = await outcome
+      if (error) throw error
+    }
+
+    it('adopts with --yes and reports the finished operation', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({
+          deployment: { status: 'COMPLETE', lastMessage: 'Database "wordpress" adopted.' },
+        })
+
+      await runToEnd(['adopt', 'primary', 'wordpress', '--yes'])
+
+      expect(sentQuery(1)).toContain('mutation AdoptDatabase($id: String!, $database: String!)')
+      expect(sentVariables(1)).toEqual({ id: 'db-id-1', database: 'wordpress' })
+      expect(sentVariables(2)).toEqual({ id: 'dep_4kq8zt' })
+      expect(spinner.succeed).toHaveBeenCalledWith('Database "wordpress" adopted.')
+      expect(promptMocks.confirm).not.toHaveBeenCalled()
+    })
+
+    it('exits with the operation message when the adopt fails', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({
+          deployment: {
+            status: 'FAILED',
+            lastMessage: 'There was an error while updating the database.',
+          },
+        })
+
+      await expect(runToEnd(['adopt', 'primary', 'wordpress', '--yes'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+      expect(spinner.fail).toHaveBeenCalledWith('There was an error while updating the database.')
+    })
+
+    it('asks before adopting and stops when declined', async () => {
+      isInteractive.mockReturnValue(true)
+      promptMocks.confirm.mockResolvedValue(false)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
+
+      await run(['adopt', 'primary', 'wordpress'])
+
+      expect(logOutput()).toContain('becomes a member of that role')
+      expect(logLines()).toContain('Adopt cancelled.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses to adopt without --yes when it cannot ask', async () => {
+      isInteractive.mockReturnValue(false)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
+
+      await expect(run(['adopt', 'primary', 'wordpress'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('Re-run with --yes to confirm.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('rotate-user', () => {
+    const serviceUsers = {
+      databaseServiceUsers: [
+        {
+          id: 'sdb_7k2m9q',
+          databaseName: 'wordpress',
+          username: 'g_web_3f9a0c1e',
+          auth: 'password',
+          access: 'admin',
+          status: 'active',
+          serviceName: 'web',
+          environmentSlug: 'production',
+        },
+      ],
+    }
+    const started = {
+      rotateDatabaseServiceUser: {
+        success: true,
+        message: 'Database user rotation started.',
+        deploymentId: 'dep_7tq4wx',
+      },
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    async function runToEnd(args: string[]): Promise<void> {
+      const outcome = run(args).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
+      )
+      await vi.advanceTimersByTimeAsync(2000)
+      const error = await outcome
+      if (error) throw error
+    }
+
+    it('rotates the named user with --yes and reports what to do next', async () => {
+      const done =
+        'New database user "g_web_3f9a0c1e_b" is ready. Deploy web in production to switch to it. "g_web_3f9a0c1e" keeps working until no live version uses it.'
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({ deployment: { status: 'COMPLETE', lastMessage: done } })
+
+      await runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--yes'])
+
+      expect(sentQuery(2)).toContain(
+        'rotateDatabaseServiceUser(id: $id, serviceUserId: $serviceUserId, mode: $mode)'
+      )
+      expect(sentVariables(2)).toEqual({ id: 'db-id-1', serviceUserId: 'sdb_7k2m9q' })
+      expect(sentVariables(3)).toEqual({ id: 'dep_7tq4wx' })
+      expect(spinner.succeed).toHaveBeenCalledWith(done)
+    })
+
+    it('rotates in place with --in-place, even on a plan with Advanced Deployments', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({ deployment: { status: 'COMPLETE', lastMessage: 'rotated' } })
+
+      await runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--in-place', '--yes'])
+
+      expect(sentVariables(2)).toEqual({
+        id: 'db-id-1',
+        serviceUserId: 'sdb_7k2m9q',
+        mode: 'IN_PLACE',
+      })
+    })
+
+    it('asks for a staged rotation with --staged', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce(started)
+        .mockResolvedValueOnce({ deployment: { status: 'COMPLETE', lastMessage: 'staged' } })
+
+      await runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--staged', '--yes'])
+
+      expect(sentVariables(2)).toEqual({
+        id: 'db-id-1',
+        serviceUserId: 'sdb_7k2m9q',
+        mode: 'STAGED',
+      })
+    })
+
+    it('refuses both --in-place and --staged', async () => {
+      await expect(
+        run(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--in-place', '--staged', '--yes'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('Choose either --in-place or --staged, not both.')
+      expect(graphqlRequest).not.toHaveBeenCalled()
+    })
+
+    it('warns only about the in-place outcome with --in-place', async () => {
+      isInteractive.mockReturnValue(true)
+      promptMocks.confirm.mockResolvedValue(false)
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+
+      await run(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--in-place'])
+
+      expect(logOutput()).toContain('"g_web_3f9a0c1e" gets a new password now')
+      expect(logOutput()).not.toContain('Advanced Deployments')
+    })
+
+    it('exits with the reason a rotation cannot start', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+        .mockResolvedValueOnce({
+          rotateDatabaseServiceUser: {
+            success: false,
+            message: 'A rotation for this database user is already waiting for a deploy.',
+            deploymentId: null,
+          },
+        })
+
+      await expect(runToEnd(['rotate-user', 'primary', 'g_web_3f9a0c1e', '--yes'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+      expect(spinner.fail).toHaveBeenCalledWith(
+        'A rotation for this database user is already waiting for a deploy.'
+      )
+    })
+
+    it('refuses a user Gantry did not create', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+
+      await expect(run(['rotate-user', 'primary', 'reporting', '--yes'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+      expect(errorOutput()).toContain('Database user not found.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(2)
+    })
+
+    it('warns about both rotation kinds and stops when declined', async () => {
+      isInteractive.mockReturnValue(true)
+      promptMocks.confirm.mockResolvedValue(false)
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(serviceUsers)
+
+      await run(['rotate-user', 'primary', 'g_web_3f9a0c1e'])
+
+      expect(logOutput()).toContain('be ready to redeploy the service')
+      expect(logLines()).toContain('Rotation cancelled.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -586,10 +1058,8 @@ describe('databases command', () => {
     })
 
     it.each([
-      ['AURORA_MYSQL', '3306'],
       ['MYSQL', '3306'],
       ['MARIADB', '3306'],
-      ['AURORA_POSTGRESQL', '5432'],
       ['POSTGRESQL', '5432'],
     ])('uses the %s default port when the provider has none', async (engine, port) => {
       graphqlRequest
@@ -745,6 +1215,7 @@ describe('databases command', () => {
       close.mockResolvedValue(undefined)
       bastionMocks.fetchBastionCredentials.mockResolvedValue({
         privateKey: 'fake-bastion-private-key',
+        sshUser: 'ubuntu',
         hostPublicKey: null,
         hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
       })
@@ -786,8 +1257,9 @@ describe('databases command', () => {
       }
       expect(config).toEqual({
         bastionHost: '203.0.113.10',
+        bastionUsername: 'ubuntu',
         hostKey: {
-          hostId: 'i-0abc123',
+          hostId: 'bastion-r3bq9m@203.0.113.10',
           label: 'ops-bastion',
           expectedFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
           trustHostKey: true,
@@ -862,10 +1334,8 @@ describe('databases command', () => {
     })
 
     it.each([
-      ['AURORA_MYSQL', '3306'],
       ['MYSQL', '3306'],
       ['MARIADB', '3306'],
-      ['AURORA_POSTGRESQL', '5432'],
       ['POSTGRESQL', '5432'],
     ])('offers and tunnels to the %s default port', async (engine, port) => {
       graphqlRequest

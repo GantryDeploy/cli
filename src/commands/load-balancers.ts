@@ -11,7 +11,9 @@ import type {
   LoadBalancerTypeEnum,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { selectCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
+import { foreignAwsFlagsMessage, unsupportedCloud } from '../lib/clouds'
+import { awsOption } from '../lib/clouds/aws'
+import { resolveCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -36,6 +38,8 @@ const LOAD_BALANCERS_QUERY = /* GraphQL */ `
       name
       slug
       type
+      region
+      endpoint
       status
       cloudAccountId
       createdAt
@@ -44,7 +48,7 @@ const LOAD_BALANCERS_QUERY = /* GraphQL */ `
 `
 
 const LOAD_BALANCER_TYPES_QUERY = /* GraphQL */ `
-  query GetLoadBalancerTypes($provider: String) {
+  query GetLoadBalancerTypes($provider: CloudProviderEnum!) {
     loadBalancerTypes(provider: $provider) {
       type
       displayName
@@ -93,7 +97,7 @@ export function registerLoadBalancersCommand(program: Command): void {
         }
 
         const table = createTable({
-          head: ['ID', 'Name', 'Slug', 'Type', 'Status', 'Created'],
+          head: ['ID', 'Name', 'Slug', 'Type', 'Region', 'Endpoint', 'Status', 'Created'],
         })
 
         for (const lb of loadBalancers) {
@@ -102,6 +106,8 @@ export function registerLoadBalancersCommand(program: Command): void {
             lb.name,
             lb.slug,
             lb.type,
+            lb.region ?? '-',
+            lb.endpoint ?? '-',
             lb.status.toUpperCase(),
             formatDate(lb.createdAt),
           ])
@@ -117,12 +123,18 @@ export function registerLoadBalancersCommand(program: Command): void {
   lbCmd
     .command('types')
     .description('List available load balancer types')
-    .action(async () => {
+    .option('--cloud <id>', 'Cloud account ID')
+    .action(async (options: { cloud?: string }) => {
       try {
+        const { provider } = await resolveCloud(options.cloud)
         const data = await graphqlRequest<
           GetLoadBalancerTypesQuery,
           GetLoadBalancerTypesQueryVariables
-        >(LOAD_BALANCER_TYPES_QUERY)
+        >(LOAD_BALANCER_TYPES_QUERY, { provider })
+        if (data.loadBalancerTypes.length === 0) {
+          console.log(unsupportedCloud('load balancers'))
+          return
+        }
 
         const table = createTable({
           head: ['Type', 'Name', 'Provider', 'Description', 'Network', 'Region'],
@@ -153,8 +165,11 @@ export function registerLoadBalancersCommand(program: Command): void {
     .option('--name <name>', 'Load balancer name')
     .option('--slug <slug>', 'Load balancer slug (auto-generated from name if omitted)')
     .option('--type <type>', 'Load balancer type (see "gantry lb types")')
-    .option('--network <id>', 'Network ID (required for ALB)')
-    .option('--region <region>', 'AWS region (see "gantry regions")')
+    .option('--network <id>', 'Network ID (required for application load balancers)')
+    .option('--region <region>', 'Region (see "gantry regions --cloud <id>")')
+    .addOption(
+      awsOption('--aws-certificate-arn <arn>', 'Default certificate for the HTTPS listener')
+    )
     .action(
       async (options: {
         cloud?: string
@@ -163,9 +178,25 @@ export function registerLoadBalancersCommand(program: Command): void {
         type?: string
         network?: string
         region?: string
+        awsCertificateArn?: string
       }) => {
         try {
-          const cloudAccountId = options.cloud ?? (await selectCloud())
+          const requestedType = options.type ? toLoadBalancerType(options.type) : undefined
+          const cloud = await resolveCloud(options.cloud)
+          const foreign = foreignAwsFlagsMessage(cloud.provider, options)
+          if (foreign) {
+            printError(foreign)
+            process.exit(1)
+          }
+
+          const { loadBalancerTypes } = await graphqlRequest<
+            GetLoadBalancerTypesQuery,
+            GetLoadBalancerTypesQueryVariables
+          >(LOAD_BALANCER_TYPES_QUERY, { provider: cloud.provider })
+          if (loadBalancerTypes.length === 0) {
+            printError(unsupportedCloud('load balancers'))
+            process.exit(1)
+          }
 
           const name =
             options.name ??
@@ -174,58 +205,50 @@ export function registerLoadBalancersCommand(program: Command): void {
               validate: (v) => (v.trim().length > 0 ? true : 'Name is required'),
             }))
 
-          let lbType: LoadBalancerTypeEnum
-          let requiresNetwork = false
-          let requiresRegion = false
-          if (options.type) {
-            lbType = toLoadBalancerType(options.type)
-          } else {
-            const typesData = await graphqlRequest<
-              GetLoadBalancerTypesQuery,
-              GetLoadBalancerTypesQueryVariables
-            >(LOAD_BALANCER_TYPES_QUERY)
-
-            lbType = await select({
+          const lbType: LoadBalancerTypeEnum =
+            requestedType ??
+            (await select({
               message: 'Load balancer type:',
-              choices: typesData.loadBalancerTypes.map((t) => ({
+              choices: loadBalancerTypes.map((t) => ({
                 name: sanitizeTerminal(`${t.displayName} — ${t.description}`),
                 value: t.type,
               })),
-            })
-
-            const selectedType = typesData.loadBalancerTypes.find((t) => t.type === lbType)
-            requiresNetwork = selectedType?.requiresNetwork ?? false
-            requiresRegion = selectedType?.requiresRegion ?? false
+            }))
+          const selectedType = loadBalancerTypes.find((t) => t.type === lbType)
+          if (!selectedType) {
+            printError(
+              'That load balancer type is not offered on this cloud. See "gantry lb types".'
+            )
+            process.exit(1)
           }
 
-          let networkId = options.network
-          if (!networkId && requiresNetwork) {
-            networkId = (await selectNetwork(cloudAccountId)) ?? undefined
-          } else if (!networkId && !requiresNetwork) {
-            networkId = (await selectNetwork(cloudAccountId, { allowNone: true })) ?? undefined
-          }
+          const networkId =
+            options.network ??
+            (await selectNetwork(cloud.id, { allowNone: !selectedType.requiresNetwork }))
 
-          let region = options.region
-          if (!region && requiresRegion) {
-            region = await selectRegion()
-          }
+          const region =
+            options.region ??
+            (selectedType.requiresRegion && !networkId
+              ? await selectRegion(cloud.provider)
+              : undefined)
 
           // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to the generated slug
           const slug = options.slug || slugify(name)
-          const providerData: Record<string, unknown> = {}
-          if (region) providerData.region = region
 
           const data = await graphqlRequest<
             CreateLoadBalancerMutation,
             CreateLoadBalancerMutationVariables
           >(CREATE_LOAD_BALANCER_MUTATION, {
             input: {
-              cloudAccountId,
+              cloudAccountId: cloud.id,
               name,
               slug,
               type: lbType,
               networkId,
-              providerData: Object.keys(providerData).length > 0 ? providerData : undefined,
+              region,
+              ...(options.awsCertificateArn
+                ? { aws: { defaultSslCertificateArn: options.awsCertificateArn } }
+                : {}),
             },
           })
 

@@ -17,7 +17,7 @@ import type {
   GetStepForUploadQuery,
   GetStepForUploadQueryVariables,
   LocalBuildCliOutputsInput,
-  S3UploadCliOutputsInput,
+  ObjectUploadCliOutputsInput,
   SubmitManifestMutation,
   SubmitManifestMutationVariables,
 } from '../generated/graphql'
@@ -37,14 +37,14 @@ export type CliInputs = NonNullable<
 type InputsOf<T extends CliInputs['__typename']> = Extract<CliInputs, { __typename: T }>
 
 export type LocalBuildInputs = InputsOf<'LocalBuildCliInputs'>
-export type S3UploadInputs = InputsOf<'S3UploadCliInputs'>
+export type ObjectUploadInputs = InputsOf<'ObjectUploadCliInputs'>
 export type ContainerPushInputs = InputsOf<'ContainerPushCliInputs'>
 export type ArtifactUploadInputs = InputsOf<'ArtifactUploadCliInputs'>
 
 type PresignedUpload = NonNullable<
   Extract<
     NonNullable<NonNullable<GetStepForUploadQuery['deploymentStep']>['cliInputs']>,
-    { __typename: 'S3UploadCliInputs' }
+    { __typename: 'ObjectUploadCliInputs' }
   >['uploadUrls']
 >['store'][number]
 
@@ -64,9 +64,9 @@ export async function executeCliTask(inputs: CliInputs, context: TaskContext): P
   switch (inputs.__typename) {
     case 'LocalBuildCliInputs':
       return { outputs: { localBuild: await executeLocalBuild(inputs, context.stagingDir) } }
-    case 'S3UploadCliInputs': {
-      const { fileResults, outputs } = await executeS3Upload(inputs, context)
-      return { outputs: { s3Upload: outputs }, fileResults }
+    case 'ObjectUploadCliInputs': {
+      const { fileResults, outputs } = await executeObjectUpload(inputs, context)
+      return { outputs: { objectUpload: outputs }, fileResults }
     }
     case 'ContainerPushCliInputs':
       return { outputs: { containerPush: await executeContainerPush(inputs, context.cwd) } }
@@ -174,17 +174,17 @@ interface FileUploadResult {
  * Upload URLs arrive asynchronously after the manifest is submitted, so this polls
  * the step until it reaches `AWAITING_CLI` with `uploadUrls` set.
  */
-async function executeS3Upload(
-  inputs: S3UploadInputs,
+async function executeObjectUpload(
+  inputs: ObjectUploadInputs,
   context: TaskContext
-): Promise<{ outputs: S3UploadCliOutputsInput; fileResults: FileUploadResult[] }> {
+): Promise<{ outputs: ObjectUploadCliOutputsInput; fileResults: FileUploadResult[] }> {
   const { stepId, includePatterns, excludePatterns } = inputs
   const sourcePath = inputs.sourcePath || '.'
   const force = context.force ?? false
   const deleteStale = context.delete ?? false
 
   if (!stepId) {
-    throw new Error('stepId is required for s3-upload task')
+    throw new Error('stepId is required for object-upload task')
   }
 
   const { rootReal, sourceDir: absoluteSourcePath } = resolveSourceDir(
@@ -298,11 +298,11 @@ async function pollForUploadUrls(
         status
         cliInputs {
           __typename
-          ... on S3UploadCliInputs {
+          ... on ObjectUploadCliInputs {
             uploadUrls {
               store {
                 path
-                s3Key
+                key
                 url
                 contentType
               }
@@ -325,8 +325,8 @@ async function pollForUploadUrls(
       throw new Error('Step not found')
     }
 
-    if (step.cliInputs && step.cliInputs.__typename !== 'S3UploadCliInputs') {
-      throw new Error('Step is not an S3 upload')
+    if (step.cliInputs && step.cliInputs.__typename !== 'ObjectUploadCliInputs') {
+      throw new Error('Step is not an object upload')
     }
 
     if (step.status === 'AWAITING_CLI' && step.cliInputs?.uploadUrls) {
@@ -406,12 +406,12 @@ async function uploadFilesInParallelWithResults(
   return { count, size, fileResults }
 }
 
-/** Retags the image the local-build step produced (e.g. `p9ue62-my-api-api-docker:v3`) and pushes it to ECR. */
+/** Retags the image the local-build step produced (e.g. `p9ue62-my-api-api-docker:v3`) and pushes it to the container registry. */
 async function executeContainerPush(
   inputs: ContainerPushInputs,
   cwd: string
 ): Promise<ContainerPushCliOutputsInput> {
-  const { imageUri, localImageTag, ecrAuthToken, ecrEndpoint } = inputs
+  const { imageUri, localImageTag, registryEndpoint, registryUsername, registryPassword } = inputs
 
   if (!imageUri) {
     throw new Error('imageUri is required for container-push task')
@@ -424,25 +424,16 @@ async function executeContainerPush(
   assertValidImageReference(localImageTag, 'local image tag')
   assertValidImageReference(imageUri, 'image URI')
 
-  if (!ecrAuthToken || !ecrEndpoint) {
-    throw new Error('ECR credentials are required for container-push task')
+  if (!registryPassword) {
+    throw new Error('Registry credentials are required for container-push task')
   }
 
-  // ECR GetAuthorizationToken returns base64 of "AWS:{password}".
-  const decoded = Buffer.from(ecrAuthToken, 'base64').toString('utf-8')
-  const separator = decoded.indexOf(':')
-  const password = separator === -1 ? '' : decoded.slice(separator + 1)
+  assertValidRegistryEndpoint(registryEndpoint)
 
-  if (!password) {
-    throw new Error('Failed to decode ECR authorization token')
-  }
-
-  assertValidRegistryEndpoint(ecrEndpoint)
-
-  await runDocker(['login', '--username', 'AWS', '--password-stdin', ecrEndpoint], {
-    cwd,
-    input: password,
-  })
+  await runDocker(
+    ['login', `--username=${registryUsername}`, '--password-stdin', registryEndpoint],
+    { cwd, input: registryPassword }
+  )
 
   await runDocker(['tag', localImageTag, imageUri], { cwd })
   await runDocker(['push', imageUri], { cwd })
@@ -454,73 +445,70 @@ async function executeContainerPush(
   }
 }
 
-// Lambda's direct-upload limit. Zips go through S3, which allows more, so this is a
-// ceiling that catches zips bundling node_modules or build inputs, not a hard quota.
-export const LAMBDA_ZIP_MAX_BYTES = 50 * 1024 * 1024
+export function assertArtifactFits(
+  artifactBytes: number,
+  maxArtifactBytes: number,
+  sourcePath: string
+): void {
+  if (artifactBytes <= maxArtifactBytes) return
 
-export function assertLambdaZipFits(zipSize: number, sourcePath: string): void {
-  if (zipSize <= LAMBDA_ZIP_MAX_BYTES) return
-
-  const actualMb = (zipSize / 1024 / 1024).toFixed(1)
-  const limitMb = (LAMBDA_ZIP_MAX_BYTES / 1024 / 1024).toFixed(0)
+  const actualMb = (artifactBytes / 1024 / 1024).toFixed(1)
+  const limitMb = (maxArtifactBytes / 1024 / 1024).toFixed(0)
   throw new Error(
-    `Lambda zip is ${actualMb} MB, which exceeds the ${limitMb} MB limit. ` +
+    `The deployment artifact is ${actualMb} MB, which exceeds the ${limitMb} MB limit. ` +
       `Source: ${sourcePath}. Set source_dir in gantry.yml to the build output ` +
       `directory (e.g. "dist") so the zip excludes node_modules and other build inputs.`
   )
+}
+
+type ArtifactUploader = (inputs: ArtifactUploadInputs, artifact: Buffer) => Promise<void>
+
+async function uploadArtifactToAws(inputs: ArtifactUploadInputs, artifact: Buffer): Promise<void> {
+  if (!inputs.aws) {
+    throw new Error('AWS credentials are required to upload the deployment artifact')
+  }
+
+  const s3Client = new S3Client({ region: inputs.region, credentials: inputs.aws })
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: inputs.bucketName,
+      Key: inputs.objectKey,
+      Body: artifact,
+      ContentType: 'application/zip',
+    })
+  )
+}
+
+const ARTIFACT_UPLOADERS: Partial<Record<string, ArtifactUploader>> = {
+  aws: uploadArtifactToAws,
 }
 
 async function executeArtifactUpload(
   inputs: ArtifactUploadInputs,
   stagingDir: string
 ): Promise<ArtifactUploadCliOutputsInput> {
-  const { bucketName, s3Key, region, accessKeyId, secretAccessKey, sessionToken } = inputs
-  const sourcePath = inputs.sourcePath || '.'
-
-  if (!bucketName || !s3Key || !region) {
-    throw new Error('bucketName, s3Key, and region are required for artifact-upload task')
+  const upload = ARTIFACT_UPLOADERS[inputs.provider]
+  if (!upload) {
+    throw new Error("This cloud doesn't support artifact uploads yet.")
   }
 
-  if (!accessKeyId || !secretAccessKey || !sessionToken) {
-    throw new Error(
-      'AWS credentials (accessKeyId, secretAccessKey, sessionToken) are required for artifact-upload task'
-    )
-  }
+  const { sourceDir: absoluteSourcePath } = resolveSourceDir(stagingDir, inputs.sourcePath || '.')
+  const artifact = await createZipArchive(absoluteSourcePath, inputs.excludePatterns)
 
-  const { sourceDir: absoluteSourcePath } = resolveSourceDir(stagingDir, sourcePath)
+  assertArtifactFits(artifact.length, inputs.maxArtifactBytes, absoluteSourcePath)
 
-  const zipBuffer = await createZipArchive(absoluteSourcePath, inputs.excludePatterns)
-
-  assertLambdaZipFits(zipBuffer.length, absoluteSourcePath)
-
-  const s3Client = new S3Client({
-    region,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-      sessionToken,
-    },
-  })
-
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: bucketName,
-      Key: s3Key,
-      Body: zipBuffer,
-      ContentType: 'application/zip',
-    })
-  )
+  await upload(inputs, artifact)
 
   return {
-    bucketName,
-    s3Key,
-    zipSize: zipBuffer.length,
+    bucketName: inputs.bucketName,
+    objectKey: inputs.objectKey,
+    zipSize: artifact.length,
     success: true,
   }
 }
 
 /**
- * The Lambda zip and the static S3 upload both filter through this, so a pattern like
+ * The artifact zip and the object upload both filter through this, so a pattern like
  * `wp-content/uploads/**` matches the same files in each. Globs match the full
  * relative path, never a basename.
  */

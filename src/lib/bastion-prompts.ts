@@ -22,12 +22,13 @@ import { printError, slugify } from './output'
 export const BASTIONS_QUERY = /* GraphQL */ `
   query GetBastions($networkId: String) {
     bastions(networkId: $networkId) {
+      id
       slug
       name
       status
       networkId
       cloudAccountId
-      instanceId
+      sshUser
       publicIp
       createdAt
     }
@@ -37,12 +38,13 @@ export const BASTIONS_QUERY = /* GraphQL */ `
 export const BASTION_QUERY = /* GraphQL */ `
   query GetBastion($slug: String!) {
     bastion(slug: $slug) {
+      id
       slug
       name
       status
       networkId
       cloudAccountId
-      instanceId
+      sshUser
       publicIp
       createdAt
     }
@@ -55,6 +57,7 @@ export const BASTION_PRIVATE_KEY_QUERY = /* GraphQL */ `
       success
       message
       privateKey
+      sshUser
       hostPublicKey
       hostKeyFingerprint
     }
@@ -72,7 +75,7 @@ export const CREATE_BASTION_MUTATION = /* GraphQL */ `
         status
         networkId
         cloudAccountId
-        instanceId
+        sshUser
         publicIp
       }
       deploymentId
@@ -120,6 +123,7 @@ export async function fetchBastion(slug: string): Promise<Bastion | null> {
 
 export interface BastionCredentials {
   privateKey: string
+  sshUser: string
   /** Null for a bastion provisioned before Gantry recorded host keys */
   hostPublicKey: string | null
   hostKeyFingerprint: string | null
@@ -131,11 +135,12 @@ export async function fetchBastionCredentials(slug: string): Promise<BastionCred
     { slug }
   )
   const result = data.bastionPrivateKey
-  if (!result.success || !result.privateKey) {
+  if (!result.success || !result.privateKey || !result.sshUser) {
     throw new Error(result.message ?? 'Failed to retrieve SSH key')
   }
   return {
     privateKey: result.privateKey,
+    sshUser: result.sshUser,
     hostPublicKey: result.hostPublicKey,
     hostKeyFingerprint: result.hostKeyFingerprint,
   }
@@ -199,6 +204,7 @@ const NETWORKS_QUERY = /* GraphQL */ `
     networks {
       id
       name
+      id
       slug
       region
       cloudAccountId

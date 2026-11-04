@@ -1,4 +1,4 @@
-import { input, select } from '@inquirer/prompts'
+import { input } from '@inquirer/prompts'
 import type { Command } from 'commander'
 import ora from 'ora'
 
@@ -11,7 +11,9 @@ import type {
   GetFilesystemsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { selectCloud, selectNetwork } from '../lib/interactive-prompts'
+import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import { awsFilesystemSettings, awsOption, type AwsFilesystemFlags } from '../lib/clouds/aws'
+import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -21,7 +23,8 @@ const FILESYSTEMS_QUERY = /* GraphQL */ `
       id
       name
       slug
-      type
+      provider
+      region
       status
       cloudAccountId
       networkId
@@ -36,6 +39,7 @@ const NETWORKS_QUERY = /* GraphQL */ `
       id
       name
       region
+      provider
       cloudAccountId
     }
   }
@@ -50,12 +54,19 @@ const CREATE_FILESYSTEM_MUTATION = /* GraphQL */ `
         id
         name
         slug
-        type
+        provider
         status
       }
     }
   }
 `
+
+interface FilesystemCreateFlags extends AwsFilesystemFlags {
+  cloud?: string
+  network?: string
+  name?: string
+  slug?: string
+}
 
 export function registerFilesystemsCommand(program: Command): void {
   const filesystemsCmd = program.command('filesystems').description('Manage persistent filesystems')
@@ -76,7 +87,7 @@ export function registerFilesystemsCommand(program: Command): void {
         }
 
         const table = createTable({
-          head: ['ID', 'Name', 'Slug', 'Type', 'Status', 'Created'],
+          head: ['ID', 'Name', 'Slug', 'Cloud', 'Region', 'Status', 'Created'],
         })
 
         for (const fs of filesystems) {
@@ -84,7 +95,8 @@ export function registerFilesystemsCommand(program: Command): void {
             fs.id,
             fs.name,
             fs.slug,
-            fs.type.toUpperCase(),
+            fs.provider.toUpperCase(),
+            fs.region,
             fs.status.toUpperCase(),
             formatDate(fs.createdAt),
           ])
@@ -104,9 +116,25 @@ export function registerFilesystemsCommand(program: Command): void {
     .option('--network <id>', 'Network ID')
     .option('--name <name>', 'Filesystem name')
     .option('--slug <slug>', 'Filesystem slug (auto-generated from name if omitted)')
-    .action(async (options: { cloud?: string; network?: string; name?: string; slug?: string }) => {
+    .addOption(awsOption('--aws-performance-mode <mode>', 'general-purpose (default) or max-io'))
+    .addOption(awsOption('--aws-throughput-mode <mode>', 'elastic, bursting or provisioned'))
+    .addOption(
+      awsOption('--aws-throughput-mibps <mibps>', 'Throughput for provisioned mode, 1 to 3414')
+    )
+    .addOption(awsOption('--aws-encrypted', 'Encrypt the filesystem at rest'))
+    .action(async (options: FilesystemCreateFlags) => {
       try {
-        const cloudAccountId = options.cloud ?? (await selectCloud())
+        const cloud = await resolveCloud(options.cloud)
+        const foreign = foreignAwsFlagsMessage(cloud.provider, options)
+        if (foreign) {
+          printError(foreign)
+          process.exit(1)
+        }
+        if (!isAws(cloud.provider)) {
+          printError(unsupportedCloud('filesystems'))
+          process.exit(1)
+        }
+        const cloudAccountId = cloud.id
         const networkId = options.network ?? (await selectNetwork(cloudAccountId))
 
         if (!networkId) {
@@ -134,30 +162,12 @@ export function registerFilesystemsCommand(program: Command): void {
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to the generated slug
         const slug = options.slug || slugify(name)
 
-        const performanceMode = await select({
-          message: 'Performance mode:',
-          choices: [
-            { name: 'General Purpose — Recommended for most workloads', value: 'generalPurpose' },
-            { name: 'Max I/O — For highly parallelized applications', value: 'maxIO' },
-          ],
-        })
-
-        const throughputMode = await select({
-          message: 'Throughput mode:',
-          choices: [
-            { name: 'Elastic — Recommended, scales automatically', value: 'elastic' },
-            { name: 'Bursting — Scales with storage size', value: 'bursting' },
-            { name: 'Provisioned — Fixed throughput', value: 'provisioned' },
-          ],
-        })
-
-        const encrypted = await select({
-          message: 'Enable encryption at rest?',
-          choices: [
-            { name: 'Yes', value: true },
-            { name: 'No', value: false },
-          ],
-        })
+        const settings = await awsFilesystemSettings(options)
+        if (!settings.ok) {
+          printError(settings.message)
+          process.exit(1)
+        }
+        const aws = settings.value
 
         const spinner = ora('Creating filesystem...').start()
 
@@ -165,19 +175,7 @@ export function registerFilesystemsCommand(program: Command): void {
           CreateFilesystemMutation,
           CreateFilesystemMutationVariables
         >(CREATE_FILESYSTEM_MUTATION, {
-          input: {
-            cloudAccountId,
-            networkId,
-            name,
-            slug,
-            type: 'EFS',
-            providerData: {
-              region: selectedNetwork.region,
-              performanceMode,
-              throughputMode,
-              encrypted,
-            },
-          },
+          input: { cloudAccountId, networkId, name, slug, aws },
         }).finally(() => spinner.stop())
 
         const result = data.createFilesystem

@@ -15,7 +15,7 @@ import type {
   CliInputs,
   ContainerPushInputs,
   LocalBuildInputs,
-  S3UploadInputs,
+  ObjectUploadInputs,
   TaskResult,
 } from '../lib/tasks'
 
@@ -73,16 +73,16 @@ class ExitError extends Error {
 
 type Handler = (variables: Record<string, unknown>) => unknown
 
-const S3_INPUTS: S3UploadInputs = {
-  __typename: 'S3UploadCliInputs',
+const OBJECT_INPUTS: ObjectUploadInputs = {
+  __typename: 'ObjectUploadCliInputs',
   stepId: 'step_1',
   sourcePath: 'dist',
   includePatterns: null,
   excludePatterns: null,
 }
 
-const S3_RESULT: TaskResult = {
-  outputs: { s3Upload: { uploadedFiles: 1, totalSize: 13, success: true } },
+const OBJECT_RESULT: TaskResult = {
+  outputs: { objectUpload: { uploadedFiles: 1, totalSize: 13, success: true } },
   fileResults: [{ path: 'index.html', hash: 'abc', success: true }],
 }
 
@@ -91,11 +91,11 @@ const PENDING_STEP = {
   status: 'AWAITING_CLI',
   cliStatus: 'PENDING',
   executor: 'CLI',
-  cliTask: 's3-upload',
+  cliTask: 'object-upload',
   phase: 'UPLOADING',
 }
 
-const CLAIMED_STEP = { ...PENDING_STEP, cliInputs: S3_INPUTS }
+const CLAIMED_STEP = { ...PENDING_STEP, cliInputs: OBJECT_INPUTS }
 
 function deployment(overrides: Record<string, unknown> = {}) {
   return { id: 'dep_1', serviceName: 'web', status: 'RUNNING', steps: [], ...overrides }
@@ -158,7 +158,7 @@ describe('lift command', () => {
 
     for (const mock of Object.values(mocks)) mock.mockReset()
     mocks.copyToStagingDir.mockReturnValue([])
-    mocks.executeCliTask.mockResolvedValue(S3_RESULT)
+    mocks.executeCliTask.mockResolvedValue(OBJECT_RESULT)
     mocks.runDocker.mockResolvedValue(undefined)
     mocks.spawn.mockImplementation((() => {
       const child = new EventEmitter() as EventEmitter & {
@@ -259,7 +259,7 @@ describe('lift command', () => {
     })
 
     expect(calls('ClaimStep')).toHaveLength(1)
-    expect(mocks.executeCliTask).toHaveBeenCalledWith(S3_INPUTS, {
+    expect(mocks.executeCliTask).toHaveBeenCalledWith(OBJECT_INPUTS, {
       stagingDir: `${workingDir}/.gantry`,
       cwd: workingDir,
       force: true,
@@ -267,7 +267,7 @@ describe('lift command', () => {
     })
     expect(calls('CompleteCliStep')[0][1]).toEqual({
       stepId: 'step_1',
-      outputs: { s3Upload: { uploadedFiles: 1, totalSize: 13, success: true } },
+      outputs: { objectUpload: { uploadedFiles: 1, totalSize: 13, success: true } },
       fileResults: [{ path: 'index.html', hash: 'abc', success: true }],
     })
 
@@ -670,26 +670,27 @@ describe('lift command', () => {
     stepId: 'step_container-push',
     imageUri: '123.dkr.ecr.us-east-1.amazonaws.com/web:v3',
     localImageTag: 'p9ue62-shop-web:v3',
-    ecrAuthToken: 'dG9rZW4=',
-    ecrEndpoint: 'https://123.dkr.ecr.us-east-1.amazonaws.com',
+    registryEndpoint: 'https://123.dkr.ecr.us-east-1.amazonaws.com',
+    registryUsername: 'AWS',
+    registryPassword: 'dG9rZW4=',
   }
 
   const ARTIFACT_UPLOAD_INPUTS: ArtifactUploadInputs = {
     __typename: 'ArtifactUploadCliInputs',
     stepId: 'step_artifact-upload',
     bucketName: 'artifacts',
-    s3Key: 'web/v3.zip',
+    provider: 'aws',
+    objectKey: 'web/v3.zip',
     region: 'us-east-1',
-    accessKeyId: 'AKIA',
-    secretAccessKey: 'secret',
-    sessionToken: 'token',
+    maxArtifactBytes: 52428800,
+    aws: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
     sourcePath: 'dist',
     excludePatterns: null,
   }
 
   it.each<[string, CliInputs]>([
     ['local-build', LOCAL_BUILD_INPUTS],
-    ['s3-upload', { ...S3_INPUTS, stepId: 'step_s3-upload' }],
+    ['object-upload', { ...OBJECT_INPUTS, stepId: 'step_object-upload' }],
     ['container-push', CONTAINER_PUSH_INPUTS],
     ['artifact-upload', ARTIFACT_UPLOAD_INPUTS],
   ])('reports a failed %s step to the API without leaking secrets', async (cliTask, cliInputs) => {
@@ -792,7 +793,7 @@ describe('lift command', () => {
           setTimeout(
             () => {
               resolve({
-                outputs: { s3Upload: { uploadedFiles: 4000, totalSize: 4000, success: true } },
+                outputs: { objectUpload: { uploadedFiles: 4000, totalSize: 4000, success: true } },
                 fileResults: [],
               })
             },

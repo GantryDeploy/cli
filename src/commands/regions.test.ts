@@ -45,30 +45,56 @@ describe('regions command', () => {
     vi.restoreAllMocks()
   })
 
-  it('lists the AWS regions by default', async () => {
+  it('lists the regions of the given provider', async () => {
     vi.mocked(graphqlRequest).mockResolvedValue({
-      cloudRegions: [{ code: 'us-east-1', name: 'US East (N. Virginia)' }],
+      cloudRegions: [{ code: 'us-central1', name: 'Iowa' }],
     })
-
-    await regions()
-
-    expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({ provider: 'aws' })
-    expect(String(logSpy.mock.calls[0][0])).toMatch(/us-east-1.*US East \(N\. Virginia\)/)
-  })
-
-  it('asks for the given provider and says so when it has no regions', async () => {
-    vi.mocked(graphqlRequest).mockResolvedValue({ cloudRegions: [] })
 
     await regions(['--provider', 'gcp'])
 
-    expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({ provider: 'gcp' })
-    expect(logSpy).toHaveBeenCalledWith('No regions found for this provider.')
+    expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({ provider: 'GCP' })
+    expect(String(logSpy.mock.calls[0][0])).toMatch(/us-central1.*Iowa/)
+  })
+
+  it("lists the regions of a cloud account's cloud", async () => {
+    vi.mocked(graphqlRequest)
+      .mockResolvedValueOnce({ clouds: [{ id: 'ca_7kq2', name: 'Production', provider: 'AWS' }] })
+      .mockResolvedValueOnce({
+        cloudRegions: [{ code: 'us-east-1', name: 'US East (N. Virginia)' }],
+      })
+
+    await regions(['--cloud', 'ca_7kq2'])
+
+    expect(vi.mocked(graphqlRequest).mock.calls[1][1]).toEqual({ provider: 'AWS' })
+    expect(String(logSpy.mock.calls[0][0])).toMatch(/us-east-1.*US East \(N\. Virginia\)/)
+  })
+
+  it('says so when the cloud has no regions', async () => {
+    vi.mocked(graphqlRequest).mockResolvedValue({ cloudRegions: [] })
+
+    await regions(['--provider', 'vultr'])
+
+    expect(logSpy).toHaveBeenCalledWith('No regions found for this cloud.')
+  })
+
+  it.each([
+    [['--cloud', 'ca_7kq2', '--provider', 'aws'], 'Pass either --cloud or --provider, not both.'],
+    [[], 'Pass --cloud <id> or --provider <provider>.'],
+  ])('refuses %j without calling the API', async (args, message) => {
+    await expect(regions(args)).rejects.toThrow(ExitError)
+    expect(printError).toHaveBeenCalledWith(message)
+    expect(graphqlRequest).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unknown provider', async () => {
+    await expect(regions(['--provider', 'heroku'])).rejects.toThrow(ExitError)
+    expect(vi.mocked(printError).mock.calls[0][0]).toMatch(/^Unknown cloud provider\./)
   })
 
   it('exits with the formatted API error', async () => {
     vi.mocked(graphqlRequest).mockRejectedValue(new Error('Forbidden.'))
 
-    await expect(regions()).rejects.toThrow(ExitError)
+    await expect(regions(['--provider', 'aws'])).rejects.toThrow(ExitError)
     expect(printError).toHaveBeenCalledWith('Forbidden.')
   })
 })

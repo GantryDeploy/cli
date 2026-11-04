@@ -4,7 +4,9 @@ import type { MockInstance } from 'vitest'
 
 const graphqlRequest = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectRegion = vi.hoisted(() => vi.fn())
 
 vi.mock('@inquirer/prompts', () => ({ input }))
@@ -12,7 +14,7 @@ vi.mock('../lib/client', () => ({
   formatApiError: (error: unknown) => (error instanceof Error ? error.message : 'API error'),
   graphqlRequest,
 }))
-vi.mock('../lib/interactive-prompts', () => ({ selectCloud, selectRegion }))
+vi.mock('../lib/interactive-prompts', () => ({ resolveCloud, selectRegion }))
 
 const { registerNetworksCommand } = await import('./networks')
 
@@ -124,9 +126,18 @@ describe('networks command', () => {
         'prod',
         '--region',
         'us-east-1',
+        '--cidr',
+        '10.20.0.0/16',
+        '--subnet',
+        'public:10.20.0.0/24:us-east-1a',
+        '--subnet',
+        'private:10.20.16.0/20:us-east-1a',
+        '--least-privilege',
+        '--aws-nat',
+        'per-az',
       ])
 
-      expect(selectCloud).not.toHaveBeenCalled()
+      expect(resolveCloud).toHaveBeenCalledWith(expect.any(String))
       expect(selectRegion).not.toHaveBeenCalled()
       expect(input).not.toHaveBeenCalled()
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('mutation CreateNetwork')
@@ -136,6 +147,13 @@ describe('networks command', () => {
           name: 'Production VPC',
           slug: 'prod',
           region: 'us-east-1',
+          cidr: '10.20.0.0/16',
+          subnets: [
+            { name: 'prod-public-0', cidr: '10.20.0.0/24', type: 'PUBLIC', zone: 'us-east-1a' },
+            { name: 'prod-private-0', cidr: '10.20.16.0/20', type: 'PRIVATE', zone: 'us-east-1a' },
+          ],
+          leastPrivilegeMode: true,
+          aws: { natGatewayOption: 'PER_AZ' },
         },
       })
       expect(printed()).toContain('Network created: Production VPC (prod)')
@@ -144,9 +162,9 @@ describe('networks command', () => {
     })
 
     it('prompts for missing values and derives the slug from the name', async () => {
-      selectCloud.mockResolvedValueOnce('cloud_1')
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_1', provider: 'AWS' })
       selectRegion.mockResolvedValueOnce('eu-west-1')
-      input.mockResolvedValueOnce('Staging Network')
+      input.mockResolvedValueOnce('Staging Network').mockResolvedValueOnce('10.30.0.0/16')
       graphqlRequest.mockResolvedValueOnce({
         createNetwork: { ...created, deploymentId: undefined },
       })
@@ -156,12 +174,18 @@ describe('networks command', () => {
       const { validate } = input.mock.calls[0]?.[0] as { validate: (v: string) => string | true }
       expect(validate(' ')).toBe('Name is required')
       expect(validate('ok')).toBe(true)
+      expect(input.mock.calls[1]?.[0]).toEqual({
+        message: 'Address range:',
+        default: '10.0.0.0/16',
+      })
       expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
         input: {
           cloudAccountId: 'cloud_1',
           name: 'Staging Network',
           slug: 'staging-network',
           region: 'eu-west-1',
+          cidr: '10.30.0.0/16',
+          subnets: [],
         },
       })
       expect(printed()).not.toContain('Deployment:')
@@ -214,6 +238,32 @@ describe('networks command', () => {
       ).rejects.toThrow('process.exit(1)')
 
       expect(printedErrors()).toContain('Rate limited')
+    })
+
+    it('sends no aws section to another cloud and refuses AWS flags there', async () => {
+      resolveCloud
+        .mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+        .mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ createNetwork: created })
+
+      await run(['create', '--cloud', 'ca_9mx4', '--name', 'n', '--region', 'us-central1'])
+
+      expect(graphqlRequest.mock.calls[0]?.[1]).not.toHaveProperty('input.aws')
+
+      await expect(
+        run(['create', '--cloud', 'ca_9mx4', '--name', 'n', '--aws-nat', 'single'])
+      ).rejects.toThrow(ExitError)
+      expect(printedErrors()).toContain('--aws-nat only applies to AWS cloud accounts.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses an unknown NAT option before calling the API', async () => {
+      await expect(
+        run(['create', '--cloud', 'cloud_1', '--name', 'n', '--aws-nat', 'double'])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain('--aws-nat must be none, single or per-az')
+      expect(graphqlRequest).not.toHaveBeenCalled()
     })
   })
 })

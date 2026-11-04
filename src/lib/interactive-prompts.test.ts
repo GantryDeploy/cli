@@ -1,22 +1,21 @@
-import { checkbox, input, select } from '@inquirer/prompts'
+import { input, select } from '@inquirer/prompts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
 
 import { graphqlRequest } from './client'
 import {
   promptName,
-  selectCloud,
+  resolveCloud,
   selectDomain,
   selectEnvironment,
   selectNetwork,
   selectProject,
   selectRegion,
-  selectRegions,
   selectSecret,
 } from './interactive-prompts'
 import { printError } from './output'
 
-vi.mock('@inquirer/prompts', () => ({ checkbox: vi.fn(), input: vi.fn(), select: vi.fn() }))
+vi.mock('@inquirer/prompts', () => ({ input: vi.fn(), select: vi.fn() }))
 vi.mock('./client', () => ({ graphqlRequest: vi.fn() }))
 vi.mock('./output', () => ({ printError: vi.fn() }))
 
@@ -40,7 +39,6 @@ describe('interactive prompts', () => {
   beforeEach(() => {
     vi.mocked(graphqlRequest).mockReset()
     vi.mocked(select).mockReset()
-    vi.mocked(checkbox).mockReset()
     vi.mocked(input).mockReset()
     vi.mocked(printError).mockReset()
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
@@ -52,19 +50,41 @@ describe('interactive prompts', () => {
     exitSpy.mockRestore()
   })
 
-  describe('selectCloud', () => {
-    it('offers each cloud account by name and provider', async () => {
-      respond({ clouds: [{ id: 'ca_1', name: 'Prod', provider: 'aws' }] })
-      vi.mocked(select).mockResolvedValueOnce('ca_1')
+  describe('resolveCloud', () => {
+    const clouds = [
+      { id: 'ca_7kq2', name: 'Production', provider: 'AWS' },
+      { id: 'ca_9mx4', name: 'Analytics', provider: 'GCP' },
+    ]
 
-      await expect(selectCloud()).resolves.toBe('ca_1')
-      expect(choicesOfLastSelect()).toEqual([{ name: 'Prod (AWS)', value: 'ca_1' }])
+    it('offers each cloud account by name and cloud, and returns the pick with its cloud', async () => {
+      respond({ clouds })
+      vi.mocked(select).mockResolvedValueOnce('ca_9mx4')
+
+      await expect(resolveCloud()).resolves.toEqual({ id: 'ca_9mx4', provider: 'GCP' })
+      expect(choicesOfLastSelect()).toEqual([
+        { name: 'Production (AWS)', value: 'ca_7kq2' },
+        { name: 'Analytics (GCP)', value: 'ca_9mx4' },
+      ])
+    })
+
+    it('looks up a given id without prompting', async () => {
+      respond({ clouds })
+
+      await expect(resolveCloud('ca_7kq2')).resolves.toEqual({ id: 'ca_7kq2', provider: 'AWS' })
+      expect(select).not.toHaveBeenCalled()
+    })
+
+    it('exits when the given id is not one of the team’s cloud accounts', async () => {
+      respond({ clouds })
+
+      await expect(resolveCloud('ca_missing')).rejects.toThrow(ExitError)
+      expect(printError).toHaveBeenCalledWith('Cloud account not found.')
     })
 
     it('exits when there are no cloud accounts', async () => {
       respond({ clouds: [] })
 
-      await expect(selectCloud()).rejects.toThrow(ExitError)
+      await expect(resolveCloud()).rejects.toThrow(ExitError)
       expect(printError).toHaveBeenCalledWith('No cloud accounts found.')
       expect(select).not.toHaveBeenCalled()
     })
@@ -134,66 +154,20 @@ describe('interactive prompts', () => {
   })
 
   describe('selectRegion', () => {
-    it('asks for the provider’s regions, defaulting to aws', async () => {
-      respond({ cloudRegions: [{ code: 'us-east-1', name: 'N. Virginia' }] })
-      vi.mocked(select).mockResolvedValueOnce('us-east-1')
-
-      await expect(selectRegion()).resolves.toBe('us-east-1')
-      expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({ provider: 'aws' })
-      expect(choicesOfLastSelect()).toEqual([
-        { name: 'us-east-1 — N. Virginia', value: 'us-east-1' },
-      ])
-    })
-
-    it('passes an explicit provider through', async () => {
+    it('asks for the regions of the given cloud', async () => {
       respond({ cloudRegions: [{ code: 'us-central1', name: 'Iowa' }] })
       vi.mocked(select).mockResolvedValueOnce('us-central1')
 
-      await selectRegion('gcp')
-
-      expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({ provider: 'gcp' })
+      await expect(selectRegion('GCP')).resolves.toBe('us-central1')
+      expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({ provider: 'GCP' })
+      expect(choicesOfLastSelect()).toEqual([{ name: 'us-central1 — Iowa', value: 'us-central1' }])
     })
 
-    it('exits when the provider has no regions', async () => {
+    it('exits when the cloud has no regions', async () => {
       respond({ cloudRegions: [] })
 
-      await expect(selectRegion('aws')).rejects.toThrow(ExitError)
+      await expect(selectRegion('AWS')).rejects.toThrow(ExitError)
       expect(printError).toHaveBeenCalledWith('No regions found.')
-    })
-  })
-
-  describe('selectRegions', () => {
-    let logSpy: MockInstance
-
-    beforeEach(() => {
-      logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-    })
-
-    afterEach(() => {
-      logSpy.mockRestore()
-    })
-
-    it('pre-checks us-east-1 by default and does not warn when it is kept', async () => {
-      vi.mocked(checkbox).mockResolvedValueOnce(['us-east-1', 'eu-west-1'])
-
-      await expect(selectRegions()).resolves.toEqual(['us-east-1', 'eu-west-1'])
-      const { choices } = vi.mocked(checkbox).mock.calls[0][0] as unknown as {
-        choices: { value: string; checked: boolean }[]
-      }
-      expect(choices.filter((c) => c.checked).map((c) => c.value)).toEqual(['us-east-1'])
-      expect(logSpy).not.toHaveBeenCalled()
-    })
-
-    it('pre-checks the given defaults and warns when us-east-1 is left out', async () => {
-      vi.mocked(checkbox).mockResolvedValueOnce(['eu-west-1'])
-
-      await selectRegions(['eu-west-1'])
-
-      const { choices } = vi.mocked(checkbox).mock.calls[0][0] as unknown as {
-        choices: { value: string; checked: boolean }[]
-      }
-      expect(choices.filter((c) => c.checked).map((c) => c.value)).toEqual(['eu-west-1'])
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('us-east-1'))
     })
   })
 

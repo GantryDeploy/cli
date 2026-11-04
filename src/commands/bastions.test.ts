@@ -87,6 +87,7 @@ describe('bastions command', () => {
     promptMocks.fetchBastion.mockResolvedValue(bastion)
     promptMocks.fetchBastionCredentials.mockResolvedValue({
       privateKey: PRIVATE_KEY,
+      sshUser: 'ec2-user',
       hostPublicKey: null,
       hostKeyFingerprint: null,
     })
@@ -304,6 +305,7 @@ describe('bastions command', () => {
       spawnMock.mockReturnValue(fakeChild())
       promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
         privateKey: PRIVATE_KEY,
+        sshUser: 'ec2-user',
         hostPublicKey,
         hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
       })
@@ -338,6 +340,7 @@ describe('bastions command', () => {
     it('refuses a malformed host key and removes the temporary key', async () => {
       promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
         privateKey: PRIVATE_KEY,
+        sshUser: 'ec2-user',
         hostPublicKey: `${hostPublicKey}\n203.0.113.66 ssh-ed25519 AAAA`,
         hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
       })
@@ -473,6 +476,7 @@ describe('bastions command', () => {
         'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICYYpJ9NxY3QwueHe9yfjYTdR8TqLEhJ5iV1nJjM/dj2'
       promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
         privateKey: PRIVATE_KEY,
+        sshUser: 'ec2-user',
         hostPublicKey,
         hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
       })
@@ -490,6 +494,7 @@ describe('bastions command', () => {
     it('prints no key when the recorded host key is malformed', async () => {
       promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
         privateKey: PRIVATE_KEY,
+        sshUser: 'ec2-user',
         hostPublicKey: "ssh-ed25519 AAAA' >> ~/.bashrc; echo '",
         hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
       })
@@ -503,6 +508,7 @@ describe('bastions command', () => {
     it('keeps a key that already ends with a newline unchanged', async () => {
       promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
         privateKey: `${PRIVATE_KEY}\n`,
+        sshUser: 'ec2-user',
         hostPublicKey: null,
         hostKeyFingerprint: null,
       })

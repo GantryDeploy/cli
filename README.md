@@ -95,6 +95,14 @@ vendor/*
 
 `.git` and the `.gantry` staging directory are never copied.
 
+## Database users
+
+`gantry databases create --no-master-rotation` keeps the master password in a Gantry secret that never rotates, instead of the cloud provider rotating it on a schedule. Choose at creation; it cannot be changed later.
+
+Each service that binds a database gets its own database user, created on deploy. `gantry databases users <server>` lists them with their service, environment, auth and access.
+
+A deploy fails when the bound Postgres database already holds tables, views, sequences or schemas owned by another database user. `gantry databases adopt <server> <database>` moves them to Gantry's owner role. Each user that owned any of them becomes a member of that role, so it keeps working, now with owner rights over the whole database. The command asks first; pass `--yes` where there is no terminal.
+
 ## Tunnels and bastion host keys
 
 `gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH. The CLI checks the bastion's SSH host key before forwarding anything.

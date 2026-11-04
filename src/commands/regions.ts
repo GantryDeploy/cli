@@ -1,32 +1,34 @@
 import type { Command } from 'commander'
 
-import type { GetCloudRegionsQuery, GetCloudRegionsQueryVariables } from '../generated/graphql'
-import { formatApiError, graphqlRequest } from '../lib/client'
+import { formatApiError } from '../lib/client'
+import { toCloudProvider } from '../lib/clouds'
+import { fetchRegions, resolveCloud } from '../lib/interactive-prompts'
 import { createTable, printError } from '../lib/output'
-
-const CLOUD_REGIONS_QUERY = /* GraphQL */ `
-  query GetCloudRegions($provider: String) {
-    cloudRegions(provider: $provider) {
-      code
-      name
-    }
-  }
-`
+import { isInteractive } from '../lib/terminal'
 
 export function registerRegionsCommand(program: Command): void {
   program
     .command('regions')
-    .description('List available cloud regions')
-    .option('--provider <provider>', 'Cloud provider (defaults to aws)', 'aws')
-    .action(async (options: { provider: string }) => {
+    .description('List the regions a cloud offers')
+    .option('--cloud <id>', 'Cloud account ID')
+    .option('--provider <provider>', 'Cloud provider, e.g. aws or gcp')
+    .action(async (options: { cloud?: string; provider?: string }) => {
       try {
-        const data = await graphqlRequest<GetCloudRegionsQuery, GetCloudRegionsQueryVariables>(
-          CLOUD_REGIONS_QUERY,
-          { provider: options.provider }
-        )
+        if (options.cloud && options.provider) {
+          printError('Pass either --cloud or --provider, not both.')
+          process.exit(1)
+        }
+        if (!options.cloud && !options.provider && !isInteractive()) {
+          printError('Pass --cloud <id> or --provider <provider>.')
+          process.exit(1)
+        }
+        const provider = options.provider
+          ? toCloudProvider(options.provider)
+          : (await resolveCloud(options.cloud)).provider
 
-        if (data.cloudRegions.length === 0) {
-          console.log('No regions found for this provider.')
+        const regions = await fetchRegions(provider)
+        if (regions.length === 0) {
+          console.log('No regions found for this cloud.')
           return
         }
 
@@ -34,7 +36,7 @@ export function registerRegionsCommand(program: Command): void {
           head: ['Code', 'Name'],
         })
 
-        for (const region of data.cloudRegions) {
+        for (const region of regions) {
           table.push([region.code, region.name])
         }
 

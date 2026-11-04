@@ -68,17 +68,18 @@ function assertEd25519PublicKey(hostPublicKey: string): void {
 export function manualConnectHints(
   keyFile: string,
   publicIp: string,
+  sshUser: string,
   hostPublicKey: string | null
 ): string[] {
   const hint = (label: string, command: string) => `  ${`${label}:`.padEnd(17)}${command}`
-  if (!hostPublicKey) return [hint('Connect', `ssh -i ${keyFile} ec2-user@${publicIp}`)]
+  if (!hostPublicKey) return [hint('Connect', `ssh -i ${keyFile} ${sshUser}@${publicIp}`)]
 
   assertEd25519PublicKey(hostPublicKey)
   return [
     hint('Trust host key', `echo '${publicIp} ${hostPublicKey}' >> ~/.ssh/known_hosts`),
     hint(
       'Connect',
-      `ssh -i ${keyFile} -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 ec2-user@${publicIp}`
+      `ssh -i ${keyFile} -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 ${sshUser}@${publicIp}`
     ),
   ]
 }
@@ -157,8 +158,8 @@ export function registerBastionsCommand(program: Command): void {
   bastionsCmd
     .command('ssh [slug]')
     .description('Connect to a bastion host via SSH')
-    .option('-u, --user <user>', 'SSH username', 'ec2-user')
-    .action(async (slug: string | undefined, options: { user: string }) => {
+    .option('-u, --user <user>', "SSH username (defaults to the bastion's user)")
+    .action(async (slug: string | undefined, options: { user?: string }) => {
       try {
         let bastion: Bastion
 
@@ -205,7 +206,7 @@ export function registerBastionsCommand(program: Command): void {
               '-i',
               keyPath,
               ...hostKeyCheckingArgs(keyPath, publicIp, credentials.hostPublicKey),
-              `${options.user}@${publicIp}`,
+              `${options.user ?? credentials.sshUser}@${publicIp}`,
             ],
             {
               stdio: 'inherit',
@@ -256,10 +257,12 @@ export function registerBastionsCommand(program: Command): void {
           bastion = result
         }
 
-        const { privateKey, hostPublicKey } = await fetchBastionCredentials(bastion.slug)
+        const { privateKey, sshUser, hostPublicKey } = await fetchBastionCredentials(bastion.slug)
         const { publicIp } = bastion
         const keyFile = options.output ? resolve(options.output) : `~/.ssh/${bastion.slug}.pem`
-        const connectHints = publicIp ? manualConnectHints(keyFile, publicIp, hostPublicKey) : []
+        const connectHints = publicIp
+          ? manualConnectHints(keyFile, publicIp, sshUser, hostPublicKey)
+          : []
 
         if (options.output) {
           const outputPath = keyFile

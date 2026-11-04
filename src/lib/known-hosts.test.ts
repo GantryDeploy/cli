@@ -65,19 +65,10 @@ describe('known-hosts', () => {
   })
 
   describe('bastionHostId', () => {
-    it('uses the instance id when present', () => {
-      expect(bastionHostId({ id: 'b1', instanceId: 'i-0abc', publicIp: '1.2.3.4' })).toBe('i-0abc')
-    })
-
-    it('falls back to the bastion id and public IP', () => {
-      expect(bastionHostId({ id: 'b1', publicIp: '1.2.3.4' })).toBe('bastion-b1@1.2.3.4')
-    })
-
-    it('throws when neither identifier is available', () => {
-      expect(() => bastionHostId({ id: 'b1', publicIp: null })).toThrow(
-        'Bastion has no instance id or public IP'
+    it('keys the host by bastion id and public IP', () => {
+      expect(bastionHostId({ id: 'r3bq9m', publicIp: '203.0.113.10' })).toBe(
+        'bastion-r3bq9m@203.0.113.10'
       )
-      expect(() => bastionHostId({ publicIp: '1.2.3.4' })).toThrow()
     })
   })
 

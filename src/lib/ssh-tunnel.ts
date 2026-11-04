@@ -8,7 +8,7 @@ import { HostKeyError, verifyHostKey } from './known-hosts'
 export interface SshTunnelConfig {
   bastionHost: string
   bastionPort?: number
-  bastionUsername?: string
+  bastionUsername: string
   hostKey: HostKeyPolicy
   privateKey: string
   remoteHost: string
@@ -161,7 +161,7 @@ export function openSshTunnel(config: SshTunnelConfig): Promise<TunnelConnection
     sshClient.connect({
       host: config.bastionHost,
       port: config.bastionPort ?? 22,
-      username: config.bastionUsername ?? 'ec2-user',
+      username: config.bastionUsername,
       privateKey: config.privateKey,
       hostVerifier,
       // Gantry records only the ed25519 host key. Older bastions keep ssh2's

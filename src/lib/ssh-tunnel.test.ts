@@ -106,6 +106,7 @@ function setTty(value: boolean) {
 function open(trustHostKey?: boolean, expectedFingerprint: string | null = null) {
   const tunnel = openSshTunnel({
     bastionHost: '1.2.3.4',
+    bastionUsername: 'ec2-user',
     hostKey: { hostId: 'i-0abc', label: 'my-bastion', expectedFingerprint, trustHostKey },
     privateKey: 'fake-key',
     remoteHost: 'db.internal',
@@ -353,9 +354,10 @@ describe('openSshTunnel forwarding', () => {
     expect(server.listen).toHaveBeenCalledWith(15432, '127.0.0.1', expect.any(Function))
   })
 
-  it('defaults to port 22 as ec2-user', () => {
+  it('defaults to port 22 and signs in as the bastion user', () => {
     const tunnel = openSshTunnel({
       bastionHost: '1.2.3.4',
+      bastionUsername: 'ec2-user',
       hostKey: { hostId: 'i-0abc', label: 'b', expectedFingerprint: null },
       privateKey: 'k',
       remoteHost: 'db',

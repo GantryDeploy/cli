@@ -7,7 +7,6 @@ import {
   getEngineFamily,
   normalizeEngine,
   toCacheEngineEnum,
-  toCatalogEngine,
   toDatabaseEngineEnum,
 } from './engine'
 
@@ -18,18 +17,16 @@ describe('engine', () => {
     ['MEMCACHED', 11211],
     ['MYSQL', 3306],
     ['MARIADB', 3306],
-    ['AURORA_MYSQL', 3306],
     ['POSTGRESQL', 5432],
-    ['AURORA_POSTGRESQL', 5432],
     ['valkey', 6379],
-    ['aurora-mysql', 3306],
+    ['mariadb', 3306],
     ['postgres', 5432],
   ])('getDefaultPort(%s) is %i', (engine, port) => {
     expect(getDefaultPort(engine)).toBe(port)
   })
 
   it('maps API enum names and catalog names to the same family', () => {
-    expect(getEngineFamily('AURORA_MYSQL')).toBe(getEngineFamily('aurora-mysql'))
+    expect(getEngineFamily('MYSQL')).toBe(getEngineFamily('mysql'))
     expect(getEngineFamily('VALKEY')).toBe('redis')
     expect(getEngineFamily(' MEMCACHED ')).toBe('memcached')
   })
@@ -44,21 +41,10 @@ describe('engine', () => {
   })
 
   it.each([
-    ['AURORA_POSTGRESQL', 'aurora-postgresql'],
+    ['POSTGRESQL', 'postgresql'],
     [' Redis ', 'redis'],
   ])('normalizeEngine(%j) is %s', (engine, expected) => {
     expect(normalizeEngine(engine)).toBe(expected)
-  })
-
-  it.each([
-    ['VALKEY', 'valkey'],
-    ['valkey', 'valkey'],
-    ['AURORA_POSTGRESQL', 'aurora-postgresql'],
-    ['POSTGRESQL', 'postgres'],
-    ['postgresql', 'postgres'],
-    ['AURORA_MYSQL', 'aurora-mysql'],
-  ])('toCatalogEngine(%s) is %s', (engine, expected) => {
-    expect(toCatalogEngine(engine)).toBe(expected)
   })
 
   it.each([
@@ -70,8 +56,6 @@ describe('engine', () => {
   })
 
   it.each([
-    ['aurora-postgresql', 'AURORA_POSTGRESQL'],
-    ['AURORA_MYSQL', 'AURORA_MYSQL'],
     ['postgres', 'POSTGRESQL'],
     ['postgresql', 'POSTGRESQL'],
     ['mariadb', 'MARIADB'],
@@ -93,7 +77,7 @@ describe('engine', () => {
         /^Unknown cache engine\. Supported engines: memcached, redis, valkey$/
       )
       expect(() => toDatabaseEngineEnum(engine)).toThrow(
-        /^Unknown database engine\. Supported engines: aurora-mysql, aurora-postgresql, mariadb, mysql, postgresql$/
+        /^Unknown database engine\. Supported engines: mariadb, mysql, postgresql$/
       )
     }
   )

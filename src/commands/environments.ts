@@ -10,7 +10,12 @@ import type {
   GetEnvironmentsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { selectCloud, selectNetwork, selectProject, selectRegion } from '../lib/interactive-prompts'
+import {
+  resolveCloud,
+  selectNetwork,
+  selectProject,
+  selectRegion,
+} from '../lib/interactive-prompts'
 import {
   createTable,
   formatDate,
@@ -114,7 +119,7 @@ export function registerEnvironmentsCommand(program: Command): void {
     .description('Create a new environment')
     .option('--project <id>', 'Project ID')
     .option('--cloud <id>', 'Cloud account ID')
-    .option('--region <region>', 'AWS region (e.g., us-east-1)')
+    .option('--region <region>', 'Region (see "gantry regions --cloud <id>")')
     .option('--name <name>', 'Environment name')
     .option('--slug <slug>', 'Environment slug (auto-generated from name if omitted)')
     .option('--network <id>', 'Network ID')
@@ -133,8 +138,9 @@ export function registerEnvironmentsCommand(program: Command): void {
       }) => {
         try {
           const projectId = options.project ?? (await selectProject())
-          const cloudAccountId = options.cloud ?? (await selectCloud())
-          const region = options.region ?? (await selectRegion())
+          const cloud = await resolveCloud(options.cloud)
+          const cloudAccountId = cloud.id
+          const region = options.region ?? (await selectRegion(cloud.provider))
 
           const name =
             options.name ??

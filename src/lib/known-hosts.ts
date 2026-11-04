@@ -18,9 +18,8 @@ export interface HostKeyPolicy {
 }
 
 export interface BastionIdentity {
-  id?: string | null
-  instanceId?: string | null
-  publicIp?: string | null
+  id: string
+  publicIp: string
 }
 
 export class HostKeyError extends Error {
@@ -39,13 +38,7 @@ export function fingerprintHostKey(key: Buffer): string {
 }
 
 export function bastionHostId(bastion: BastionIdentity): string {
-  const { instanceId, publicIp } = bastion
-  if (instanceId) return instanceId
-
-  if (!bastion.id || !publicIp) {
-    throw new Error('Bastion has no instance id or public IP to identify its host key by.')
-  }
-  return `bastion-${bastion.id}@${publicIp}`
+  return `bastion-${bastion.id}@${bastion.publicIp}`
 }
 
 function readEntries(): Map<string, string> {

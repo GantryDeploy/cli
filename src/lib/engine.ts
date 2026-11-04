@@ -2,8 +2,8 @@ import type { CacheEngineEnum, DatabaseEngineEnum } from '../generated/graphql'
 
 export type EngineFamily = 'postgres' | 'mysql' | 'redis' | 'memcached'
 
-const POSTGRES_ENGINES = ['aurora-postgresql', 'postgresql', 'postgres']
-const MYSQL_ENGINES = ['aurora-mysql', 'mysql', 'mariadb']
+const POSTGRES_ENGINES = ['postgresql', 'postgres']
+const MYSQL_ENGINES = ['mysql', 'mariadb']
 const REDIS_ENGINES = ['redis', 'valkey']
 const MEMCACHED_ENGINES = ['memcached']
 
@@ -14,8 +14,6 @@ const CACHE_ENGINES = {
 } as const satisfies Record<CacheEngineEnum, CacheEngineEnum>
 
 const DATABASE_ENGINES = {
-  AURORA_MYSQL: 'AURORA_MYSQL',
-  AURORA_POSTGRESQL: 'AURORA_POSTGRESQL',
   MARIADB: 'MARIADB',
   MYSQL: 'MYSQL',
   POSTGRESQL: 'POSTGRESQL',
@@ -28,7 +26,7 @@ const PORT_MAP: Record<EngineFamily, number> = {
   memcached: 11211,
 }
 
-/** Accepts either the API enum name (`AURORA_POSTGRESQL`) or the catalog form (`aurora-postgresql`). */
+/** Accepts either the API enum name (`POSTGRESQL`) or the lowercase form (`postgresql`). */
 export function normalizeEngine(engine: string): string {
   return engine.trim().toLowerCase().replaceAll('_', '-')
 }
@@ -44,12 +42,6 @@ export function getEngineFamily(engine: string): EngineFamily {
 
 export function getDefaultPort(engine: string): number {
   return PORT_MAP[getEngineFamily(engine)]
-}
-
-/** The engine string the server's version and instance-type catalogs compare against. */
-export function toCatalogEngine(engine: string): string {
-  const normalized = normalizeEngine(engine)
-  return normalized === 'postgresql' ? 'postgres' : normalized
 }
 
 function toEnumMember<T extends string>(

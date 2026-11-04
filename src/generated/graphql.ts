@@ -15,10 +15,187 @@ export type ActivationInput = {
 
 export type ArtifactUploadCliOutputsInput = {
   bucketName: string;
-  s3Key: string;
+  objectKey: string;
   success: boolean;
   /** Size of the uploaded zip in bytes */
   zipSize: number;
+};
+
+export type AwsAlbDefaultActionInput = {
+  /** e.g. text/html or application/json */
+  contentType: string;
+  /** Response body, up to 1024 characters */
+  messageBody: string;
+  /** HTTP status code, e.g. 200 or 503 */
+  statusCode: string;
+};
+
+/** Burstable performance setting for T-series instances */
+export type AwsBurstablePerformanceEnum =
+  | 'EXCLUDED'
+  | 'INCLUDED'
+  | 'REQUIRED';
+
+/** Catalog filters that only apply to AWS */
+export type AwsCacheCatalogFilterInput = {
+  deploymentMode?: AwsCacheDeploymentModeEnum | null | undefined;
+};
+
+/** Cache deployment mode */
+export type AwsCacheDeploymentModeEnum =
+  | 'NODE_BASED'
+  | 'SERVERLESS';
+
+/** Cache settings only AWS has */
+export type AwsCacheSettingsInput = {
+  /** Valkey and Redis only */
+  clusterMode?: boolean | null | undefined;
+  /** Daily backup time, HH:MM in UTC */
+  dailySnapshotTime?: string | null | undefined;
+  /** Required on create */
+  deploymentMode?: AwsCacheDeploymentModeEnum | null | undefined;
+  /** KMS key ARN for encryption at rest */
+  kmsKeyId?: string | null | undefined;
+  /** Serverless only, 1 to 5000 */
+  maxDataStorageGb?: number | null | undefined;
+  /** Serverless only, 1000 to 15000000 */
+  maxEcpuPerSecond?: number | null | undefined;
+  /** Node-based only */
+  numCacheNodes?: number | null | undefined;
+  /** Shards, cluster mode only */
+  numNodeGroups?: number | null | undefined;
+  /** Replicas per shard, cluster mode only */
+  replicasPerNodeGroup?: number | null | undefined;
+};
+
+export type AwsCapacityProviderInput = {
+  /** Managed instances only */
+  instanceRequirements?: AwsInstanceRequirementsInput | null | undefined;
+  type: AwsCapacityProviderTypeEnum;
+};
+
+/** Type of capacity provider */
+export type AwsCapacityProviderTypeEnum =
+  | 'FARGATE'
+  | 'FARGATE_SPOT'
+  | 'MANAGED_INSTANCES';
+
+/** Certificate settings only AWS has */
+export type AwsCertificateSettingsInput = {
+  /** Regions to issue the certificate in. AWS issues one certificate per region. */
+  regions: Array<string>;
+};
+
+/** Container orchestrator a cluster runs */
+export type AwsClusterOrchestratorEnum =
+  | 'ECS';
+
+/** Cluster settings for an AWS cloud account */
+export type AwsClusterSettingsInput = {
+  capacityProviders: Array<AwsCapacityProviderInput>;
+  orchestrator: AwsClusterOrchestratorEnum;
+};
+
+/** Catalog filters that only apply to AWS */
+export type AwsDatabaseCatalogFilterInput = {
+  deploymentMode?: AwsDatabaseDeploymentModeEnum | null | undefined;
+  /** rds or aurora. Required when filtering by engine. */
+  flavor?: string | null | undefined;
+};
+
+/** Database deployment mode */
+export type AwsDatabaseDeploymentModeEnum =
+  | 'PROVISIONED'
+  | 'SERVERLESS';
+
+/** Settings only AWS servers have. Service, deployment mode, database name, encryption and master username are fixed at creation. */
+export type AwsDatabaseSettingsInput = {
+  /** Database RDS creates with the server */
+  dbName?: string | null | undefined;
+  /** Serverless is Aurora only. Required at creation. */
+  deploymentMode?: AwsDatabaseDeploymentModeEnum | null | undefined;
+  /** rds or aurora. Required at creation. */
+  flavor?: string | null | undefined;
+  /** Required for io1 and io2 storage */
+  iops?: number | null | undefined;
+  /** KMS key ARN for storage encryption */
+  kmsKeyId?: string | null | undefined;
+  /** Defaults to on. Changing this either way sets a new master password. */
+  masterPasswordRotation?: boolean | null | undefined;
+  /** Storage autoscaling ceiling in GB, RDS only */
+  maxAllocatedStorage?: number | null | undefined;
+  /** Serverless only, in steps of 0.5 */
+  maxCapacity?: number | null | undefined;
+  /** Serverless only, in steps of 0.5 */
+  minCapacity?: number | null | undefined;
+  performanceInsightsEnabled?: boolean | null | undefined;
+  /** Serverless with a minimum capacity of 0 only, 300 to 86400 */
+  secondsUntilAutoPause?: number | null | undefined;
+  storageEncrypted?: boolean | null | undefined;
+  /** gp3, io1 or io2, RDS only */
+  storageType?: string | null | undefined;
+  /** Master username. Defaults to the slug. */
+  username?: string | null | undefined;
+};
+
+/** EFS performance mode */
+export type AwsEfsPerformanceModeEnum =
+  | 'GENERAL_PURPOSE'
+  | 'MAX_IO';
+
+/** EFS throughput mode */
+export type AwsEfsThroughputModeEnum =
+  | 'BURSTING'
+  | 'ELASTIC'
+  | 'PROVISIONED';
+
+/** Settings only EFS filesystems have */
+export type AwsFilesystemSettingsInput = {
+  /** Default: true */
+  encrypted?: boolean | null | undefined;
+  /** KMS key ARN for encryption */
+  kmsKeyId?: string | null | undefined;
+  /** Default: generalPurpose */
+  performanceMode?: AwsEfsPerformanceModeEnum | null | undefined;
+  /** MiB/s, provisioned throughput only */
+  provisionedThroughputMibps?: number | null | undefined;
+  /** Default: elastic */
+  throughputMode?: AwsEfsThroughputModeEnum | null | undefined;
+};
+
+/** Which EC2 instances a managed instances capacity provider may launch */
+export type AwsInstanceRequirementsInput = {
+  /** e.g. c5.* or m5.large */
+  allowedInstanceTypes?: Array<string> | null | undefined;
+  burstablePerformance?: AwsBurstablePerformanceEnum | null | undefined;
+  /** arm64 or x86_64 */
+  cpuArchitecture?: string | null | undefined;
+  /** e.g. amazon-web-services, intel, amd */
+  cpuManufacturers?: Array<string> | null | undefined;
+  memoryMib?: IntRangeInput | null | undefined;
+  vcpuCount?: IntRangeInput | null | undefined;
+};
+
+/** Load balancer settings for an AWS cloud account */
+export type AwsLoadBalancerSettingsInput = {
+  /** Application load balancers only: response when no route matches */
+  defaultAction?: AwsAlbDefaultActionInput | null | undefined;
+  /** Application load balancers only: ACM certificate for HTTPS traffic */
+  defaultSslCertificateArn?: string | null | undefined;
+};
+
+/** NAT gateways an AWS network gets: none, one, or one per availability zone */
+export type AwsNatGatewayOptionEnum =
+  | 'NONE'
+  | 'PER_AZ'
+  | 'SINGLE';
+
+/** Network settings only AWS has */
+export type AwsNetworkSettingsInput = {
+  /** Defaults to true */
+  enableInternetAccess?: boolean | null | undefined;
+  /** Defaults to SINGLE with internet access and NONE without */
+  natGatewayOption?: AwsNatGatewayOptionEnum | null | undefined;
 };
 
 /** Status of a bastion host */
@@ -66,7 +243,7 @@ export type CliTaskOutputsInput = {
   artifactUpload?: ArtifactUploadCliOutputsInput | null | undefined;
   containerPush?: ContainerPushCliOutputsInput | null | undefined;
   localBuild?: LocalBuildCliOutputsInput | null | undefined;
-  s3Upload?: S3UploadCliOutputsInput | null | undefined;
+  objectUpload?: ObjectUploadCliOutputsInput | null | undefined;
 };
 
 /** Supported cloud providers */
@@ -83,10 +260,6 @@ export type ClusterStatusEnum =
   | 'ACTIVE'
   | 'FAILED'
   | 'PENDING';
-
-/** Type of cluster */
-export type ClusterTypeEnum =
-  | 'ECS';
 
 export type ContainerPushCliOutputsInput = {
   imageUri: string;
@@ -106,58 +279,73 @@ export type CreateBastionInput = {
 };
 
 export type CreateCacheInput = {
+  /** Required when the cloud account is AWS */
+  aws?: AwsCacheSettingsInput | null | undefined;
+  /** Days of backups kept. Defaults to 0 (none). Memcached keeps none. */
+  backupRetentionDays?: number | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** Cache engine */
   engine: CacheEngineEnum;
+  /** Engine version, e.g. 8.0 */
+  engineVersion?: string | null | undefined;
   /** User-friendly name */
   name: string;
   /** Network ID - required for all caches */
   networkId: string;
-  /** Provider-specific configuration including region and deployment mode */
-  providerData?: Record<string, unknown> | null | undefined;
+  /** Node size. Leave out for a serverless cache. */
+  size?: string | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
 };
 
 export type CreateCertificateInput = {
   additionalDomains?: Array<string> | null | undefined;
+  /** Required when the cloud account is AWS */
+  aws?: AwsCertificateSettingsInput | null | undefined;
   cloudAccountId: string;
   domainId?: string | null | undefined;
   primaryDomain: string;
-  regions: Array<string>;
 };
 
 export type CreateClusterInput = {
+  /** Required when the cloud account is AWS */
+  aws?: AwsClusterSettingsInput | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
   /** Network ID - required for managed instances */
   networkId?: string | null | undefined;
-  /** Provider-specific configuration including capacity providers */
-  providerData?: Record<string, unknown> | null | undefined;
-  /** AWS region for the cluster */
   region: string;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
-  /** Cluster type */
-  type: ClusterTypeEnum;
 };
 
+/** A new database server. Send the settings section for the cloud account it runs in. */
 export type CreateDatabaseInput = {
+  aws?: AwsDatabaseSettingsInput | null | undefined;
+  /** Days of automatic backups. Defaults to 7. */
+  backupRetentionDays?: number | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** Database engine */
   engine: DatabaseEngineEnum;
+  engineVersion?: string | null | undefined;
+  /** Keep a standby copy in a second zone */
+  highAvailability?: boolean | null | undefined;
   /** User-friendly name */
   name: string;
   /** Network ID - required for all databases */
   networkId: string;
-  /** Provider-specific configuration including region and deployment mode */
-  providerData?: Record<string, unknown> | null | undefined;
+  /** Reachable from outside the network */
+  publiclyAccessible?: boolean | null | undefined;
+  /** Machine size. Not used when the server scales on its own. */
+  size?: string | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
+  /** Storage in GB */
+  storageGb?: number | null | undefined;
 };
 
 export type CreateDomainInput = {
@@ -177,29 +365,28 @@ export type CreateEnvironmentInput = {
 };
 
 export type CreateFilesystemInput = {
+  /** Required when the cloud account is AWS */
+  aws?: AwsFilesystemSettingsInput | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
-  /** Network ID - required for all filesystems */
+  /** Network ID. The filesystem takes the network's region. */
   networkId: string;
-  /** Provider-specific configuration including region */
-  providerData?: Record<string, unknown> | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
-  /** Filesystem type (efs, filestore) */
-  type: FilesystemTypeEnum;
 };
 
 export type CreateLoadBalancerInput = {
+  aws?: AwsLoadBalancerSettingsInput | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
-  /** Network ID - required for AWS ALB */
+  /** Network ID. Required for application load balancers. */
   networkId?: string | null | undefined;
-  /** Provider-specific configuration including region */
-  providerData?: Record<string, unknown> | null | undefined;
+  /** Required for regional types without a network. A load balancer in a network takes the network's region. */
+  region?: string | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
   /** Load balancer type */
@@ -207,17 +394,21 @@ export type CreateLoadBalancerInput = {
 };
 
 export type CreateNetworkInput = {
+  /** Only for an AWS cloud account */
+  aws?: AwsNetworkSettingsInput | null | undefined;
+  /** Address range, e.g. 10.0.0.0/16 */
+  cidr: string;
   cloudAccountId: string;
+  /** When true, databases and caches get no network-wide ingress. Defaults to false. */
+  leastPrivilegeMode?: boolean | null | undefined;
   name: string;
-  providerConfig?: Record<string, unknown> | null | undefined;
   region: string;
   slug: string;
-  subnets?: Record<string, unknown> | null | undefined;
+  subnets: Array<NetworkSubnetInput>;
 };
 
 export type CreateProjectInput = {
-  /** Cloud provider: aws, gcp, or cloudflare */
-  cloudProvider: string;
+  cloudProvider: CloudProviderEnum;
   name: string;
   tag?: string | null | undefined;
 };
@@ -231,8 +422,6 @@ export type CreateSecretInput = {
 
 /** Database engine type */
 export type DatabaseEngineEnum =
-  | 'AURORA_MYSQL'
-  | 'AURORA_POSTGRESQL'
   | 'MARIADB'
   | 'MYSQL'
   | 'POSTGRESQL';
@@ -242,6 +431,11 @@ export type DatabaseStatusEnum =
   | 'ACTIVE'
   | 'FAILED'
   | 'PENDING';
+
+/** IN_PLACE sets a new password on the same user. STAGED (Advanced Deployments) creates the user in the other slot, which the next deploy switches to */
+export type DatabaseUserRotationMode =
+  | 'IN_PLACE'
+  | 'STAGED';
 
 export type DeploymentOptionsInput = {
   /** Delete stale files after upload */
@@ -305,10 +499,10 @@ export type FilesystemStatusEnum =
   | 'FAILED'
   | 'PENDING';
 
-/** Filesystem provider type */
-export type FilesystemTypeEnum =
-  | 'EFS'
-  | 'FILESTORE';
+export type IntRangeInput = {
+  max?: number | null | undefined;
+  min: number;
+};
 
 /** Status of a load balancer */
 export type LoadBalancerStatusEnum =
@@ -329,6 +523,21 @@ export type LocalBuildCliOutputsInput = {
   success: boolean;
 };
 
+export type NetworkSubnetInput = {
+  cidr: string;
+  name: string;
+  type: SubnetTypeEnum;
+  /** Availability zone */
+  zone?: string | null | undefined;
+};
+
+export type ObjectUploadCliOutputsInput = {
+  success: boolean;
+  /** Total bytes uploaded */
+  totalSize: number;
+  uploadedFiles: number;
+};
+
 export type PromoteVersionInput = {
   /** Source version ID to promote from */
   sourceVersionId: string;
@@ -341,13 +550,6 @@ export type ResolveProjectInput = {
   projectId: string;
   variables?: Array<VariableOverrideInput> | null | undefined;
   yaml: string;
-};
-
-export type S3UploadCliOutputsInput = {
-  success: boolean;
-  /** Total bytes uploaded */
-  totalSize: number;
-  uploadedFiles: number;
 };
 
 export type SecretKeyValueInput = {
@@ -380,6 +582,25 @@ export type SubmitManifestInput = {
   force?: boolean | null | undefined;
   /** Step ID that needs the manifest */
   stepId: string;
+};
+
+export type SubnetTypeEnum =
+  | 'PRIVATE'
+  | 'PUBLIC';
+
+/** Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly. */
+export type UpdateDatabaseInput = {
+  aws?: AwsDatabaseSettingsInput | null | undefined;
+  /** Days of automatic backups. 0 turns backups off and deletes existing ones. */
+  backupRetentionDays?: number | null | undefined;
+  /** Keep a standby copy in a second zone */
+  highAvailability?: boolean | null | undefined;
+  /** User-friendly name */
+  name?: string | null | undefined;
+  /** Provisioned servers only. Restarts the server. */
+  size?: string | null | undefined;
+  /** Storage in GB. It can only grow. */
+  storageGb?: number | null | undefined;
 };
 
 export type UpdateSecretInput = {
@@ -442,27 +663,30 @@ export type GetCachesQueryVariables = Exact<{ [key: string]: never; }>;
 export type GetCachesQuery = { caches: Array<{ id: string, name: string, slug: string, engine: CacheEngineEnum, status: CacheStatusEnum, cloudAccountId: string, networkId: string, endpoint: string | null, port: number | null, createdAt: string }> };
 
 export type GetCacheTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
 export type GetCacheTypesQuery = { cacheTypes: Array<{ type: CacheEngineEnum, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, supportsClusterMode: boolean, requiresNetwork: boolean }> };
 
 export type GetCacheEngineVersionsQueryVariables = Exact<{
-  engine?: string | null | undefined;
+  provider: CloudProviderEnum;
+  engine?: CacheEngineEnum | null | undefined;
+  region?: string | null | undefined;
+  aws?: AwsCacheCatalogFilterInput | null | undefined;
+}>;
+
+
+export type GetCacheEngineVersionsQuery = { cacheEngineVersions: Array<{ engine: CacheEngineEnum, version: string, providerData: Record<string, unknown> }> };
+
+export type GetCacheSizesQueryVariables = Exact<{
+  provider: CloudProviderEnum;
+  engine?: CacheEngineEnum | null | undefined;
   region?: string | null | undefined;
 }>;
 
 
-export type GetCacheEngineVersionsQuery = { cacheEngineVersions: Array<{ engine: string, version: string, family: string, supportedModes: Array<string> }> };
-
-export type GetCacheNodeTypesQueryVariables = Exact<{
-  engine?: string | null | undefined;
-  region?: string | null | undefined;
-}>;
-
-
-export type GetCacheNodeTypesQuery = { cacheNodeTypes: Array<{ nodeType: string, family: string, size: string, memoryGiB: number, vcpu: number }> };
+export type GetCacheSizesQuery = { cacheSizes: Array<{ size: string, family: string, memoryGiB: number, vcpu: number }> };
 
 export type CreateCacheMutationVariables = Exact<{
   input: CreateCacheInput;
@@ -476,7 +700,7 @@ export type GetCacheTunnelBastionQueryVariables = Exact<{
 }>;
 
 
-export type GetCacheTunnelBastionQuery = { bastion: { id: string, instanceId: string | null, publicIp: string | null } | null };
+export type GetCacheTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
 
 export type GetCloudsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -486,21 +710,21 @@ export type GetCloudsQuery = { clouds: Array<{ id: string, name: string, provide
 export type GetClustersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetClustersQuery = { clusters: Array<{ id: string, name: string, slug: string, type: ClusterTypeEnum, status: ClusterStatusEnum, region: string, cloudAccountId: string, createdAt: string }> };
+export type GetClustersQuery = { clusters: Array<{ id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string, cloudAccountId: string, createdAt: string }> };
 
 export type GetClusterTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
-export type GetClusterTypesQuery = { clusterTypes: Array<{ type: ClusterTypeEnum, displayName: string, provider: string, description: string, guidance: string | null }> };
+export type GetClusterTypesQuery = { clusterTypes: Array<{ type: string, displayName: string, provider: string, description: string, guidance: string | null }> };
 
 export type CreateClusterMutationVariables = Exact<{
   input: CreateClusterInput;
 }>;
 
 
-export type CreateClusterMutation = { createCluster: { success: boolean, message: string | null, deploymentId: string | null, cluster: { id: string, name: string, slug: string, type: ClusterTypeEnum, status: ClusterStatusEnum, region: string } | null } };
+export type CreateClusterMutation = { createCluster: { success: boolean, message: string | null, deploymentId: string | null, cluster: { id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string } | null } };
 
 export type RunConsoleCommandMutationVariables = Exact<{
   projectId: string;
@@ -516,7 +740,7 @@ export type RunConsoleCommandMutation = { runConsoleCommand: { success: boolean,
 export type GetDatabasesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetDatabasesQuery = { databases: Array<{ id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum, cloudAccountId: string, networkId: string, endpoint: string | null, port: number | null, publiclyAccessible: boolean | null, createdAt: string }> };
+export type GetDatabasesQuery = { databases: Array<{ id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum, cloudAccountId: string, networkId: string, provider: string, endpoint: string | null, port: number | null, publiclyAccessible: boolean, createdAt: string }> };
 
 export type GetDatabaseCredentialsQueryVariables = Exact<{
   id: string;
@@ -526,28 +750,31 @@ export type GetDatabaseCredentialsQueryVariables = Exact<{
 export type GetDatabaseCredentialsQuery = { databaseCredentials: { success: boolean, message: string | null, username: string | null, password: string | null } };
 
 export type GetDatabaseTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
-export type GetDatabaseTypesQuery = { databaseTypes: Array<{ type: DatabaseEngineEnum, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, requiresNetwork: boolean }> };
+export type GetDatabaseTypesQuery = { databaseTypes: Array<{ engine: DatabaseEngineEnum, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, requiresNetwork: boolean, providerData: Record<string, unknown> }> };
 
 export type GetDatabaseEngineVersionsQueryVariables = Exact<{
-  engine?: string | null | undefined;
-  deploymentMode?: string | null | undefined;
+  provider: CloudProviderEnum;
+  engine?: DatabaseEngineEnum | null | undefined;
   region?: string | null | undefined;
+  aws?: AwsDatabaseCatalogFilterInput | null | undefined;
 }>;
 
 
-export type GetDatabaseEngineVersionsQuery = { databaseEngineVersions: Array<{ engine: string, version: string, family: string, description: string, supportedModes: Array<string> }> };
+export type GetDatabaseEngineVersionsQuery = { databaseEngineVersions: Array<{ engine: DatabaseEngineEnum, version: string, description: string, providerData: Record<string, unknown> }> };
 
-export type GetDatabaseInstanceClassesQueryVariables = Exact<{
-  engine?: string | null | undefined;
+export type GetDatabaseSizesQueryVariables = Exact<{
+  provider: CloudProviderEnum;
+  engine?: DatabaseEngineEnum | null | undefined;
   region?: string | null | undefined;
+  aws?: AwsDatabaseCatalogFilterInput | null | undefined;
 }>;
 
 
-export type GetDatabaseInstanceClassesQuery = { databaseInstanceClasses: Array<{ instanceClass: string, family: string, size: string, vcpu: number, memoryMb: number }> };
+export type GetDatabaseSizesQuery = { databaseSizes: Array<{ size: string, family: string, vcpu: number, memoryMb: number }> };
 
 export type CreateDatabaseMutationVariables = Exact<{
   input: CreateDatabaseInput;
@@ -556,12 +783,51 @@ export type CreateDatabaseMutationVariables = Exact<{
 
 export type CreateDatabaseMutation = { createDatabase: { success: boolean, message: string | null, deploymentId: string | null, database: { id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum } | null } };
 
+export type GetDatabaseServiceUsersQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetDatabaseServiceUsersQuery = { databaseServiceUsers: Array<{ id: string, databaseName: string, username: string, auth: string, access: string, status: string, serviceName: string, environmentSlug: string }> };
+
+export type AdoptDatabaseMutationVariables = Exact<{
+  id: string;
+  database: string;
+}>;
+
+
+export type AdoptDatabaseMutation = { adoptDatabase: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type RotateDatabaseServiceUserMutationVariables = Exact<{
+  id: string;
+  serviceUserId: string;
+  mode?: DatabaseUserRotationMode | null | undefined;
+}>;
+
+
+export type RotateDatabaseServiceUserMutation = { rotateDatabaseServiceUser: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type UpdateDatabaseMutationVariables = Exact<{
+  id: string;
+  input: UpdateDatabaseInput;
+}>;
+
+
+export type UpdateDatabaseMutation = { updateDatabase: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type GetDatabaseOperationQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetDatabaseOperationQuery = { deployment: { status: DeploymentStatus, lastMessage: string | null } | null };
+
 export type GetDatabaseTunnelBastionQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetDatabaseTunnelBastionQuery = { bastion: { id: string, instanceId: string | null, publicIp: string | null } | null };
+export type GetDatabaseTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
 
 export type GetDeploymentQueryVariables = Exact<{
   id: string;
@@ -633,19 +899,19 @@ export type CreateEnvironmentMutation = { createEnvironment: { success: boolean,
 export type GetFilesystemsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetFilesystemsQuery = { filesystems: Array<{ id: string, name: string, slug: string, type: FilesystemTypeEnum, status: FilesystemStatusEnum, cloudAccountId: string, networkId: string, createdAt: string }> };
+export type GetFilesystemsQuery = { filesystems: Array<{ id: string, name: string, slug: string, provider: string, region: string, status: FilesystemStatusEnum, cloudAccountId: string, networkId: string, createdAt: string }> };
 
 export type GetFilesystemNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetFilesystemNetworksQuery = { networks: Array<{ id: string, name: string, region: string, cloudAccountId: string }> };
+export type GetFilesystemNetworksQuery = { networks: Array<{ id: string, name: string, region: string, provider: string, cloudAccountId: string }> };
 
 export type CreateFilesystemMutationVariables = Exact<{
   input: CreateFilesystemInput;
 }>;
 
 
-export type CreateFilesystemMutation = { createFilesystem: { success: boolean, message: string | null, filesystem: { id: string, name: string, slug: string, type: FilesystemTypeEnum, status: FilesystemStatusEnum } | null } };
+export type CreateFilesystemMutation = { createFilesystem: { success: boolean, message: string | null, filesystem: { id: string, name: string, slug: string, provider: string, status: FilesystemStatusEnum } | null } };
 
 export type CreateVersionMutationVariables = Exact<{
   config: Record<string, unknown>;
@@ -686,10 +952,10 @@ export type ClaimStepMutationVariables = Exact<{
 
 
 export type ClaimStepMutation = { claimStep: { success: boolean, message: string | null, step: { id: string, stepType: string, cliTask: string | null, cliInputs:
-        | { __typename: 'ArtifactUploadCliInputs', stepId: string, bucketName: string, s3Key: string, region: string, accessKeyId: string | null, secretAccessKey: string | null, sessionToken: string | null, sourcePath: string, excludePatterns: Array<string> | null }
-        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string, ecrAuthToken: string | null, ecrEndpoint: string }
+        | { __typename: 'ArtifactUploadCliInputs', stepId: string, provider: string, bucketName: string, objectKey: string, region: string, maxArtifactBytes: number, sourcePath: string, excludePatterns: Array<string> | null, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null }
+        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string, registryEndpoint: string, registryUsername: string, registryPassword: string | null }
         | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, buildArgs: Array<{ name: string, value: string }> | null }
-        | { __typename: 'S3UploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null }
+        | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null }
        | null } | null } };
 
 export type CompleteCliStepMutationVariables = Exact<{
@@ -733,10 +999,10 @@ export type VersionDnsRecordsQuery = { versionDnsRecords: Array<{ hostname: stri
 export type GetLoadBalancersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
+export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, region: string | null, endpoint: string | null, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
 
 export type GetLoadBalancerTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
@@ -823,13 +1089,6 @@ export type GetPromoteTargetEnvironmentsQueryVariables = Exact<{
 
 
 export type GetPromoteTargetEnvironmentsQuery = { environments: Array<{ id: string, name: string, slug: string }> };
-
-export type GetCloudRegionsQueryVariables = Exact<{
-  provider?: string | null | undefined;
-}>;
-
-
-export type GetCloudRegionsQuery = { cloudRegions: Array<{ code: string, name: string }> };
 
 export type TriggerRerouteMutationVariables = Exact<{
   config: Record<string, unknown>;
@@ -921,28 +1180,28 @@ export type GetBastionsQueryVariables = Exact<{
 }>;
 
 
-export type GetBastionsQuery = { bastions: Array<{ slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, instanceId: string | null, publicIp: string | null, createdAt: string }> };
+export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string }> };
 
 export type GetBastionQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetBastionQuery = { bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, instanceId: string | null, publicIp: string | null, createdAt: string } | null };
+export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string } | null };
 
 export type GetBastionPrivateKeyQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetBastionPrivateKeyQuery = { bastionPrivateKey: { success: boolean, message: string | null, privateKey: string | null, hostPublicKey: string | null, hostKeyFingerprint: string | null } };
+export type GetBastionPrivateKeyQuery = { bastionPrivateKey: { success: boolean, message: string | null, privateKey: string | null, sshUser: string | null, hostPublicKey: string | null, hostKeyFingerprint: string | null } };
 
 export type CreateBastionMutationVariables = Exact<{
   input: CreateBastionInput;
 }>;
 
 
-export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, instanceId: string | null, publicIp: string | null } | null } };
+export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null } | null } };
 
 export type DestroyBastionMutationVariables = Exact<{
   slug: string;
@@ -996,7 +1255,7 @@ export type GetDomainChoicesQueryVariables = Exact<{ [key: string]: never; }>;
 export type GetDomainChoicesQuery = { domains: Array<{ id: string, name: string }> };
 
 export type GetCloudRegionChoicesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
@@ -1025,5 +1284,5 @@ export type GetStepForUploadQuery = { deploymentStep: { id: string, status: Depl
       | { __typename: 'ArtifactUploadCliInputs' }
       | { __typename: 'ContainerPushCliInputs' }
       | { __typename: 'LocalBuildCliInputs' }
-      | { __typename: 'S3UploadCliInputs', uploadUrls: { store: Array<{ path: string, s3Key: string, url: string, contentType: string }> } | null }
+      | { __typename: 'ObjectUploadCliInputs', uploadUrls: { store: Array<{ path: string, key: string, url: string, contentType: string }> } | null }
      | null } | null };

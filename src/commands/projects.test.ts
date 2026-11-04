@@ -214,7 +214,7 @@ describe('projects command', () => {
       expect(select).not.toHaveBeenCalled()
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('mutation CreateProject')
       expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
-        input: { name: 'Storefront', cloudProvider: 'aws', tag: 'ecommerce' },
+        input: { name: 'Storefront', cloudProvider: 'AWS', tag: 'ecommerce' },
       })
       expect(printed()).toContain('Project created: Storefront (storefront)')
       expect(printed()).toContain(`ID: ${project.id}`)
@@ -222,7 +222,7 @@ describe('projects command', () => {
 
     it('prompts for missing values and drops a skipped tag', async () => {
       input.mockResolvedValueOnce('Edge App').mockResolvedValueOnce('')
-      select.mockResolvedValueOnce('cloudflare')
+      select.mockResolvedValueOnce('CLOUDFLARE')
       graphqlRequest.mockResolvedValueOnce({ createProject: { success: true, project } })
 
       await run(['create'])
@@ -232,7 +232,7 @@ describe('projects command', () => {
       expect(validate('x')).toBe(true)
       expect(select).toHaveBeenCalledWith(expect.objectContaining({ message: 'Cloud provider:' }))
       expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
-        input: { name: 'Edge App', cloudProvider: 'cloudflare', tag: undefined },
+        input: { name: 'Edge App', cloudProvider: 'CLOUDFLARE', tag: undefined },
       })
     })
 

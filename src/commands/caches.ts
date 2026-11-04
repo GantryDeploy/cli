@@ -3,13 +3,14 @@ import type { Command } from 'commander'
 import ora from 'ora'
 
 import type {
+  CloudProviderEnum,
   CreateCacheMutation,
   CreateCacheMutationVariables,
   GetCacheEngineVersionsQuery,
   GetCacheEngineVersionsQueryVariables,
-  GetCacheNodeTypesQuery,
-  GetCacheNodeTypesQueryVariables,
   GetCachesQuery,
+  GetCacheSizesQuery,
+  GetCacheSizesQueryVariables,
   GetCachesQueryVariables,
   GetCacheTunnelBastionQuery,
   GetCacheTunnelBastionQueryVariables,
@@ -23,8 +24,15 @@ import {
   selectBastion,
 } from '../lib/bastion-prompts'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { getDefaultPort, normalizeEngine, toCacheEngineEnum, toCatalogEngine } from '../lib/engine'
-import { selectCloud, selectNetwork } from '../lib/interactive-prompts'
+import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import {
+  awsCacheSettings,
+  awsCatalogFamily,
+  awsOption,
+  toAwsCacheDeploymentMode,
+} from '../lib/clouds/aws'
+import { getDefaultPort, normalizeEngine, toCacheEngineEnum } from '../lib/engine'
+import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { bastionHostId } from '../lib/known-hosts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -58,7 +66,7 @@ const CACHES_QUERY = /* GraphQL */ `
 `
 
 const CACHE_TYPES_QUERY = /* GraphQL */ `
-  query GetCacheTypes($provider: String) {
+  query GetCacheTypes($provider: CloudProviderEnum!) {
     cacheTypes(provider: $provider) {
       type
       displayName
@@ -73,22 +81,25 @@ const CACHE_TYPES_QUERY = /* GraphQL */ `
 `
 
 const CACHE_ENGINE_VERSIONS_QUERY = /* GraphQL */ `
-  query GetCacheEngineVersions($engine: String, $region: String) {
-    cacheEngineVersions(engine: $engine, region: $region) {
+  query GetCacheEngineVersions(
+    $provider: CloudProviderEnum!
+    $engine: CacheEngineEnum
+    $region: String
+    $aws: AwsCacheCatalogFilterInput
+  ) {
+    cacheEngineVersions(provider: $provider, engine: $engine, region: $region, aws: $aws) {
       engine
       version
-      family
-      supportedModes
+      providerData
     }
   }
 `
 
-const CACHE_NODE_TYPES_QUERY = /* GraphQL */ `
-  query GetCacheNodeTypes($engine: String, $region: String) {
-    cacheNodeTypes(engine: $engine, region: $region) {
-      nodeType
-      family
+const CACHE_SIZES_QUERY = /* GraphQL */ `
+  query GetCacheSizes($provider: CloudProviderEnum!, $engine: CacheEngineEnum, $region: String) {
+    cacheSizes(provider: $provider, engine: $engine, region: $region) {
       size
+      family
       memoryGiB
       vcpu
     }
@@ -112,23 +123,25 @@ const CREATE_CACHE_MUTATION = /* GraphQL */ `
   }
 `
 
-async function fetchCacheEngineVersions(filters: {
-  engine?: string
-  region?: string
-  mode?: string
-}): Promise<CacheEngineVersion[]> {
-  const variables: GetCacheEngineVersionsQueryVariables = {}
-  if (filters.engine) variables.engine = toCatalogEngine(filters.engine)
+async function fetchCacheEngineVersions(
+  provider: CloudProviderEnum,
+  filters: { engine?: string; region?: string; awsMode?: string }
+): Promise<CacheEngineVersion[]> {
+  const variables: GetCacheEngineVersionsQueryVariables = { provider }
+  if (filters.engine) variables.engine = toCacheEngineEnum(filters.engine)
   if (filters.region) variables.region = filters.region
+  if (filters.awsMode) variables.aws = { deploymentMode: toAwsCacheDeploymentMode(filters.awsMode) }
 
   const data = await graphqlRequest<
     GetCacheEngineVersionsQuery,
     GetCacheEngineVersionsQueryVariables
   >(CACHE_ENGINE_VERSIONS_QUERY, variables)
+  return data.cacheEngineVersions
+}
 
-  const { mode } = filters
-  if (!mode) return data.cacheEngineVersions
-  return data.cacheEngineVersions.filter((v) => v.supportedModes.includes(mode))
+function versionLabel(version: CacheEngineVersion): string {
+  const family = awsCatalogFamily(version.providerData)
+  return family ? `${version.version} (${family})` : version.version
 }
 
 async function findCache(slugOrId: string): Promise<Cache | undefined> {
@@ -176,15 +189,23 @@ export function registerCachesCommand(program: Command): void {
 
   cachesCmd
     .command('engines')
-    .description('List available cache engines')
-    .action(async () => {
+    .description('List the cache engines a cloud offers')
+    .option('--cloud <id>', 'Cloud account ID')
+    .action(async (options: { cloud?: string }) => {
       try {
+        const { provider } = await resolveCloud(options.cloud)
         const data = await graphqlRequest<GetCacheTypesQuery, GetCacheTypesQueryVariables>(
-          CACHE_TYPES_QUERY
+          CACHE_TYPES_QUERY,
+          { provider }
         )
+        if (data.cacheTypes.length === 0) {
+          console.log(unsupportedCloud('caches'))
+          return
+        }
 
+        const aws = isAws(provider)
         const table = createTable({
-          head: ['Engine', 'Name', 'Description', 'Serverless', 'Cluster Mode'],
+          head: ['Engine', 'Name', 'Description', ...(aws ? ['Serverless', 'Cluster Mode'] : [])],
         })
 
         for (const t of data.cacheTypes) {
@@ -192,8 +213,9 @@ export function registerCachesCommand(program: Command): void {
             t.type,
             t.displayName,
             t.description,
-            t.supportsServerless ? 'Yes' : 'No',
-            t.supportsClusterMode ? 'Yes' : 'No',
+            ...(aws
+              ? [t.supportsServerless ? 'Yes' : 'No', t.supportsClusterMode ? 'Yes' : 'No']
+              : []),
           ])
         }
 
@@ -206,61 +228,74 @@ export function registerCachesCommand(program: Command): void {
 
   cachesCmd
     .command('engine-versions')
-    .description('List available cache engine versions')
+    .description('List the cache engine versions a cloud offers')
+    .option('--cloud <id>', 'Cloud account ID')
     .option('--engine <engine>', 'Filter by engine')
     .option('--region <region>', 'Filter by region')
-    .option('--mode <mode>', 'Filter by deployment mode (serverless, node-based)')
-    .action(async (options: { engine?: string; region?: string; mode?: string }) => {
-      try {
-        const versions = await fetchCacheEngineVersions(options)
+    .addOption(
+      awsOption('--aws-mode <mode>', 'Filter by deployment mode: serverless or node-based')
+    )
+    .action(
+      async (options: { cloud?: string; engine?: string; region?: string; awsMode?: string }) => {
+        try {
+          const { provider } = await resolveCloud(options.cloud)
+          const foreign = foreignAwsFlagsMessage(provider, options)
+          if (foreign) {
+            printError(foreign)
+            process.exit(1)
+          }
+          const versions = await fetchCacheEngineVersions(provider, options)
 
-        if (versions.length === 0) {
-          console.log('No engine versions found matching the filters.')
-          return
+          if (versions.length === 0) {
+            console.log('No engine versions found matching the filters.')
+            return
+          }
+
+          const table = createTable({
+            head: ['Engine', 'Version'],
+          })
+
+          for (const v of versions) {
+            table.push([v.engine, versionLabel(v)])
+          }
+
+          console.log(table.toString())
+        } catch (error) {
+          printError(formatApiError(error))
+          process.exit(1)
         }
-
-        const table = createTable({
-          head: ['Engine', 'Version', 'Family', 'Modes'],
-        })
-
-        for (const v of versions) {
-          table.push([v.engine, v.version, v.family, v.supportedModes.join(', ')])
-        }
-
-        console.log(table.toString())
-      } catch (error) {
-        printError(formatApiError(error))
-        process.exit(1)
       }
-    })
+    )
 
   cachesCmd
-    .command('node-types')
-    .description('List available cache node types')
+    .command('sizes')
+    .description('List the cache sizes a cloud offers')
+    .option('--cloud <id>', 'Cloud account ID')
     .option('--engine <engine>', 'Filter by engine')
     .option('--region <region>', 'Filter by region')
-    .action(async (options: { engine?: string; region?: string }) => {
+    .action(async (options: { cloud?: string; engine?: string; region?: string }) => {
       try {
-        const variables: GetCacheNodeTypesQueryVariables = {}
-        if (options.engine) variables.engine = toCatalogEngine(options.engine)
+        const { provider } = await resolveCloud(options.cloud)
+        const variables: GetCacheSizesQueryVariables = { provider }
+        if (options.engine) variables.engine = toCacheEngineEnum(options.engine)
         if (options.region) variables.region = options.region
 
-        const data = await graphqlRequest<GetCacheNodeTypesQuery, GetCacheNodeTypesQueryVariables>(
-          CACHE_NODE_TYPES_QUERY,
+        const data = await graphqlRequest<GetCacheSizesQuery, GetCacheSizesQueryVariables>(
+          CACHE_SIZES_QUERY,
           variables
         )
 
-        if (data.cacheNodeTypes.length === 0) {
-          console.log('No node types found matching the filters.')
+        if (data.cacheSizes.length === 0) {
+          console.log('No sizes found matching the filters.')
           return
         }
 
         const table = createTable({
-          head: ['Node Type', 'Family', 'Size', 'Memory (GiB)', 'vCPU'],
+          head: ['Size', 'Family', 'Memory (GiB)', 'vCPU'],
         })
 
-        for (const nt of data.cacheNodeTypes) {
-          table.push([nt.nodeType, nt.family, nt.size, String(nt.memoryGiB), String(nt.vcpu)])
+        for (const s of data.cacheSizes) {
+          table.push([s.size, s.family, String(s.memoryGiB), String(s.vcpu)])
         }
 
         console.log(table.toString())
@@ -278,10 +313,10 @@ export function registerCachesCommand(program: Command): void {
     .option('--name <name>', 'Cache name')
     .option('--slug <slug>', 'Cache slug (auto-generated from name if omitted)')
     .option('--engine <engine>', 'Cache engine (see "gantry caches engines")')
-    .option('--node-type <type>', 'Node type (see "gantry caches node-types")')
+    .option('--size <size>', 'Cache size (see "gantry caches sizes")')
     .option('--engine-version <version>', 'Engine version (see "gantry caches engine-versions")')
-    .option('--serverless', 'Use serverless mode')
     .option('--backup-days <days>', 'Days of backups kept (Valkey and Redis only). Default 0.')
+    .addOption(awsOption('--aws-serverless', 'Use ElastiCache Serverless'))
     .action(
       async (options: {
         cloud?: string
@@ -289,10 +324,10 @@ export function registerCachesCommand(program: Command): void {
         name?: string
         slug?: string
         engine?: string
-        nodeType?: string
+        size?: string
         engineVersion?: string
-        serverless?: boolean
         backupDays?: string
+        awsServerless?: boolean
       }) => {
         try {
           const backupRetentionDays =
@@ -305,8 +340,23 @@ export function registerCachesCommand(program: Command): void {
             process.exit(1)
           }
 
-          const cloudAccountId = options.cloud ?? (await selectCloud())
-          const networkId = options.network ?? (await selectNetwork(cloudAccountId))
+          const requestedEngine = options.engine ? toCacheEngineEnum(options.engine) : undefined
+          const cloud = await resolveCloud(options.cloud)
+          const foreign = foreignAwsFlagsMessage(cloud.provider, options)
+          if (foreign) {
+            printError(foreign)
+            process.exit(1)
+          }
+          const { cacheTypes } = await graphqlRequest<
+            GetCacheTypesQuery,
+            GetCacheTypesQueryVariables
+          >(CACHE_TYPES_QUERY, { provider: cloud.provider })
+          if (cacheTypes.length === 0 || !isAws(cloud.provider)) {
+            printError(unsupportedCloud('caches'))
+            process.exit(1)
+          }
+
+          const networkId = options.network ?? (await selectNetwork(cloud.id))
           if (!networkId) {
             printError('A network is required to create a cache.')
             process.exit(1)
@@ -319,74 +369,62 @@ export function registerCachesCommand(program: Command): void {
               validate: (v) => (v.trim().length > 0 ? true : 'Name is required'),
             }))
 
-          let selectedEngine = options.engine
-          if (!selectedEngine) {
-            const enginesData = await graphqlRequest<
-              GetCacheTypesQuery,
-              GetCacheTypesQueryVariables
-            >(CACHE_TYPES_QUERY)
-
-            selectedEngine = await select({
+          const engine =
+            requestedEngine ??
+            (await select({
               message: 'Cache engine:',
-              choices: enginesData.cacheTypes.map((t) => ({
+              choices: cacheTypes.map((t) => ({
                 name: `${t.displayName} — ${t.description}`,
                 value: t.type,
               })),
-            })
+            }))
+          const engineInfo = cacheTypes.find(
+            (t) => normalizeEngine(t.type) === normalizeEngine(engine)
+          )
+          if (!engineInfo) {
+            printError('That engine is not offered. See "gantry caches engines".')
+            process.exit(1)
           }
-          const engine = toCacheEngineEnum(selectedEngine)
 
-          let useServerless = options.serverless ?? false
-          if (!options.serverless && options.serverless === undefined) {
-            const enginesData = await graphqlRequest<
-              GetCacheTypesQuery,
-              GetCacheTypesQueryVariables
-            >(CACHE_TYPES_QUERY)
-            const engineInfo = enginesData.cacheTypes.find(
-              (t) => normalizeEngine(t.type) === normalizeEngine(engine)
-            )
-            if (engineInfo?.supportsServerless) {
-              useServerless = await select({
-                message: 'Use serverless mode?',
-                choices: [
-                  { name: 'No', value: false },
-                  { name: 'Yes', value: true },
-                ],
-              })
-            }
+          let useServerless = options.awsServerless ?? false
+          if (options.awsServerless === undefined && engineInfo.supportsServerless) {
+            useServerless = await select({
+              message: 'Use serverless mode?',
+              choices: [
+                { name: 'No', value: false },
+                { name: 'Yes', value: true },
+              ],
+            })
           }
 
           let engineVersion = options.engineVersion
           if (!engineVersion) {
-            const versions = await fetchCacheEngineVersions({
+            const versions = await fetchCacheEngineVersions(cloud.provider, {
               engine,
-              mode: useServerless ? 'serverless' : 'node-based',
+              awsMode: useServerless ? 'serverless' : 'node-based',
             })
 
             if (versions.length > 0) {
               engineVersion = await select({
                 message: 'Engine version:',
-                choices: versions.map((v) => ({
-                  name: `${v.version} (${v.family})`,
-                  value: v.version,
-                })),
+                choices: versions.map((v) => ({ name: versionLabel(v), value: v.version })),
               })
             }
           }
 
-          let nodeType = options.nodeType
-          if (!nodeType && !useServerless) {
-            const typesData = await graphqlRequest<
-              GetCacheNodeTypesQuery,
-              GetCacheNodeTypesQueryVariables
-            >(CACHE_NODE_TYPES_QUERY, { engine: toCatalogEngine(engine) })
+          let size = options.size
+          if (!size && !useServerless) {
+            const sizesData = await graphqlRequest<GetCacheSizesQuery, GetCacheSizesQueryVariables>(
+              CACHE_SIZES_QUERY,
+              { provider: cloud.provider, engine }
+            )
 
-            if (typesData.cacheNodeTypes.length > 0) {
-              nodeType = await select({
-                message: 'Node type:',
-                choices: typesData.cacheNodeTypes.map((nt) => ({
-                  name: `${nt.nodeType} — ${String(nt.vcpu)} vCPU, ${String(nt.memoryGiB)} GiB RAM`,
-                  value: nt.nodeType,
+            if (sizesData.cacheSizes.length > 0) {
+              size = await select({
+                message: 'Cache size:',
+                choices: sizesData.cacheSizes.map((s) => ({
+                  name: `${s.size} — ${String(s.vcpu)} vCPU, ${String(s.memoryGiB)} GiB RAM`,
+                  value: s.size,
                 })),
               })
             }
@@ -398,15 +436,15 @@ export function registerCachesCommand(program: Command): void {
             CREATE_CACHE_MUTATION,
             {
               input: {
-                cloudAccountId,
+                cloudAccountId: cloud.id,
                 networkId,
                 name,
                 slug,
                 engine,
                 ...(engineVersion ? { engineVersion } : {}),
-                ...(nodeType ? { size: nodeType } : {}),
+                ...(size ? { size } : {}),
                 ...(backupRetentionDays !== undefined ? { backupRetentionDays } : {}),
-                aws: { deploymentMode: useServerless ? 'SERVERLESS' : 'NODE_BASED' },
+                aws: awsCacheSettings(useServerless),
               },
             }
           )
@@ -532,7 +570,6 @@ export function registerCachesCommand(program: Command): void {
               query GetCacheTunnelBastion($slug: String!) {
                 bastion(slug: $slug) {
                   id
-                  instanceId
                   publicIp
                 }
               }
@@ -551,8 +588,9 @@ export function registerCachesCommand(program: Command): void {
 
           const tunnel = await openSshTunnel({
             bastionHost: bastionIp,
+            bastionUsername: credentials.sshUser,
             hostKey: {
-              hostId: bastionHostId(bastion),
+              hostId: bastionHostId({ id: bastion.id, publicIp: bastionIp }),
               label: bastionSlug,
               expectedFingerprint: credentials.hostKeyFingerprint,
               trustHostKey: options?.trustHostKey,

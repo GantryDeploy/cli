@@ -5,16 +5,27 @@ import type { MockInstance } from 'vitest'
 const graphqlRequest = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
 const select = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectDomain = vi.hoisted(() => vi.fn())
-const selectRegions = vi.hoisted(() => vi.fn())
+const checkbox = vi.hoisted(() => vi.fn())
+const fetchRegions = vi.hoisted(() =>
+  vi.fn(() =>
+    Promise.resolve([
+      { code: 'us-east-1', name: 'US East (N. Virginia)' },
+      { code: 'us-west-2', name: 'US West (Oregon)' },
+      { code: 'eu-west-1', name: 'Europe (Ireland)' },
+    ])
+  )
+)
 
-vi.mock('@inquirer/prompts', () => ({ input, select }))
+vi.mock('@inquirer/prompts', () => ({ checkbox, input, select }))
 vi.mock('../lib/client', () => ({
   formatApiError: (error: unknown) => (error instanceof Error ? error.message : 'API error'),
   graphqlRequest,
 }))
-vi.mock('../lib/interactive-prompts', () => ({ selectCloud, selectDomain, selectRegions }))
+vi.mock('../lib/interactive-prompts', () => ({ fetchRegions, resolveCloud, selectDomain }))
 
 const { registerDomainsCommand } = await import('./domains')
 
@@ -191,7 +202,7 @@ describe('domains command', () => {
         '--request-cert',
         '--cloud',
         'cloud_aws_1',
-        '--regions',
+        '--aws-regions',
         'us-east-1, eu-west-1',
         '--primary-domain',
         '*.example.com',
@@ -201,15 +212,15 @@ describe('domains command', () => {
 
       expect(select).not.toHaveBeenCalled()
       expect(input).not.toHaveBeenCalled()
-      expect(selectCloud).not.toHaveBeenCalled()
-      expect(selectRegions).not.toHaveBeenCalled()
+      expect(resolveCloud).toHaveBeenCalledWith(expect.any(String))
+      expect(checkbox).not.toHaveBeenCalled()
       expect(String(graphqlRequest.mock.calls[1]?.[0])).toContain('mutation CreateCertificate')
       expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
         input: {
           cloudAccountId: 'cloud_aws_1',
           domainId: 'dom_8f2k1',
           primaryDomain: '*.example.com',
-          regions: ['us-east-1', 'eu-west-1'],
+          aws: { regions: ['us-east-1', 'eu-west-1'] },
           additionalDomains: ['example.com', 'www.example.com'],
         },
       })
@@ -223,9 +234,9 @@ describe('domains command', () => {
         .mockResolvedValueOnce({ createDomain: { success: true, domain } })
         .mockResolvedValueOnce({ createCertificate: { success: true, certificate } })
       select.mockResolvedValueOnce(true)
-      selectCloud.mockResolvedValueOnce('cloud_aws_1')
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_aws_1', provider: 'AWS' })
       input.mockResolvedValueOnce('example.com').mockResolvedValueOnce('   ')
-      selectRegions.mockResolvedValueOnce(['us-east-1'])
+      checkbox.mockResolvedValueOnce(['us-east-1'])
 
       await run(['create', '--name', 'example.com'])
 
@@ -239,7 +250,7 @@ describe('domains command', () => {
           cloudAccountId: 'cloud_aws_1',
           domainId: 'dom_8f2k1',
           primaryDomain: 'example.com',
-          regions: ['us-east-1'],
+          aws: { regions: ['us-east-1'] },
         },
       })
     })
@@ -259,7 +270,7 @@ describe('domains command', () => {
         '--request-cert',
         '--cloud',
         'c1',
-        '--regions',
+        '--aws-regions',
         'us-east-1',
       ])
 
@@ -323,7 +334,7 @@ describe('domains command', () => {
           '--request-cert',
           '--cloud',
           'c1',
-          '--regions',
+          '--aws-regions',
           'us-east-1',
           '--primary-domain',
           'example.com',
@@ -360,7 +371,7 @@ describe('domains command', () => {
         'dom_8f2k1',
         '--cloud',
         'cloud_aws_1',
-        '--regions',
+        '--aws-regions',
         'us-east-1',
         '--primary-domain',
         'example.com',
@@ -374,7 +385,7 @@ describe('domains command', () => {
           cloudAccountId: 'cloud_aws_1',
           domainId: 'dom_8f2k1',
           primaryDomain: 'example.com',
-          regions: ['us-east-1'],
+          aws: { regions: ['us-east-1'] },
           additionalDomains: ['*.example.com'],
         },
       })
@@ -395,9 +406,9 @@ describe('domains command', () => {
 
     it('selects the domain, cloud, and regions interactively', async () => {
       selectDomain.mockResolvedValueOnce({ id: 'dom_8f2k1', name: 'example.com' })
-      selectCloud.mockResolvedValueOnce('cloud_aws_1')
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_aws_1', provider: 'AWS' })
       input.mockResolvedValueOnce('example.com').mockResolvedValueOnce('www.example.com')
-      selectRegions.mockResolvedValueOnce(['us-west-2'])
+      checkbox.mockResolvedValueOnce(['us-west-2'])
       graphqlRequest.mockResolvedValueOnce({ createCertificate: { success: true, certificate } })
 
       await run(['request-cert'])
@@ -414,7 +425,7 @@ describe('domains command', () => {
           cloudAccountId: 'cloud_aws_1',
           domainId: 'dom_8f2k1',
           primaryDomain: 'example.com',
-          regions: ['us-west-2'],
+          aws: { regions: ['us-west-2'] },
           additionalDomains: ['www.example.com'],
         },
       })
@@ -429,7 +440,7 @@ describe('domains command', () => {
         'request-cert',
         '--cloud',
         'c1',
-        '--regions',
+        '--aws-regions',
         'us-east-1',
         '--primary-domain',
         'example.com',
@@ -440,7 +451,7 @@ describe('domains command', () => {
           cloudAccountId: 'c1',
           domainId: 'dom_8f2k1',
           primaryDomain: 'example.com',
-          regions: ['us-east-1'],
+          aws: { regions: ['us-east-1'] },
         },
       })
     })
@@ -486,7 +497,7 @@ describe('domains command', () => {
           'request-cert',
           '--cloud',
           'c1',
-          '--regions',
+          '--aws-regions',
           'us-east-1',
           '--primary-domain',
           'example.com',
@@ -507,7 +518,7 @@ describe('domains command', () => {
           'request-cert',
           '--cloud',
           'c1',
-          '--regions',
+          '--aws-regions',
           'us-east-1',
           '--primary-domain',
           'example.com',
@@ -525,6 +536,36 @@ describe('domains command', () => {
       await expect(run(['request-cert', 'dom_8f2k1'])).rejects.toThrow('process.exit(1)')
 
       expect(printedErrors()).toContain('Forbidden')
+    })
+
+    const certFlags = [
+      'request-cert',
+      'dom_8f2k1',
+      '--primary-domain',
+      'example.com',
+      '--additional-domains',
+      'www.example.com',
+    ]
+
+    it('refuses a cloud that cannot issue certificates without requesting one', async () => {
+      graphqlRequest.mockResolvedValueOnce({ domains: [domain] })
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_cf_1', provider: 'CLOUDFLARE' })
+
+      await expect(run([...certFlags, '--cloud', 'cloud_cf_1'])).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain("This cloud doesn't support certificates yet.")
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses a region the cloud doesn't offer", async () => {
+      graphqlRequest.mockResolvedValueOnce({ domains: [domain] })
+
+      await expect(
+        run([...certFlags, '--cloud', 'cloud_aws_1', '--aws-regions', 'us-east-1,mars-north-1'])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain('Unknown region: mars-north-1.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
   })
 })

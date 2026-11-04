@@ -5,7 +5,9 @@ import type { MockInstance } from 'vitest'
 const graphqlRequest = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
 const select = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectNetwork = vi.hoisted(() => vi.fn())
 const selectRegion = vi.hoisted(() => vi.fn())
 
@@ -14,7 +16,7 @@ vi.mock('../lib/client', () => ({
   formatApiError: (error: unknown) => (error instanceof Error ? error.message : 'API error'),
   graphqlRequest,
 }))
-vi.mock('../lib/interactive-prompts', () => ({ selectCloud, selectNetwork, selectRegion }))
+vi.mock('../lib/interactive-prompts', () => ({ resolveCloud, selectNetwork, selectRegion }))
 
 const { registerClustersCommand } = await import('./clusters')
 
@@ -33,7 +35,7 @@ async function run(args: string[]): Promise<void> {
 const clusterTypes = {
   clusterTypes: [
     {
-      type: 'ECS',
+      type: 'ecs',
       displayName: 'Amazon ECS',
       provider: 'aws',
       description: 'Managed containers\x1b]0;pwned\x07',
@@ -61,8 +63,8 @@ const flags = [
   'cloud_1',
   '--name',
   'Web',
-  '--type',
-  'ECS',
+  '--aws-capacity-provider',
+  'fargate-spot',
   '--region',
   'us-east-1',
   '--network',
@@ -139,16 +141,26 @@ describe('clusters command', () => {
   })
 
   describe('types', () => {
-    it('prints each type with a sanitised description', async () => {
+    it("prints each of the cloud's types with a sanitised description", async () => {
       graphqlRequest.mockResolvedValueOnce(clusterTypes)
 
-      await run(['types'])
+      await run(['types', '--cloud', 'cloud_1'])
 
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetClusterTypes')
+      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ provider: 'AWS' })
       expect(printed()).toContain('Amazon ECS')
       expect(printed()).toContain('AWS')
       expect(printed()).toContain('Managed containers')
       expect(printed()).not.toContain('pwned')
+    })
+
+    it('says when the cloud has no cluster types', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ clusterTypes: [] })
+
+      await run(['types', '--cloud', 'ca_9mx4'])
+
+      expect(printed()).toContain("This cloud doesn't support clusters yet.")
     })
 
     it('prints the API error and exits non-zero', async () => {
@@ -162,21 +174,23 @@ describe('clusters command', () => {
 
   describe('create', () => {
     it('sends every flag without prompting', async () => {
-      graphqlRequest.mockResolvedValueOnce({ createCluster: created })
+      graphqlRequest
+        .mockResolvedValueOnce(clusterTypes)
+        .mockResolvedValueOnce({ createCluster: created })
 
       await run([...flags, '--slug', 'web-prod'])
 
       expect(input).not.toHaveBeenCalled()
       expect(select).not.toHaveBeenCalled()
       expect(selectNetwork).not.toHaveBeenCalled()
-      expect(graphqlRequest).toHaveBeenCalledTimes(1)
-      expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('mutation CreateCluster')
-      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
+      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ provider: 'AWS' })
+      expect(String(graphqlRequest.mock.calls[1]?.[0])).toContain('mutation CreateCluster')
+      expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
         input: {
           cloudAccountId: 'cloud_1',
           name: 'Web',
           slug: 'web-prod',
-          aws: { orchestrator: 'ECS', capacityProviders: [{ type: 'FARGATE' }] },
+          aws: { orchestrator: 'ECS', capacityProviders: [{ type: 'FARGATE_SPOT' }] },
           region: 'us-east-1',
           networkId: 'h4nw8r',
         },
@@ -186,13 +200,13 @@ describe('clusters command', () => {
       expect(printed()).toContain('Deployment: n5qr8w')
     })
 
-    it('prompts for everything, offering cluster types from the API', async () => {
-      selectCloud.mockResolvedValueOnce('cloud_1')
+    it('prompts for everything, using the only cluster type the cloud offers', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_1', provider: 'AWS' })
       input.mockResolvedValueOnce('Worker Pool')
       graphqlRequest
         .mockResolvedValueOnce(clusterTypes)
         .mockResolvedValueOnce({ createCluster: { ...created, deploymentId: undefined } })
-      select.mockResolvedValueOnce('ECS')
+      select.mockResolvedValueOnce('FARGATE')
       selectRegion.mockResolvedValueOnce('ap-southeast-2')
       selectNetwork.mockResolvedValueOnce(undefined)
 
@@ -201,12 +215,9 @@ describe('clusters command', () => {
       const { validate } = input.mock.calls[0]?.[0] as { validate: (v: string) => string | true }
       expect(validate('')).toBe('Name is required')
       expect(validate('w')).toBe(true)
-      expect(select).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: 'Cluster type:',
-          choices: [{ name: 'Amazon ECS — Managed containers', value: 'ECS' }],
-        })
-      )
+      expect(select).toHaveBeenCalledTimes(1)
+      expect(select).toHaveBeenCalledWith(expect.objectContaining({ message: 'Capacity:' }))
+      expect(selectRegion).toHaveBeenCalledWith('AWS')
       expect(selectNetwork).toHaveBeenCalledWith('cloud_1', { allowNone: true })
       expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
         input: {
@@ -222,7 +233,7 @@ describe('clusters command', () => {
     })
 
     it('strips terminal escapes from server IDs', async () => {
-      graphqlRequest.mockResolvedValueOnce({
+      graphqlRequest.mockResolvedValueOnce(clusterTypes).mockResolvedValueOnce({
         createCluster: {
           ...created,
           cluster: { ...created.cluster, id: 'clu_3\x1b]0;pwned\x07' },
@@ -239,7 +250,7 @@ describe('clusters command', () => {
     })
 
     it('exits with the server message when creation fails', async () => {
-      graphqlRequest.mockResolvedValueOnce({
+      graphqlRequest.mockResolvedValueOnce(clusterTypes).mockResolvedValueOnce({
         createCluster: { success: false, message: 'Network is not deployed' },
       })
 
@@ -249,7 +260,9 @@ describe('clusters command', () => {
     })
 
     it('falls back to a generic message when no cluster is returned', async () => {
-      graphqlRequest.mockResolvedValueOnce({ createCluster: { success: true } })
+      graphqlRequest
+        .mockResolvedValueOnce(clusterTypes)
+        .mockResolvedValueOnce({ createCluster: { success: true } })
 
       await expect(run(flags)).rejects.toThrow(ExitError)
 
@@ -257,33 +270,51 @@ describe('clusters command', () => {
     })
 
     it('prints the API error when the mutation throws', async () => {
-      graphqlRequest.mockRejectedValueOnce(new Error('Invalid region'))
+      graphqlRequest
+        .mockResolvedValueOnce(clusterTypes)
+        .mockRejectedValueOnce(new Error('Invalid region'))
 
       await expect(run(flags)).rejects.toThrow('process.exit(1)')
 
       expect(printedErrors()).toContain('Invalid region')
     })
 
-    it.each(['EKS', 'ecs'])(
-      'rejects the unknown --type %j without calling the API',
-      async (type) => {
-        await expect(
-          run([
-            'create',
-            '--cloud',
-            'cloud_1',
-            '--name',
-            'Web',
-            '--type',
-            type,
-            '--region',
-            'us-east-1',
-          ])
-        ).rejects.toThrow('process.exit(1)')
+    it('rejects an unknown --aws-capacity-provider before creating anything', async () => {
+      graphqlRequest.mockResolvedValueOnce(clusterTypes)
 
-        expect(graphqlRequest).not.toHaveBeenCalled()
-        expect(printedErrors()).toContain('Unknown cluster type.')
-      }
-    )
+      await expect(
+        run(['create', '--cloud', 'cloud_1', '--name', 'Web', '--aws-capacity-provider', 'ec2'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+      expect(printedErrors()).toContain(
+        '--aws-capacity-provider must be fargate, fargate-spot or managed-instances'
+      )
+    })
+
+    it('refuses a cloud with no cluster types', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ clusterTypes: [] })
+
+      await expect(run(['create', '--cloud', 'ca_9mx4', '--name', 'Web'])).rejects.toThrow(
+        ExitError
+      )
+
+      expect(printedErrors()).toContain("This cloud doesn't support clusters yet.")
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses AWS flags on another cloud', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+
+      await expect(
+        run(['create', '--cloud', 'ca_9mx4', '--aws-capacity-provider', 'fargate'])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain(
+        '--aws-capacity-provider only applies to AWS cloud accounts.'
+      )
+      expect(graphqlRequest).not.toHaveBeenCalled()
+    })
   })
 })

@@ -11,13 +11,15 @@ const input = vi.hoisted(() => vi.fn())
 const isInteractive = vi.hoisted(() => vi.fn(() => true))
 const readFileSync = vi.hoisted(() => vi.fn())
 const readStdin = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectSecret = vi.hoisted(() => vi.fn())
 
 vi.mock('fs', () => ({ readFileSync }))
 vi.mock('@inquirer/prompts', () => ({ confirm, input }))
 vi.mock('../lib/client', () => ({ formatApiError, graphqlRequest }))
-vi.mock('../lib/interactive-prompts', () => ({ selectCloud, selectSecret }))
+vi.mock('../lib/interactive-prompts', () => ({ resolveCloud, selectSecret }))
 vi.mock('../lib/stdin', () => ({ readStdin }))
 vi.mock('../lib/terminal', () => ({ isInteractive }))
 
@@ -194,7 +196,7 @@ describe('secrets command', () => {
 
     expect(printedErrors()).toContain('--cloud and --name are required')
     expect(readStdin).not.toHaveBeenCalled()
-    expect(selectCloud).not.toHaveBeenCalled()
+    expect(resolveCloud).not.toHaveBeenCalled()
   })
 
   it('update --from-file - reads values from stdin and names stdin in parse errors', async () => {
@@ -495,7 +497,7 @@ describe('secrets command', () => {
 
   describe('create', () => {
     it('prompts for the cloud, name and description when not given', async () => {
-      selectCloud.mockResolvedValueOnce('cloud-p')
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud-p', provider: 'AWS' })
       input.mockResolvedValueOnce('prompted-name').mockResolvedValueOnce('')
       graphqlRequest.mockResolvedValueOnce({
         createSecret: {

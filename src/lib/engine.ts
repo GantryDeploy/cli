@@ -44,12 +44,6 @@ export function getDefaultPort(engine: string): number {
   return PORT_MAP[getEngineFamily(engine)]
 }
 
-/** The engine string the server's cache version and node-type catalogs compare against. */
-export function toCatalogEngine(engine: string): string {
-  const normalized = normalizeEngine(engine)
-  return normalized === 'postgresql' ? 'postgres' : normalized
-}
-
 function toEnumMember<T extends string>(
   engine: string,
   members: Record<T, T>,
@@ -75,13 +69,4 @@ export function toCacheEngineEnum(engine: string): CacheEngineEnum {
 
 export function toDatabaseEngineEnum(engine: string): DatabaseEngineEnum {
   return toEnumMember(engine, DATABASE_ENGINES, 'database')
-}
-
-export type AwsDatabaseFlavor = 'rds' | 'aurora'
-
-/** Which AWS database service runs a server: RDS, or Aurora (the only one with serverless). */
-export function toAwsDatabaseFlavor(flavor: string): AwsDatabaseFlavor {
-  const normalized = flavor.trim().toLowerCase()
-  if (normalized === 'rds' || normalized === 'aurora') return normalized
-  throw new Error('Unknown database service. Use rds or aurora.')
 }

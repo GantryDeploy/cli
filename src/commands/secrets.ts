@@ -18,7 +18,7 @@ import type {
   UpdateSecretMutationVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { selectCloud, selectSecret } from '../lib/interactive-prompts'
+import { resolveCloud, selectSecret } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { redact, sanitizeTerminal } from '../lib/sanitize'
 import { readStdin } from '../lib/stdin'
@@ -277,7 +277,7 @@ export function registerSecretsCommand(program: Command): void {
             fail('--from-file - reads values from stdin, so --cloud and --name are required.')
           }
 
-          const cloudAccountId = options.cloud ?? (await selectCloud())
+          const cloudAccountId = options.cloud ?? (await resolveCloud()).id
 
           const name =
             options.name ??

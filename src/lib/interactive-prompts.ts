@@ -1,6 +1,7 @@
-import { checkbox, input, select } from '@inquirer/prompts'
+import { input, select } from '@inquirer/prompts'
 
 import type {
+  CloudProviderEnum,
   GetCloudChoicesQuery,
   GetCloudChoicesQueryVariables,
   GetCloudRegionChoicesQuery,
@@ -18,7 +19,7 @@ import type {
 } from '../generated/graphql'
 
 import { graphqlRequest } from './client'
-import { AWS_REGIONS } from './domain-validation'
+import type { ResolvedCloud } from './clouds'
 import { printError } from './output'
 
 const CLOUDS_QUERY = /* GraphQL */ `
@@ -86,7 +87,7 @@ const DOMAINS_QUERY = /* GraphQL */ `
 `
 
 const CLOUD_REGIONS_QUERY = /* GraphQL */ `
-  query GetCloudRegionChoices($provider: String) {
+  query GetCloudRegionChoices($provider: CloudProviderEnum!) {
     cloudRegions(provider: $provider) {
       code
       name
@@ -94,22 +95,38 @@ const CLOUD_REGIONS_QUERY = /* GraphQL */ `
   }
 `
 
-export async function selectCloud(): Promise<string> {
+/** The cloud account a command runs against, with its cloud, prompting when no id is given. */
+export async function resolveCloud(id?: string): Promise<ResolvedCloud> {
   const data = await graphqlRequest<GetCloudChoicesQuery, GetCloudChoicesQueryVariables>(
     CLOUDS_QUERY
   )
+  if (id !== undefined) {
+    const cloud = data.clouds.find((c) => c.id === id)
+    if (!cloud) {
+      printError('Cloud account not found.')
+      process.exit(1)
+    }
+    return { id: cloud.id, provider: cloud.provider }
+  }
+
   if (data.clouds.length === 0) {
     printError('No cloud accounts found.')
     process.exit(1)
   }
 
-  return select({
+  const selectedId = await select({
     message: 'Select a cloud account:',
     choices: data.clouds.map((c) => ({
-      name: `${c.name} (${c.provider.toUpperCase()})`,
+      name: `${c.name} (${c.provider})`,
       value: c.id,
     })),
   })
+  const cloud = data.clouds.find((c) => c.id === selectedId)
+  if (!cloud) {
+    printError('Cloud account not found.')
+    process.exit(1)
+  }
+  return { id: cloud.id, provider: cloud.provider }
 }
 
 export async function selectNetwork(
@@ -149,48 +166,30 @@ export async function selectNetwork(
   return selected === '__none__' ? undefined : selected
 }
 
-export async function selectRegion(provider?: string): Promise<string> {
+export type CloudRegion = GetCloudRegionChoicesQuery['cloudRegions'][number]
+
+export async function fetchRegions(provider: CloudProviderEnum): Promise<CloudRegion[]> {
   const data = await graphqlRequest<
     GetCloudRegionChoicesQuery,
     GetCloudRegionChoicesQueryVariables
-  >(CLOUD_REGIONS_QUERY, {
-    provider: provider ?? 'aws',
-  })
+  >(CLOUD_REGIONS_QUERY, { provider })
+  return data.cloudRegions
+}
 
-  if (data.cloudRegions.length === 0) {
+export async function selectRegion(provider: CloudProviderEnum): Promise<string> {
+  const regions = await fetchRegions(provider)
+  if (regions.length === 0) {
     printError('No regions found.')
     process.exit(1)
   }
 
   return select({
     message: 'Select a region:',
-    choices: data.cloudRegions.map((r) => ({
+    choices: regions.map((r) => ({
       name: `${r.code} — ${r.name}`,
       value: r.code,
     })),
   })
-}
-
-export async function selectRegions(defaults?: string[]): Promise<string[]> {
-  const defaultSet = new Set(defaults ?? ['us-east-1'])
-
-  const selected = await checkbox({
-    message: 'Select AWS regions:',
-    choices: AWS_REGIONS.map((r) => ({
-      name: `${r.code} — ${r.name}`,
-      value: r.code,
-      checked: defaultSet.has(r.code),
-    })),
-    required: true,
-  })
-
-  if (!selected.includes('us-east-1')) {
-    console.log(
-      '\n  ⚠ CloudFront distributions require certificates in us-east-1. If you plan to use CloudFront CDN, consider including that region.\n'
-    )
-  }
-
-  return selected
 }
 
 export async function selectProject(): Promise<string> {

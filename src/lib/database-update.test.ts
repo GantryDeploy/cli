@@ -11,12 +11,12 @@ describe('buildDatabaseUpdate', () => {
         storage: '200',
         backupDays: '14',
         highAvailability: true,
-        minCapacity: '0.5',
-        maxCapacity: '16',
-        pauseAfter: '900',
-        storageType: 'io2',
-        iops: '3000',
-        performanceInsights: true,
+        awsMinCapacity: '0.5',
+        awsMaxCapacity: '16',
+        awsPauseAfter: '900',
+        awsStorageType: 'io2',
+        awsIops: '3000',
+        awsPerformanceInsights: true,
       })
     ).toEqual({
       ok: true,
@@ -50,7 +50,7 @@ describe('buildDatabaseUpdate', () => {
   it.each([
     [{ size: 'db.m7g.large' }, 'The server restarts briefly'],
     [{ backupDays: '0' }, 'existing automatic backups are deleted'],
-    [{ masterRotation: false }, 'sets a new master password'],
+    [{ awsNoMasterRotation: true }, 'sets a new master password'],
   ])('warns before %o', (options, warning) => {
     const update = buildDatabaseUpdate(options)
 
@@ -59,8 +59,12 @@ describe('buildDatabaseUpdate', () => {
 
   it.each([
     [{ storage: '50.5' }, '--storage must be a whole number.'],
-    [{ maxCapacity: 'lots' }, '--max-capacity must be a number.'],
-    [{ iops: '' }, '--iops must be a whole number.'],
+    [{ awsMaxCapacity: 'lots' }, '--aws-max-capacity must be a number.'],
+    [{ awsIops: '' }, '--aws-iops must be a whole number.'],
+    [
+      { awsPerformanceInsights: true, awsNoPerformanceInsights: true },
+      'Choose either --aws-performance-insights or --aws-no-performance-insights.',
+    ],
   ])('refuses %o', (options, message) => {
     expect(buildDatabaseUpdate(options)).toEqual({ ok: false, message })
   })

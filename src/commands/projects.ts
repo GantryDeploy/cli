@@ -2,6 +2,7 @@ import { input, select } from '@inquirer/prompts'
 import type { Command } from 'commander'
 
 import type {
+  CloudProviderEnum,
   CreateProjectMutation,
   CreateProjectMutationVariables,
   GetProjectEnvironmentsQuery,
@@ -12,6 +13,7 @@ import type {
   GetProjectsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { CLOUD_PROVIDER_LABELS, toCloudProvider } from '../lib/clouds'
 import { createTable, formatDate, printError, printSuccess, styledCell } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -158,7 +160,12 @@ export function registerProjectsCommand(program: Command): void {
     .command('create')
     .description('Create a new project')
     .option('--name <name>', 'Project name')
-    .option('--cloud-provider <provider>', 'Cloud provider (aws, gcp, cloudflare)')
+    .option(
+      '--cloud-provider <provider>',
+      `Cloud provider (${Object.keys(CLOUD_PROVIDER_LABELS)
+        .map((p) => p.toLowerCase())
+        .join(', ')})`
+    )
     .option('--tag <tag>', 'Project tag')
     .action(async (options: { name?: string; cloudProvider?: string; tag?: string }) => {
       try {
@@ -169,16 +176,15 @@ export function registerProjectsCommand(program: Command): void {
             validate: (v) => (v.trim().length > 0 ? true : 'Name is required'),
           }))
 
-        const cloudProvider =
-          options.cloudProvider ??
-          (await select({
-            message: 'Cloud provider:',
-            choices: [
-              { name: 'AWS', value: 'aws' },
-              { name: 'GCP', value: 'gcp' },
-              { name: 'Cloudflare', value: 'cloudflare' },
-            ],
-          }))
+        const cloudProvider = options.cloudProvider
+          ? toCloudProvider(options.cloudProvider)
+          : await select<CloudProviderEnum>({
+              message: 'Cloud provider:',
+              choices: Object.entries(CLOUD_PROVIDER_LABELS).map(([value, name]) => ({
+                name,
+                value: toCloudProvider(value),
+              })),
+            })
 
         const tag =
           (options.tag ??

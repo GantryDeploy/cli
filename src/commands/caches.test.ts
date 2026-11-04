@@ -17,7 +17,10 @@ const bastionMocks = vi.hoisted(() => ({
   selectBastion: vi.fn(),
 }))
 const tunnelMocks = vi.hoisted(() => ({ openDirectTunnel: vi.fn(), openSshTunnel: vi.fn() }))
-const cloudMocks = vi.hoisted(() => ({ selectCloud: vi.fn(), selectNetwork: vi.fn() }))
+const cloudMocks = vi.hoisted(() => ({
+  resolveCloud: vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' })),
+  selectNetwork: vi.fn(),
+}))
 
 vi.mock('ora', () => ({ default: () => ({ ...spinner, start: () => spinner }) }))
 vi.mock('@inquirer/prompts', () => promptMocks)
@@ -38,13 +41,20 @@ class ExitError extends Error {
 }
 
 const versions = [
-  { engine: 'valkey', version: '8.0', family: 'valkey8', supportedModes: ['serverless'] },
-  { engine: 'valkey', version: '7.2', family: 'valkey7', supportedModes: ['node-based'] },
   {
-    engine: 'valkey',
+    engine: 'VALKEY',
+    version: '8.0',
+    providerData: { provider: 'aws', parameterGroupFamily: 'valkey8' },
+  },
+  {
+    engine: 'VALKEY',
+    version: '7.2',
+    providerData: { provider: 'aws', parameterGroupFamily: 'valkey7' },
+  },
+  {
+    engine: 'VALKEY',
     version: '7.1',
-    family: 'valkey7',
-    supportedModes: ['serverless', 'node-based'],
+    providerData: { provider: 'aws', parameterGroupFamily: 'valkey7' },
   },
 ]
 
@@ -82,7 +92,7 @@ const reachableCache = {
 }
 
 const bastion = {
-  bastion: { id: 'r3bq9m', instanceId: 'i-0abc123', publicIp: '203.0.113.10' },
+  bastion: { id: 'r3bq9m', publicIp: '203.0.113.10' },
 }
 
 describe('caches command', () => {
@@ -95,6 +105,9 @@ describe('caches command', () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    cloudMocks.resolveCloud.mockImplementation((id?: string) =>
+      Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' })
+    )
     vi.spyOn(process, 'exit').mockImplementation((code) => {
       throw new ExitError(code as number | undefined)
     })
@@ -107,60 +120,78 @@ describe('caches command', () => {
   })
 
   describe('engine-versions', () => {
-    it('does not send deploymentMode and filters by supportedModes client-side', async () => {
+    it('sends the engine, region and AWS mode and labels each version with its family', async () => {
       graphqlRequest.mockResolvedValueOnce({ cacheEngineVersions: versions })
 
       await run([
         'engine-versions',
+        '--cloud',
+        'cloud-1',
         '--engine',
         'valkey',
         '--region',
         'us-east-1',
-        '--mode',
+        '--aws-mode',
         'serverless',
       ])
 
-      expect(graphqlRequest).toHaveBeenCalledTimes(1)
-      expect(sentQuery(0)).toContain(
-        'query GetCacheEngineVersions($engine: String, $region: String)'
-      )
-      expect(sentQuery(0)).not.toContain('deploymentMode')
-      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ engine: 'valkey', region: 'us-east-1' })
-
+      expect(sentQuery(0)).toContain('query GetCacheEngineVersions')
+      expect(sentVariables(0)).toEqual({
+        provider: 'AWS',
+        engine: 'VALKEY',
+        region: 'us-east-1',
+        aws: { deploymentMode: 'SERVERLESS' },
+      })
       const output = String(logSpy.mock.calls[0]?.[0])
-      expect(output).toContain('8.0')
-      expect(output).toContain('7.1')
-      expect(output).not.toContain('7.2')
+      expect(output).toContain('8.0 (valkey8)')
+      expect(output).toContain('7.1 (valkey7)')
     })
 
-    it('lists every version when no mode is given', async () => {
-      graphqlRequest.mockResolvedValueOnce({ cacheEngineVersions: versions })
+    it('reports when nothing matches', async () => {
+      graphqlRequest.mockResolvedValueOnce({ cacheEngineVersions: [] })
 
-      await run(['engine-versions'])
+      await run(['engine-versions', '--cloud', 'cloud-1'])
 
-      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({})
-      const output = String(logSpy.mock.calls[0]?.[0])
-      expect(output).toContain('8.0')
-      expect(output).toContain('7.2')
-    })
-
-    it('reports when the mode filter leaves nothing', async () => {
-      graphqlRequest.mockResolvedValueOnce({ cacheEngineVersions: versions })
-
-      await run(['engine-versions', '--mode', 'provisioned'])
-
+      expect(sentVariables(0)).toEqual({ provider: 'AWS' })
       expect(logSpy).toHaveBeenCalledWith('No engine versions found matching the filters.')
+    })
+
+    it('refuses an unknown --aws-mode', async () => {
+      await expect(
+        run(['engine-versions', '--cloud', 'cloud-1', '--aws-mode', 'cluster'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('--aws-mode must be serverless or node-based')
+      expect(graphqlRequest).not.toHaveBeenCalled()
+    })
+
+    it('refuses AWS filters on another cloud', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+
+      await expect(
+        run(['engine-versions', '--cloud', 'ca_9mx4', '--aws-mode', 'serverless'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('--aws-mode only applies to AWS cloud accounts.')
     })
   })
 
   describe('create', () => {
-    it('offers only engine versions that support the chosen mode', async () => {
+    const valkey = {
+      type: 'VALKEY',
+      displayName: 'Valkey',
+      description: 'Redis-compatible',
+      supportsServerless: true,
+    }
+
+    it('asks for serverless versions when --aws-serverless is passed', async () => {
       graphqlRequest
+        .mockResolvedValueOnce({ cacheTypes: [valkey] })
         .mockResolvedValueOnce({ cacheEngineVersions: versions })
         .mockResolvedValueOnce({
           createCache: { success: true, cache, deploymentId: 'd3pw8k' },
         })
-      promptMocks.select.mockResolvedValueOnce('7.2')
+      promptMocks.select.mockResolvedValueOnce('8.0')
 
       await run([
         'create',
@@ -172,52 +203,31 @@ describe('caches command', () => {
         'Sessions',
         '--engine',
         'valkey',
-        '--node-type',
-        'cache.t4g.micro',
-        '--serverless',
+        '--aws-serverless',
       ])
 
-      expect(sentQuery(0)).not.toContain('deploymentMode')
-      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ engine: 'valkey' })
-
-      const selectArgs = promptMocks.select.mock.calls[0]?.[0] as {
-        choices: { value: string }[]
-      }
-      expect(selectArgs.choices.map((c) => c.value)).toEqual(['8.0', '7.1'])
-
-      expect(graphqlRequest.mock.calls[1]?.[1]).toMatchObject({
+      expect(sentVariables(0)).toEqual({ provider: 'AWS' })
+      expect(sentVariables(1)).toEqual({
+        provider: 'AWS',
+        engine: 'VALKEY',
+        aws: { deploymentMode: 'SERVERLESS' },
+      })
+      expect(sentVariables(2)).toMatchObject({
         input: {
           engine: 'VALKEY',
           slug: 'sessions',
-          engineVersion: '7.2',
+          engineVersion: '8.0',
           aws: { deploymentMode: 'SERVERLESS' },
         },
       })
     })
 
-    it('queries the catalogs in lower case and sends the enum name when the engine is picked', async () => {
-      const cacheTypes = [
-        {
-          type: 'VALKEY',
-          displayName: 'Valkey',
-          description: 'Redis-compatible',
-          supportsServerless: true,
-        },
-      ]
+    it('offers the engines, versions and sizes of the cloud when nothing is passed', async () => {
       graphqlRequest
-        .mockResolvedValueOnce({ cacheTypes })
-        .mockResolvedValueOnce({ cacheTypes })
+        .mockResolvedValueOnce({ cacheTypes: [valkey] })
         .mockResolvedValueOnce({ cacheEngineVersions: versions })
         .mockResolvedValueOnce({
-          cacheNodeTypes: [
-            {
-              nodeType: 'cache.t4g.micro',
-              family: 't4g',
-              size: 'micro',
-              memoryGiB: 0.5,
-              vcpu: 2,
-            },
-          ],
+          cacheSizes: [{ size: 'cache.t4g.micro', family: 't4g', memoryGiB: 0.5, vcpu: 2 }],
         })
         .mockResolvedValueOnce({ createCache: { success: true, cache } })
       promptMocks.select
@@ -229,10 +239,14 @@ describe('caches command', () => {
       await run(['create', '--cloud', 'cloud-1', '--network', 'h4nw8r', '--name', 'Sessions'])
 
       expect(promptMocks.select).toHaveBeenCalledTimes(4)
-      expect(graphqlRequest.mock.calls[2]?.[1]).toEqual({ engine: 'valkey' })
-      expect(sentQuery(3)).toContain('query GetCacheNodeTypes')
-      expect(graphqlRequest.mock.calls[3]?.[1]).toEqual({ engine: 'valkey' })
-      expect(graphqlRequest.mock.calls[4]?.[1]).toMatchObject({
+      expect(sentVariables(1)).toEqual({
+        provider: 'AWS',
+        engine: 'VALKEY',
+        aws: { deploymentMode: 'NODE_BASED' },
+      })
+      expect(sentQuery(2)).toContain('query GetCacheSizes')
+      expect(sentVariables(2)).toEqual({ provider: 'AWS', engine: 'VALKEY' })
+      expect(sentVariables(3)).toMatchObject({
         input: {
           engine: 'VALKEY',
           engineVersion: '7.2',
@@ -242,38 +256,33 @@ describe('caches command', () => {
       })
     })
 
-    it('rejects an unknown --engine before calling the API', async () => {
-      await expect(
-        run([
-          'create',
-          '--cloud',
-          'cloud-1',
-          '--network',
-          'h4nw8r',
-          '--name',
-          'Sessions',
-          '--engine',
-          'postgres',
-        ])
-      ).rejects.toThrow('process.exit(1)')
+    it.each(['postgres', 'dragonfly', 'mysql'])(
+      'rejects the unknown --engine %j before calling the API',
+      async (engine) => {
+        await expect(
+          run([
+            'create',
+            '--cloud',
+            'c',
+            '--network',
+            'n',
+            '--name',
+            'Sessions',
+            '--engine',
+            engine,
+          ])
+        ).rejects.toThrow('process.exit(1)')
 
-      expect(graphqlRequest).not.toHaveBeenCalled()
-      expect(errorSpy.mock.calls.flat().join(' ')).toContain('Unknown cache engine.')
-    })
-
-    it.each(['dragonfly', 'mysql'])('rejects the unknown --engine %j locally', async (engine) => {
-      await expect(
-        run(['create', '--cloud', 'c', '--network', 'n', '--name', 'Sessions', '--engine', engine])
-      ).rejects.toThrow('process.exit(1)')
-
-      expect(graphqlRequest).not.toHaveBeenCalled()
-      expect(errorOutput()).toContain(
-        'Unknown cache engine. Supported engines: memcached, redis, valkey'
-      )
-    })
+        expect(graphqlRequest).not.toHaveBeenCalled()
+        expect(errorOutput()).toContain(
+          'Unknown cache engine. Supported engines: memcached, redis, valkey'
+        )
+      }
+    )
 
     it('fails without creating anything when no network is selected', async () => {
       cloudMocks.selectNetwork.mockResolvedValueOnce(undefined)
+      graphqlRequest.mockResolvedValueOnce({ cacheTypes: [valkey] })
 
       await expect(
         run(['create', '--cloud', 'cloud-1', '--name', 'Sessions', '--engine', 'valkey'])
@@ -282,7 +291,40 @@ describe('caches command', () => {
       expect(cloudMocks.selectNetwork).toHaveBeenCalledWith('cloud-1')
       expect(errorOutput()).toContain('A network is required to create a cache.')
       expect(promptMocks.input).not.toHaveBeenCalled()
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses a cloud with no cache engines', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ cacheTypes: [] })
+
+      await expect(run(['create', '--cloud', 'ca_9mx4', '--name', 'Sessions'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+
+      expect(errorOutput()).toContain("This cloud doesn't support caches yet.")
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses AWS flags on another cloud', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+
+      await expect(run(['create', '--cloud', 'ca_9mx4', '--aws-serverless'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+
+      expect(errorOutput()).toContain('--aws-serverless only applies to AWS cloud accounts.')
       expect(graphqlRequest).not.toHaveBeenCalled()
+    })
+
+    it('refuses an engine the cloud does not offer', async () => {
+      graphqlRequest.mockResolvedValueOnce({ cacheTypes: [valkey] })
+
+      await expect(
+        run(['create', '--cloud', 'c', '--network', 'n', '--name', 'Sessions', '--engine', 'redis'])
+      ).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('That engine is not offered. See "gantry caches engines".')
     })
   })
 
@@ -366,6 +408,7 @@ describe('caches command', () => {
         close.mockResolvedValue(undefined)
         bastionMocks.fetchBastionCredentials.mockResolvedValue({
           privateKey: 'fake-bastion-private-key',
+          sshUser: 'ubuntu',
           hostPublicKey: null,
           hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
         })
@@ -408,8 +451,9 @@ describe('caches command', () => {
         }
         expect(config).toEqual({
           bastionHost: '203.0.113.10',
+          bastionUsername: 'ubuntu',
           hostKey: {
-            hostId: 'i-0abc123',
+            hostId: 'bastion-r3bq9m@203.0.113.10',
             label: 'ops-bastion',
             expectedFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
             trustHostKey: true,
@@ -658,39 +702,58 @@ describe('caches command', () => {
   })
 
   describe('engines', () => {
-    it('lists each engine with its serverless and cluster-mode support', async () => {
-      graphqlRequest.mockResolvedValueOnce({
-        cacheTypes: [
-          {
-            type: 'VALKEY',
-            displayName: 'Valkey',
-            description: 'Redis-compatible',
-            supportsServerless: true,
-            supportsClusterMode: true,
-          },
-          {
-            type: 'MEMCACHED',
-            displayName: 'Memcached',
-            description: 'Simple key-value',
-            supportsServerless: false,
-            supportsClusterMode: false,
-          },
-        ],
-      })
+    const cacheTypes = [
+      {
+        type: 'VALKEY',
+        displayName: 'Valkey',
+        description: 'Redis-compatible',
+        supportsServerless: true,
+        supportsClusterMode: true,
+      },
+      {
+        type: 'MEMCACHED',
+        displayName: 'Memcached',
+        description: 'Simple key-value',
+        supportsServerless: false,
+        supportsClusterMode: false,
+      },
+    ]
 
-      await run(['engines'])
+    it('lists each engine with its AWS serverless and cluster-mode support', async () => {
+      graphqlRequest.mockResolvedValueOnce({ cacheTypes })
 
+      await run(['engines', '--cloud', 'cloud-1'])
+
+      expect(sentVariables(0)).toEqual({ provider: 'AWS' })
       const output = logOutput()
       expect(output).toContain('Valkey')
       expect(output).toContain('Memcached')
+      expect(output).toContain('Cluster Mode')
       expect(output).toContain('Yes')
       expect(output).toContain('No')
+    })
+
+    it('shows only the shared columns for another cloud', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ cacheTypes })
+
+      await run(['engines', '--cloud', 'ca_9mx4'])
+
+      expect(logOutput()).not.toContain('Cluster Mode')
+    })
+
+    it('says when the cloud has no cache engines', async () => {
+      graphqlRequest.mockResolvedValueOnce({ cacheTypes: [] })
+
+      await run(['engines', '--cloud', 'cloud-1'])
+
+      expect(logLines()).toEqual(["This cloud doesn't support caches yet."])
     })
 
     it('exits non-zero when the API fails', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('boom'))
 
-      await expect(run(['engines'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['engines', '--cloud', 'cloud-1'])).rejects.toThrow('process.exit(1)')
     })
   })
 
@@ -698,46 +761,47 @@ describe('caches command', () => {
     it('exits non-zero when the API fails', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('boom'))
 
-      await expect(run(['engine-versions'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['engine-versions', '--cloud', 'cloud-1'])).rejects.toThrow(
+        'process.exit(1)'
+      )
 
       expect(errorOutput()).toContain('boom')
     })
   })
 
-  describe('node-types', () => {
-    it('sends the catalog engine and region and prints each node type', async () => {
+  describe('sizes', () => {
+    it('sends the engine and region and prints each size', async () => {
       graphqlRequest.mockResolvedValueOnce({
-        cacheNodeTypes: [
-          { nodeType: 'cache.r7g.large', family: 'r7g', size: 'large', memoryGiB: 13.07, vcpu: 2 },
-        ],
+        cacheSizes: [{ size: 'cache.r7g.large', family: 'r7g', memoryGiB: 13.07, vcpu: 2 }],
       })
 
-      await run(['node-types', '--engine', 'REDIS', '--region', 'us-west-2'])
+      await run(['sizes', '--cloud', 'cloud-1', '--engine', 'REDIS', '--region', 'us-west-2'])
 
-      expect(sentQuery(0)).toContain('query GetCacheNodeTypes')
-      expect(sentVariables(0)).toEqual({ engine: 'redis', region: 'us-west-2' })
+      expect(sentQuery(0)).toContain('query GetCacheSizes')
+      expect(sentVariables(0)).toEqual({ provider: 'AWS', engine: 'REDIS', region: 'us-west-2' })
       const output = logOutput()
       expect(output).toContain('cache.r7g.large')
       expect(output).toContain('13.07')
     })
 
     it('reports when nothing matches', async () => {
-      graphqlRequest.mockResolvedValueOnce({ cacheNodeTypes: [] })
+      graphqlRequest.mockResolvedValueOnce({ cacheSizes: [] })
 
-      await run(['node-types'])
+      await run(['sizes', '--cloud', 'cloud-1'])
 
-      expect(sentVariables(0)).toEqual({})
-      expect(logSpy).toHaveBeenCalledWith('No node types found matching the filters.')
+      expect(sentVariables(0)).toEqual({ provider: 'AWS' })
+      expect(logSpy).toHaveBeenCalledWith('No sizes found matching the filters.')
     })
 
     it('exits non-zero when the API fails', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('boom'))
 
-      await expect(run(['node-types'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['sizes', '--cloud', 'cloud-1'])).rejects.toThrow('process.exit(1)')
     })
   })
 
   describe('create outcomes', () => {
+    const redis = { type: 'REDIS', displayName: 'Redis', supportsServerless: false }
     const fullArgs = [
       'create',
       '--cloud',
@@ -750,22 +814,20 @@ describe('caches command', () => {
       'redis',
       '--engine-version',
       '7.1',
-      '--node-type',
+      '--size',
       'cache.t4g.micro',
     ]
 
     it('uses every flag without prompting and prints the deployment', async () => {
-      graphqlRequest
-        .mockResolvedValueOnce({ cacheTypes: [{ type: 'REDIS', supportsServerless: false }] })
-        .mockResolvedValueOnce({
-          createCache: { success: true, cache, deploymentId: 'h6cz1y' },
-        })
+      graphqlRequest.mockResolvedValueOnce({ cacheTypes: [redis] }).mockResolvedValueOnce({
+        createCache: { success: true, cache, deploymentId: 'h6cz1y' },
+      })
 
       await run([...fullArgs, '--slug', 'session-store'])
 
       expect(promptMocks.select).not.toHaveBeenCalled()
       expect(promptMocks.input).not.toHaveBeenCalled()
-      expect(cloudMocks.selectCloud).not.toHaveBeenCalled()
+      expect(cloudMocks.resolveCloud).toHaveBeenCalledWith('cloud-1')
       expect(sentVariables(1)).toEqual({
         input: {
           cloudAccountId: 'cloud-1',
@@ -786,7 +848,7 @@ describe('caches command', () => {
 
     it('sends --backup-days as a shared setting', async () => {
       graphqlRequest
-        .mockResolvedValueOnce({ cacheTypes: [{ type: 'REDIS', supportsServerless: false }] })
+        .mockResolvedValueOnce({ cacheTypes: [redis] })
         .mockResolvedValueOnce({ createCache: { success: true, cache } })
 
       await run([...fullArgs, '--backup-days', '7'])
@@ -812,7 +874,7 @@ describe('caches command', () => {
       graphqlRequest
         .mockResolvedValueOnce({ cacheTypes: [{ type: enumName, supportsServerless: false }] })
         .mockResolvedValueOnce({ cacheEngineVersions: [] })
-        .mockResolvedValueOnce({ cacheNodeTypes: [] })
+        .mockResolvedValueOnce({ cacheSizes: [] })
         .mockResolvedValueOnce({ createCache: { success: true, cache } })
 
       await run([
@@ -828,8 +890,8 @@ describe('caches command', () => {
       ])
 
       expect(promptMocks.select).not.toHaveBeenCalled()
-      expect(sentVariables(1)).toEqual({ engine: enumName.toLowerCase() })
-      expect(sentVariables(2)).toEqual({ engine: enumName.toLowerCase() })
+      expect(sentVariables(1)).toMatchObject({ engine: enumName })
+      expect(sentVariables(2)).toEqual({ provider: 'AWS', engine: enumName })
       expect(sentVariables(3)).toEqual({
         input: {
           cloudAccountId: 'c',
@@ -842,18 +904,16 @@ describe('caches command', () => {
       })
     })
 
-    it('prompts for cloud, network and name and filters versions to node-based', async () => {
-      cloudMocks.selectCloud.mockResolvedValueOnce('cloud-9')
+    it('prompts for cloud, network and name and asks for node-based versions', async () => {
+      cloudMocks.resolveCloud.mockResolvedValueOnce({ id: 'cloud-9', provider: 'AWS' })
       cloudMocks.selectNetwork.mockResolvedValueOnce('x9mf3d')
       promptMocks.input.mockResolvedValueOnce('Rate Limits')
       promptMocks.select.mockResolvedValueOnce('7.2').mockResolvedValueOnce('cache.t4g.small')
       graphqlRequest
         .mockResolvedValueOnce({ cacheTypes: [{ type: 'VALKEY', supportsServerless: false }] })
-        .mockResolvedValueOnce({ cacheEngineVersions: versions })
+        .mockResolvedValueOnce({ cacheEngineVersions: versions.slice(1) })
         .mockResolvedValueOnce({
-          cacheNodeTypes: [
-            { nodeType: 'cache.t4g.small', family: 't4g', size: 'small', memoryGiB: 1.37, vcpu: 2 },
-          ],
+          cacheSizes: [{ size: 'cache.t4g.small', family: 't4g', memoryGiB: 1.37, vcpu: 2 }],
         })
         .mockResolvedValueOnce({ createCache: { success: true, cache } })
 
@@ -890,11 +950,11 @@ describe('caches command', () => {
       })
     })
 
-    it('skips node types when serverless is chosen interactively', async () => {
+    it('skips sizes when serverless is chosen interactively', async () => {
       promptMocks.select.mockResolvedValueOnce(true).mockResolvedValueOnce('8.0')
       graphqlRequest
         .mockResolvedValueOnce({ cacheTypes: [{ type: 'VALKEY', supportsServerless: true }] })
-        .mockResolvedValueOnce({ cacheEngineVersions: versions })
+        .mockResolvedValueOnce({ cacheEngineVersions: [versions[0], versions[2]] })
         .mockResolvedValueOnce({ createCache: { success: true, cache } })
 
       await run([
@@ -909,10 +969,7 @@ describe('caches command', () => {
         'valkey',
       ])
 
-      const versionChoices = (
-        promptMocks.select.mock.calls[1]?.[0] as { choices: { value: string }[] }
-      ).choices.map((c) => c.value)
-      expect(versionChoices).toEqual(['8.0', '7.1'])
+      expect(sentVariables(1)).toMatchObject({ aws: { deploymentMode: 'SERVERLESS' } })
       expect(sentQuery(2)).toContain('mutation CreateCache')
       expect(sentVariables(2)).toMatchObject({
         input: { engineVersion: '8.0', aws: { deploymentMode: 'SERVERLESS' } },
@@ -921,7 +978,7 @@ describe('caches command', () => {
 
     it('derives the slug from the name when --slug is empty', async () => {
       graphqlRequest
-        .mockResolvedValueOnce({ cacheTypes: [] })
+        .mockResolvedValueOnce({ cacheTypes: [redis] })
         .mockResolvedValueOnce({ createCache: { success: true, cache } })
 
       await run([...fullArgs, '--slug', ''])
@@ -938,7 +995,7 @@ describe('caches command', () => {
       [{ success: true }, 'Failed to create cache'],
     ])('fails when the mutation result is %j', async (createCache, message) => {
       graphqlRequest
-        .mockResolvedValueOnce({ cacheTypes: [] })
+        .mockResolvedValueOnce({ cacheTypes: [redis] })
         .mockResolvedValueOnce({ createCache })
 
       await expect(run(fullArgs)).rejects.toThrow('process.exit(1)')

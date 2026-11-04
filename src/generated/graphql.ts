@@ -21,6 +21,31 @@ export type ArtifactUploadCliOutputsInput = {
   zipSize: number;
 };
 
+export type AwsAlbDefaultActionInput = {
+  /** e.g. text/html or application/json */
+  contentType: string;
+  /** Response body, up to 1024 characters */
+  messageBody: string;
+  /** HTTP status code, e.g. 200 or 503 */
+  statusCode: string;
+};
+
+/** Burstable performance setting for T-series instances */
+export type AwsBurstablePerformanceEnum =
+  | 'EXCLUDED'
+  | 'INCLUDED'
+  | 'REQUIRED';
+
+/** Catalog filters that only apply to AWS */
+export type AwsCacheCatalogFilterInput = {
+  deploymentMode?: AwsCacheDeploymentModeEnum | null | undefined;
+};
+
+/** Cache deployment mode */
+export type AwsCacheDeploymentModeEnum =
+  | 'NODE_BASED'
+  | 'SERVERLESS';
+
 /** Cache settings only AWS has */
 export type AwsCacheSettingsInput = {
   /** Valkey and Redis only */
@@ -28,7 +53,7 @@ export type AwsCacheSettingsInput = {
   /** Daily backup time, HH:MM in UTC */
   dailySnapshotTime?: string | null | undefined;
   /** Required on create */
-  deploymentMode?: CacheDeploymentModeEnum | null | undefined;
+  deploymentMode?: AwsCacheDeploymentModeEnum | null | undefined;
   /** KMS key ARN for encryption at rest */
   kmsKeyId?: string | null | undefined;
   /** Serverless only, 1 to 5000 */
@@ -43,18 +68,52 @@ export type AwsCacheSettingsInput = {
   replicasPerNodeGroup?: number | null | undefined;
 };
 
+export type AwsCapacityProviderInput = {
+  /** Managed instances only */
+  instanceRequirements?: AwsInstanceRequirementsInput | null | undefined;
+  type: AwsCapacityProviderTypeEnum;
+};
+
+/** Type of capacity provider */
+export type AwsCapacityProviderTypeEnum =
+  | 'FARGATE'
+  | 'FARGATE_SPOT'
+  | 'MANAGED_INSTANCES';
+
+/** Certificate settings only AWS has */
+export type AwsCertificateSettingsInput = {
+  /** Regions to issue the certificate in. AWS issues one certificate per region. */
+  regions: Array<string>;
+};
+
+/** Container orchestrator a cluster runs */
+export type AwsClusterOrchestratorEnum =
+  | 'ECS';
+
 /** Cluster settings for an AWS cloud account */
 export type AwsClusterSettingsInput = {
-  capacityProviders: Array<CapacityProviderInput>;
-  orchestrator: ClusterTypeEnum;
+  capacityProviders: Array<AwsCapacityProviderInput>;
+  orchestrator: AwsClusterOrchestratorEnum;
 };
+
+/** Catalog filters that only apply to AWS */
+export type AwsDatabaseCatalogFilterInput = {
+  deploymentMode?: AwsDatabaseDeploymentModeEnum | null | undefined;
+  /** rds or aurora. Required when filtering by engine. */
+  flavor?: string | null | undefined;
+};
+
+/** Database deployment mode */
+export type AwsDatabaseDeploymentModeEnum =
+  | 'PROVISIONED'
+  | 'SERVERLESS';
 
 /** Settings only AWS servers have. Service, deployment mode, database name, encryption and master username are fixed at creation. */
 export type AwsDatabaseSettingsInput = {
   /** Database RDS creates with the server */
   dbName?: string | null | undefined;
   /** Serverless is Aurora only. Required at creation. */
-  deploymentMode?: DatabaseDeploymentModeEnum | null | undefined;
+  deploymentMode?: AwsDatabaseDeploymentModeEnum | null | undefined;
   /** rds or aurora. Required at creation. */
   flavor?: string | null | undefined;
   /** Required for io1 and io2 storage */
@@ -104,18 +163,39 @@ export type AwsFilesystemSettingsInput = {
   throughputMode?: AwsEfsThroughputModeEnum | null | undefined;
 };
 
+/** Which EC2 instances a managed instances capacity provider may launch */
+export type AwsInstanceRequirementsInput = {
+  /** e.g. c5.* or m5.large */
+  allowedInstanceTypes?: Array<string> | null | undefined;
+  burstablePerformance?: AwsBurstablePerformanceEnum | null | undefined;
+  /** arm64 or x86_64 */
+  cpuArchitecture?: string | null | undefined;
+  /** e.g. amazon-web-services, intel, amd */
+  cpuManufacturers?: Array<string> | null | undefined;
+  memoryMib?: IntRangeInput | null | undefined;
+  vcpuCount?: IntRangeInput | null | undefined;
+};
+
 /** Load balancer settings for an AWS cloud account */
 export type AwsLoadBalancerSettingsInput = {
+  /** Application load balancers only: response when no route matches */
+  defaultAction?: AwsAlbDefaultActionInput | null | undefined;
   /** Application load balancers only: ACM certificate for HTTPS traffic */
   defaultSslCertificateArn?: string | null | undefined;
 };
+
+/** NAT gateways an AWS network gets: none, one, or one per availability zone */
+export type AwsNatGatewayOptionEnum =
+  | 'NONE'
+  | 'PER_AZ'
+  | 'SINGLE';
 
 /** Network settings only AWS has */
 export type AwsNetworkSettingsInput = {
   /** Defaults to true */
   enableInternetAccess?: boolean | null | undefined;
   /** Defaults to SINGLE with internet access and NONE without */
-  natGatewayOption?: NatGatewayOptionEnum | null | undefined;
+  natGatewayOption?: AwsNatGatewayOptionEnum | null | undefined;
 };
 
 /** Status of a bastion host */
@@ -128,17 +208,6 @@ export type BastionStatusEnum =
   | 'PENDING'
   | 'PROVISIONING';
 
-/** Burstable performance setting for T-series instances */
-export type BurstablePerformanceEnum =
-  | 'EXCLUDED'
-  | 'INCLUDED'
-  | 'REQUIRED';
-
-/** Cache deployment mode */
-export type CacheDeploymentModeEnum =
-  | 'NODE_BASED'
-  | 'SERVERLESS';
-
 /** Cache engine type */
 export type CacheEngineEnum =
   | 'MEMCACHED'
@@ -150,18 +219,6 @@ export type CacheStatusEnum =
   | 'ACTIVE'
   | 'FAILED'
   | 'PENDING';
-
-export type CapacityProviderInput = {
-  /** Managed instances only */
-  instanceRequirements?: InstanceRequirementsInput | null | undefined;
-  type: CapacityProviderTypeEnum;
-};
-
-/** Type of capacity provider */
-export type CapacityProviderTypeEnum =
-  | 'FARGATE'
-  | 'FARGATE_SPOT'
-  | 'MANAGED_INSTANCES';
 
 /** Certificate status values */
 export type CertificateStatusEnum =
@@ -204,10 +261,6 @@ export type ClusterStatusEnum =
   | 'FAILED'
   | 'PENDING';
 
-/** Container orchestrator a cluster runs */
-export type ClusterTypeEnum =
-  | 'ECS';
-
 export type ContainerPushCliOutputsInput = {
   imageUri: string;
   localImageTag: string;
@@ -248,10 +301,11 @@ export type CreateCacheInput = {
 
 export type CreateCertificateInput = {
   additionalDomains?: Array<string> | null | undefined;
+  /** Required when the cloud account is AWS */
+  aws?: AwsCertificateSettingsInput | null | undefined;
   cloudAccountId: string;
   domainId?: string | null | undefined;
   primaryDomain: string;
-  regions: Array<string>;
 };
 
 export type CreateClusterInput = {
@@ -354,8 +408,7 @@ export type CreateNetworkInput = {
 };
 
 export type CreateProjectInput = {
-  /** Cloud provider: aws, gcp, or cloudflare */
-  cloudProvider: string;
+  cloudProvider: CloudProviderEnum;
   name: string;
   tag?: string | null | undefined;
 };
@@ -366,11 +419,6 @@ export type CreateSecretInput = {
   keyValuePairs: Array<SecretKeyValueInput>;
   name: string;
 };
-
-/** Database deployment mode */
-export type DatabaseDeploymentModeEnum =
-  | 'PROVISIONED'
-  | 'SERVERLESS';
 
 /** Database engine type */
 export type DatabaseEngineEnum =
@@ -451,19 +499,6 @@ export type FilesystemStatusEnum =
   | 'FAILED'
   | 'PENDING';
 
-/** Which EC2 instances a managed instances capacity provider may launch */
-export type InstanceRequirementsInput = {
-  /** e.g. c5.* or m5.large */
-  allowedInstanceTypes?: Array<string> | null | undefined;
-  burstablePerformance?: BurstablePerformanceEnum | null | undefined;
-  /** arm64 or x86_64 */
-  cpuArchitecture?: string | null | undefined;
-  /** e.g. amazon-web-services, intel, amd */
-  cpuManufacturers?: Array<string> | null | undefined;
-  memoryMib?: IntRangeInput | null | undefined;
-  vcpuCount?: IntRangeInput | null | undefined;
-};
-
 export type IntRangeInput = {
   max?: number | null | undefined;
   min: number;
@@ -487,12 +522,6 @@ export type LocalBuildCliOutputsInput = {
   serviceName: string;
   success: boolean;
 };
-
-/** NAT gateways an AWS network gets: none, one, or one per availability zone */
-export type NatGatewayOptionEnum =
-  | 'NONE'
-  | 'PER_AZ'
-  | 'SINGLE';
 
 export type NetworkSubnetInput = {
   cidr: string;
@@ -634,27 +663,30 @@ export type GetCachesQueryVariables = Exact<{ [key: string]: never; }>;
 export type GetCachesQuery = { caches: Array<{ id: string, name: string, slug: string, engine: CacheEngineEnum, status: CacheStatusEnum, cloudAccountId: string, networkId: string, endpoint: string | null, port: number | null, createdAt: string }> };
 
 export type GetCacheTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
 export type GetCacheTypesQuery = { cacheTypes: Array<{ type: CacheEngineEnum, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, supportsClusterMode: boolean, requiresNetwork: boolean }> };
 
 export type GetCacheEngineVersionsQueryVariables = Exact<{
-  engine?: string | null | undefined;
+  provider: CloudProviderEnum;
+  engine?: CacheEngineEnum | null | undefined;
+  region?: string | null | undefined;
+  aws?: AwsCacheCatalogFilterInput | null | undefined;
+}>;
+
+
+export type GetCacheEngineVersionsQuery = { cacheEngineVersions: Array<{ engine: CacheEngineEnum, version: string, providerData: Record<string, unknown> }> };
+
+export type GetCacheSizesQueryVariables = Exact<{
+  provider: CloudProviderEnum;
+  engine?: CacheEngineEnum | null | undefined;
   region?: string | null | undefined;
 }>;
 
 
-export type GetCacheEngineVersionsQuery = { cacheEngineVersions: Array<{ engine: string, version: string, family: string, supportedModes: Array<string> }> };
-
-export type GetCacheNodeTypesQueryVariables = Exact<{
-  engine?: string | null | undefined;
-  region?: string | null | undefined;
-}>;
-
-
-export type GetCacheNodeTypesQuery = { cacheNodeTypes: Array<{ nodeType: string, family: string, size: string, memoryGiB: number, vcpu: number }> };
+export type GetCacheSizesQuery = { cacheSizes: Array<{ size: string, family: string, memoryGiB: number, vcpu: number }> };
 
 export type CreateCacheMutationVariables = Exact<{
   input: CreateCacheInput;
@@ -668,7 +700,7 @@ export type GetCacheTunnelBastionQueryVariables = Exact<{
 }>;
 
 
-export type GetCacheTunnelBastionQuery = { bastion: { id: string, instanceId: string | null, publicIp: string | null } | null };
+export type GetCacheTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
 
 export type GetCloudsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -681,11 +713,11 @@ export type GetClustersQueryVariables = Exact<{ [key: string]: never; }>;
 export type GetClustersQuery = { clusters: Array<{ id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string, cloudAccountId: string, createdAt: string }> };
 
 export type GetClusterTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
-export type GetClusterTypesQuery = { clusterTypes: Array<{ type: ClusterTypeEnum, displayName: string, provider: string, description: string, guidance: string | null }> };
+export type GetClusterTypesQuery = { clusterTypes: Array<{ type: string, displayName: string, provider: string, description: string, guidance: string | null }> };
 
 export type CreateClusterMutationVariables = Exact<{
   input: CreateClusterInput;
@@ -708,7 +740,7 @@ export type RunConsoleCommandMutation = { runConsoleCommand: { success: boolean,
 export type GetDatabasesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetDatabasesQuery = { databases: Array<{ id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum, cloudAccountId: string, networkId: string, endpoint: string | null, port: number | null, publiclyAccessible: boolean, createdAt: string }> };
+export type GetDatabasesQuery = { databases: Array<{ id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum, cloudAccountId: string, networkId: string, provider: string, endpoint: string | null, port: number | null, publiclyAccessible: boolean, createdAt: string }> };
 
 export type GetDatabaseCredentialsQueryVariables = Exact<{
   id: string;
@@ -718,30 +750,31 @@ export type GetDatabaseCredentialsQueryVariables = Exact<{
 export type GetDatabaseCredentialsQuery = { databaseCredentials: { success: boolean, message: string | null, username: string | null, password: string | null } };
 
 export type GetDatabaseTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
-export type GetDatabaseTypesQuery = { databaseTypes: Array<{ engine: DatabaseEngineEnum, flavor: string, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, requiresNetwork: boolean }> };
+export type GetDatabaseTypesQuery = { databaseTypes: Array<{ engine: DatabaseEngineEnum, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, requiresNetwork: boolean, providerData: Record<string, unknown> }> };
 
 export type GetDatabaseEngineVersionsQueryVariables = Exact<{
-  engine?: string | null | undefined;
-  flavor?: string | null | undefined;
-  deploymentMode?: string | null | undefined;
+  provider: CloudProviderEnum;
+  engine?: DatabaseEngineEnum | null | undefined;
   region?: string | null | undefined;
+  aws?: AwsDatabaseCatalogFilterInput | null | undefined;
 }>;
 
 
-export type GetDatabaseEngineVersionsQuery = { databaseEngineVersions: Array<{ engine: string, version: string, family: string, description: string, supportedModes: Array<string> }> };
+export type GetDatabaseEngineVersionsQuery = { databaseEngineVersions: Array<{ engine: DatabaseEngineEnum, version: string, description: string, providerData: Record<string, unknown> }> };
 
-export type GetDatabaseInstanceClassesQueryVariables = Exact<{
-  engine?: string | null | undefined;
-  flavor?: string | null | undefined;
+export type GetDatabaseSizesQueryVariables = Exact<{
+  provider: CloudProviderEnum;
+  engine?: DatabaseEngineEnum | null | undefined;
   region?: string | null | undefined;
+  aws?: AwsDatabaseCatalogFilterInput | null | undefined;
 }>;
 
 
-export type GetDatabaseInstanceClassesQuery = { databaseInstanceClasses: Array<{ instanceClass: string, family: string, size: string, vcpu: number, memoryMb: number }> };
+export type GetDatabaseSizesQuery = { databaseSizes: Array<{ size: string, family: string, vcpu: number, memoryMb: number }> };
 
 export type CreateDatabaseMutationVariables = Exact<{
   input: CreateDatabaseInput;
@@ -794,7 +827,7 @@ export type GetDatabaseTunnelBastionQueryVariables = Exact<{
 }>;
 
 
-export type GetDatabaseTunnelBastionQuery = { bastion: { id: string, instanceId: string | null, publicIp: string | null } | null };
+export type GetDatabaseTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
 
 export type GetDeploymentQueryVariables = Exact<{
   id: string;
@@ -969,7 +1002,7 @@ export type GetLoadBalancersQueryVariables = Exact<{ [key: string]: never; }>;
 export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, region: string | null, endpoint: string | null, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
 
 export type GetLoadBalancerTypesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 
@@ -1056,13 +1089,6 @@ export type GetPromoteTargetEnvironmentsQueryVariables = Exact<{
 
 
 export type GetPromoteTargetEnvironmentsQuery = { environments: Array<{ id: string, name: string, slug: string }> };
-
-export type GetCloudRegionsQueryVariables = Exact<{
-  provider?: string | null | undefined;
-}>;
-
-
-export type GetCloudRegionsQuery = { cloudRegions: Array<{ code: string, name: string }> };
 
 export type TriggerRerouteMutationVariables = Exact<{
   config: Record<string, unknown>;
@@ -1154,28 +1180,28 @@ export type GetBastionsQueryVariables = Exact<{
 }>;
 
 
-export type GetBastionsQuery = { bastions: Array<{ slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, instanceId: string | null, publicIp: string | null, createdAt: string }> };
+export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string }> };
 
 export type GetBastionQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetBastionQuery = { bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, instanceId: string | null, publicIp: string | null, createdAt: string } | null };
+export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string } | null };
 
 export type GetBastionPrivateKeyQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetBastionPrivateKeyQuery = { bastionPrivateKey: { success: boolean, message: string | null, privateKey: string | null, hostPublicKey: string | null, hostKeyFingerprint: string | null } };
+export type GetBastionPrivateKeyQuery = { bastionPrivateKey: { success: boolean, message: string | null, privateKey: string | null, sshUser: string | null, hostPublicKey: string | null, hostKeyFingerprint: string | null } };
 
 export type CreateBastionMutationVariables = Exact<{
   input: CreateBastionInput;
 }>;
 
 
-export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, instanceId: string | null, publicIp: string | null } | null } };
+export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null } | null } };
 
 export type DestroyBastionMutationVariables = Exact<{
   slug: string;
@@ -1229,7 +1255,7 @@ export type GetDomainChoicesQueryVariables = Exact<{ [key: string]: never; }>;
 export type GetDomainChoicesQuery = { domains: Array<{ id: string, name: string }> };
 
 export type GetCloudRegionChoicesQueryVariables = Exact<{
-  provider?: string | null | undefined;
+  provider: CloudProviderEnum;
 }>;
 
 

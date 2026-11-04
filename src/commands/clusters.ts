@@ -2,7 +2,6 @@ import { input, select } from '@inquirer/prompts'
 import type { Command } from 'commander'
 
 import type {
-  ClusterTypeEnum,
   CreateClusterMutation,
   CreateClusterMutationVariables,
   GetClustersQuery,
@@ -11,19 +10,11 @@ import type {
   GetClusterTypesQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { selectCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
+import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import { awsClusterSettings, awsOption } from '../lib/clouds/aws'
+import { resolveCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
-
-const CLUSTER_TYPES = { ECS: 'ECS' } as const satisfies Record<ClusterTypeEnum, ClusterTypeEnum>
-
-function toClusterType(value: string): ClusterTypeEnum {
-  const match = Object.values(CLUSTER_TYPES).find((t) => t === value)
-  if (!match) {
-    throw new Error('Unknown cluster type.')
-  }
-  return match
-}
 
 const CLUSTERS_QUERY = /* GraphQL */ `
   query GetClusters {
@@ -41,7 +32,7 @@ const CLUSTERS_QUERY = /* GraphQL */ `
 `
 
 const CLUSTER_TYPES_QUERY = /* GraphQL */ `
-  query GetClusterTypes($provider: String) {
+  query GetClusterTypes($provider: CloudProviderEnum!) {
     clusterTypes(provider: $provider) {
       type
       displayName
@@ -114,11 +105,18 @@ export function registerClustersCommand(program: Command): void {
   clustersCmd
     .command('types')
     .description('List available cluster types')
-    .action(async () => {
+    .option('--cloud <id>', 'Cloud account ID')
+    .action(async (options: { cloud?: string }) => {
       try {
+        const { provider } = await resolveCloud(options.cloud)
         const data = await graphqlRequest<GetClusterTypesQuery, GetClusterTypesQueryVariables>(
-          CLUSTER_TYPES_QUERY
+          CLUSTER_TYPES_QUERY,
+          { provider }
         )
+        if (data.clusterTypes.length === 0) {
+          console.log(unsupportedCloud('clusters'))
+          return
+        }
 
         const table = createTable({
           head: ['Type', 'Name', 'Provider', 'Description'],
@@ -141,20 +139,40 @@ export function registerClustersCommand(program: Command): void {
     .option('--cloud <id>', 'Cloud account ID')
     .option('--name <name>', 'Cluster name')
     .option('--slug <slug>', 'Cluster slug (auto-generated from name if omitted)')
-    .option('--type <type>', 'Cluster type (see "gantry clusters types")')
-    .option('--region <region>', 'Region (see "gantry regions")')
+    .option('--region <region>', 'Region (see "gantry regions --cloud <id>")')
     .option('--network <id>', 'Network ID')
+    .addOption(
+      awsOption(
+        '--aws-capacity-provider <type>',
+        'Where containers run: fargate, fargate-spot or managed-instances'
+      )
+    )
     .action(
       async (options: {
         cloud?: string
         name?: string
         slug?: string
-        type?: string
         region?: string
         network?: string
+        awsCapacityProvider?: string
       }) => {
         try {
-          const cloudAccountId = options.cloud ?? (await selectCloud())
+          const cloud = await resolveCloud(options.cloud)
+          const foreign = foreignAwsFlagsMessage(cloud.provider, options)
+          if (foreign) {
+            printError(foreign)
+            process.exit(1)
+          }
+
+          const { clusterTypes } = await graphqlRequest<
+            GetClusterTypesQuery,
+            GetClusterTypesQueryVariables
+          >(CLUSTER_TYPES_QUERY, { provider: cloud.provider })
+          const onlyType = clusterTypes.at(0)
+          if (!onlyType || !isAws(cloud.provider)) {
+            printError(unsupportedCloud('clusters'))
+            process.exit(1)
+          }
 
           const name =
             options.name ??
@@ -163,27 +181,25 @@ export function registerClustersCommand(program: Command): void {
               validate: (v) => (v.trim().length > 0 ? true : 'Name is required'),
             }))
 
-          let clusterType: ClusterTypeEnum
-          if (options.type) {
-            clusterType = toClusterType(options.type)
-          } else {
-            const typesData = await graphqlRequest<
-              GetClusterTypesQuery,
-              GetClusterTypesQueryVariables
-            >(CLUSTER_TYPES_QUERY)
+          const clusterType =
+            clusterTypes.length === 1
+              ? onlyType.type
+              : await select({
+                  message: 'Cluster type:',
+                  choices: clusterTypes.map((t) => ({
+                    name: sanitizeTerminal(`${t.displayName} — ${t.description}`),
+                    value: t.type,
+                  })),
+                })
 
-            clusterType = await select({
-              message: 'Cluster type:',
-              choices: typesData.clusterTypes.map((t) => ({
-                name: sanitizeTerminal(`${t.displayName} — ${t.description}`),
-                value: t.type,
-              })),
-            })
+          const aws = await awsClusterSettings(clusterType, options.awsCapacityProvider)
+          if (!aws.ok) {
+            printError(aws.message)
+            process.exit(1)
           }
 
-          const region = options.region ?? (await selectRegion())
-          const networkId =
-            options.network ?? (await selectNetwork(cloudAccountId, { allowNone: true }))
+          const region = options.region ?? (await selectRegion(cloud.provider))
+          const networkId = options.network ?? (await selectNetwork(cloud.id, { allowNone: true }))
 
           // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to the generated slug
           const slug = options.slug || slugify(name)
@@ -191,10 +207,10 @@ export function registerClustersCommand(program: Command): void {
             CREATE_CLUSTER_MUTATION,
             {
               input: {
-                cloudAccountId,
+                cloudAccountId: cloud.id,
                 name,
                 slug,
-                aws: { orchestrator: clusterType, capacityProviders: [{ type: 'FARGATE' }] },
+                aws: aws.value,
                 region,
                 networkId,
               },

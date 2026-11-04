@@ -5,17 +5,21 @@ import type { MockInstance } from 'vitest'
 const graphqlRequest = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
 const select = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectNetwork = vi.hoisted(() => vi.fn())
 const spinner = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn() }))
+const isInteractive = vi.hoisted(() => vi.fn(() => true))
 
 vi.mock('@inquirer/prompts', () => ({ input, select }))
 vi.mock('ora', () => ({ default: () => spinner }))
+vi.mock('../lib/terminal', () => ({ isInteractive }))
 vi.mock('../lib/client', () => ({
   formatApiError: (error: unknown) => (error instanceof Error ? error.message : 'API error'),
   graphqlRequest,
 }))
-vi.mock('../lib/interactive-prompts', () => ({ selectCloud, selectNetwork }))
+vi.mock('../lib/interactive-prompts', () => ({ resolveCloud, selectNetwork }))
 
 const { registerFilesystemsCommand } = await import('./filesystems')
 
@@ -167,7 +171,7 @@ describe('filesystems command', () => {
         'up',
       ])
 
-      expect(selectCloud).not.toHaveBeenCalled()
+      expect(resolveCloud).toHaveBeenCalledWith(expect.any(String))
       expect(selectNetwork).not.toHaveBeenCalled()
       expect(input).toHaveBeenCalledTimes(1)
       expect(input.mock.calls[0]?.[0]).toMatchObject({
@@ -195,7 +199,7 @@ describe('filesystems command', () => {
     })
 
     it('selects the cloud and network and derives the slug from a prompted name', async () => {
-      selectCloud.mockResolvedValueOnce('cloud_1')
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_1', provider: 'AWS' })
       selectNetwork.mockResolvedValueOnce('h4nw8r')
       input.mockResolvedValueOnce('Media Assets')
       graphqlRequest
@@ -240,23 +244,82 @@ describe('filesystems command', () => {
       expect(validate('3414')).toBe(true)
     })
 
-    it('asks for no AWS settings on a network in another cloud', async () => {
+    it('refuses a cloud without filesystems before asking anything', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_2', provider: 'GCP' })
+
+      await expect(
+        run(['create', '--cloud', 'cloud_2', '--network', 'q8vm3t', '--name', 'Uploads'])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain("This cloud doesn't support filesystems yet.")
+      expect(select).not.toHaveBeenCalled()
+      expect(graphqlRequest).not.toHaveBeenCalled()
+    })
+
+    it('takes every AWS setting from flags without a terminal', async () => {
+      isInteractive.mockReturnValue(false)
       graphqlRequest
         .mockResolvedValueOnce(networks)
         .mockResolvedValueOnce({ createFilesystem: created })
 
-      await run(['create', '--cloud', 'cloud_2', '--network', 'q8vm3t', '--name', 'Uploads'])
+      await run([
+        'create',
+        '--cloud',
+        'cloud_1',
+        '--network',
+        'h4nw8r',
+        '--name',
+        'Uploads',
+        '--aws-performance-mode',
+        'general-purpose',
+        '--aws-throughput-mode',
+        'provisioned',
+        '--aws-throughput-mibps',
+        '512',
+        '--aws-encrypted',
+      ])
 
       expect(select).not.toHaveBeenCalled()
-      expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
+      expect(input).not.toHaveBeenCalled()
+      expect(graphqlRequest.mock.calls[1]?.[1]).toMatchObject({
         input: {
-          cloudAccountId: 'cloud_2',
-          networkId: 'q8vm3t',
-          name: 'Uploads',
-          slug: 'uploads',
-          aws: undefined,
+          aws: {
+            performanceMode: 'GENERAL_PURPOSE',
+            throughputMode: 'PROVISIONED',
+            provisionedThroughputMibps: 512,
+            encrypted: true,
+          },
         },
       })
+      isInteractive.mockReturnValue(true)
+    })
+
+    it.each([
+      [
+        ['--aws-performance-mode', 'turbo'],
+        '--aws-performance-mode must be general-purpose or max-io',
+      ],
+      [
+        ['--aws-performance-mode', 'max-io', '--aws-throughput-mode', 'elastic'],
+        'Elastic throughput is not available with max-io performance.',
+      ],
+      [
+        ['--aws-throughput-mode', 'bursting', '--aws-throughput-mibps', '128'],
+        '--aws-throughput-mibps needs --aws-throughput-mode provisioned',
+      ],
+      [
+        ['--aws-throughput-mode', 'provisioned', '--aws-throughput-mibps', '5000'],
+        '--aws-throughput-mibps must be a whole number from 1 to 3414',
+      ],
+    ])('refuses %j before creating anything', async (flags, message) => {
+      graphqlRequest.mockResolvedValueOnce(networks)
+
+      await expect(
+        run(['create', '--cloud', 'cloud_1', '--network', 'h4nw8r', '--name', 'Uploads', ...flags])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain(message)
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
 
     it('fails when no network is selected', async () => {

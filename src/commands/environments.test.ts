@@ -5,7 +5,9 @@ import type { MockInstance } from 'vitest'
 const graphqlRequest = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
 const select = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectNetwork = vi.hoisted(() => vi.fn())
 const selectProject = vi.hoisted(() => vi.fn())
 const selectRegion = vi.hoisted(() => vi.fn())
@@ -16,7 +18,7 @@ vi.mock('../lib/client', () => ({
   graphqlRequest,
 }))
 vi.mock('../lib/interactive-prompts', () => ({
-  selectCloud,
+  resolveCloud,
   selectNetwork,
   selectProject,
   selectRegion,
@@ -180,7 +182,7 @@ describe('environments command', () => {
 
     it('prompts for everything and drops a skipped colour', async () => {
       selectProject.mockResolvedValueOnce('p9ue62')
-      selectCloud.mockResolvedValueOnce('cloud_1')
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_1', provider: 'AWS' })
       selectRegion.mockResolvedValueOnce('eu-west-1')
       input.mockResolvedValueOnce('QA Env').mockResolvedValueOnce('')
       selectNetwork.mockResolvedValueOnce(undefined)

@@ -11,13 +11,15 @@ import type {
   GetDomainsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { foreignAwsFlagsMessage, isAws, unsupportedCloud, type ResolvedCloud } from '../lib/clouds'
+import { awsCertificateRegions, awsOption } from '../lib/clouds/aws'
 import {
   isValidCertificateDomain,
   parseAdditionalDomains,
   rootDomainErrorMessage,
   validateRootDomain,
 } from '../lib/domain-validation'
-import { selectCloud, selectDomain, selectRegions } from '../lib/interactive-prompts'
+import { fetchRegions, resolveCloud, selectDomain } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -80,6 +82,23 @@ function validateCertDomain(value: string): string | true {
   return true
 }
 
+/** The certificate's cloud-specific input, or exits when the cloud can't issue certificates. */
+async function certificateCloudSettings(
+  cloud: ResolvedCloud,
+  awsRegions: string | undefined
+): Promise<Pick<CreateCertificateInput, 'aws'>> {
+  if (!isAws(cloud.provider)) {
+    printError(unsupportedCloud('certificates'))
+    process.exit(1)
+  }
+  const regions = await awsCertificateRegions(awsRegions, await fetchRegions(cloud.provider))
+  if (!regions.ok) {
+    printError(regions.message)
+    process.exit(1)
+  }
+  return { aws: { regions: regions.value } }
+}
+
 function exitIfInvalidCertDomain(value: string): void {
   const validation = validateCertDomain(value)
   if (validation !== true) {
@@ -125,18 +144,17 @@ export function registerDomainsCommand(program: Command): void {
     .option('--name <fqdn>', 'Domain name (e.g., example.com)')
     .option('--request-cert', 'Also request a certificate for this domain')
     .option('--cloud <id>', 'Cloud account ID (required with --request-cert)')
-    .option(
-      '--regions <regions>',
-      'Comma-separated AWS regions for certificate (required with --request-cert)'
-    )
     .option('--primary-domain <fqdn>', 'Primary domain for certificate (defaults to domain name)')
     .option('--additional-domains <domains>', 'Comma-separated additional domains for certificate')
+    .addOption(
+      awsOption('--aws-regions <regions>', 'Comma-separated regions to issue the certificate in')
+    )
     .action(
       async (options: {
         name?: string
         requestCert?: boolean
         cloud?: string
-        regions?: string
+        awsRegions?: string
         primaryDomain?: string
         additionalDomains?: string
       }) => {
@@ -180,7 +198,12 @@ export function registerDomainsCommand(program: Command): void {
           })
 
           if (requestCert) {
-            const cloudAccountId = options.cloud ?? (await selectCloud())
+            const cloud = await resolveCloud(options.cloud)
+            const foreign = foreignAwsFlagsMessage(cloud.provider, options)
+            if (foreign) {
+              printError(foreign)
+              process.exit(1)
+            }
 
             const primaryDomain =
               options.primaryDomain ??
@@ -210,18 +233,11 @@ export function registerDomainsCommand(program: Command): void {
               }
             }
 
-            let regions: string[]
-            if (options.regions) {
-              regions = options.regions.split(',').map((r) => r.trim())
-            } else {
-              regions = await selectRegions()
-            }
-
             const certInput: CreateCertificateInput = {
-              cloudAccountId,
+              cloudAccountId: cloud.id,
               domainId: createdDomain.id,
               primaryDomain,
-              regions,
+              ...(await certificateCloudSettings(cloud, options.awsRegions)),
             }
             if (additionalDomains.length > 0) {
               certInput.additionalDomains = additionalDomains
@@ -254,15 +270,17 @@ export function registerDomainsCommand(program: Command): void {
     .command('request-cert [domainId]')
     .description('Request a certificate for an existing domain')
     .option('--cloud <id>', 'Cloud account ID')
-    .option('--regions <regions>', 'Comma-separated AWS regions (e.g., us-east-1,us-west-2)')
     .option('--primary-domain <fqdn>', 'Primary domain name (defaults to domain name)')
     .option('--additional-domains <domains>', 'Comma-separated additional domains for certificate')
+    .addOption(
+      awsOption('--aws-regions <regions>', 'Comma-separated regions to issue the certificate in')
+    )
     .action(
       async (
         domainId: string | undefined,
         options: {
           cloud?: string
-          regions?: string
+          awsRegions?: string
           primaryDomain?: string
           additionalDomains?: string
         }
@@ -288,7 +306,12 @@ export function registerDomainsCommand(program: Command): void {
             domainName = selected.name
           }
 
-          const cloudAccountId = options.cloud ?? (await selectCloud())
+          const cloud = await resolveCloud(options.cloud)
+          const foreign = foreignAwsFlagsMessage(cloud.provider, options)
+          if (foreign) {
+            printError(foreign)
+            process.exit(1)
+          }
 
           const primaryDomain =
             options.primaryDomain ??
@@ -318,18 +341,11 @@ export function registerDomainsCommand(program: Command): void {
             }
           }
 
-          let regions: string[]
-          if (options.regions) {
-            regions = options.regions.split(',').map((r) => r.trim())
-          } else {
-            regions = await selectRegions()
-          }
-
           const certInput: CreateCertificateInput = {
-            cloudAccountId,
+            cloudAccountId: cloud.id,
             domainId: selectedDomainId,
             primaryDomain,
-            regions,
+            ...(await certificateCloudSettings(cloud, options.awsRegions)),
           }
           if (additionalDomains.length > 0) {
             certInput.additionalDomains = additionalDomains

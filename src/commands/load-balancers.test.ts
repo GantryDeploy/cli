@@ -7,7 +7,9 @@ import type { MockInstance } from 'vitest'
 const graphqlRequest = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
 const select = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectNetwork = vi.hoisted(() => vi.fn())
 const selectRegion = vi.hoisted(() => vi.fn())
 
@@ -16,7 +18,7 @@ vi.mock('../lib/client', () => ({
   formatApiError: (error: unknown) => (error instanceof Error ? error.message : 'API error'),
   graphqlRequest,
 }))
-vi.mock('../lib/interactive-prompts', () => ({ selectCloud, selectNetwork, selectRegion }))
+vi.mock('../lib/interactive-prompts', () => ({ resolveCloud, selectNetwork, selectRegion }))
 
 const { registerLoadBalancersCommand } = await import('./load-balancers')
 
@@ -154,17 +156,27 @@ describe('load-balancers command', () => {
   })
 
   describe('types', () => {
-    it('prints each type with its network and region requirements', async () => {
+    it("prints each of the cloud's types with its network and region requirements", async () => {
       graphqlRequest.mockResolvedValueOnce(lbTypes)
 
-      await run(['lb', 'types'])
+      await run(['lb', 'types', '--cloud', 'cloud_1'])
 
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetLoadBalancerTypes')
+      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ provider: 'AWS' })
       expect(printed()).toContain('Application Load Balancer')
       expect(printed()).toContain('CloudFront')
       expect(printed()).toContain('Required')
       expect(stripVTControlCharacters(printed())).toMatch(/│ -\s+│ -\s+│/)
       expect(printed()).not.toContain('pwned')
+    })
+
+    it('says when the cloud has no load balancer types', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ loadBalancerTypes: [] })
+
+      await run(['lb', 'types', '--cloud', 'ca_9mx4'])
+
+      expect(printed()).toContain("This cloud doesn't support load balancers yet.")
     })
 
     it('prints the API error and exits non-zero', async () => {
@@ -178,17 +190,25 @@ describe('load-balancers command', () => {
 
   describe('create', () => {
     it('sends every flag without prompting', async () => {
-      graphqlRequest.mockResolvedValueOnce({ createLoadBalancer: created })
+      graphqlRequest
+        .mockResolvedValueOnce(lbTypes)
+        .mockResolvedValueOnce({ createLoadBalancer: created })
 
-      await run([...flags, '--slug', 'alb'])
+      await run([
+        ...flags,
+        '--slug',
+        'alb',
+        '--aws-certificate-arn',
+        'arn:aws:acm:us-east-1:123456789012:certificate/4f2a',
+      ])
 
       expect(input).not.toHaveBeenCalled()
       expect(select).not.toHaveBeenCalled()
       expect(selectNetwork).not.toHaveBeenCalled()
       expect(selectRegion).not.toHaveBeenCalled()
-      expect(graphqlRequest).toHaveBeenCalledTimes(1)
-      expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('mutation CreateLoadBalancer')
-      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
+      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ provider: 'AWS' })
+      expect(String(graphqlRequest.mock.calls[1]?.[0])).toContain('mutation CreateLoadBalancer')
+      expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
         input: {
           cloudAccountId: 'cloud_1',
           name: 'Public ALB',
@@ -196,6 +216,7 @@ describe('load-balancers command', () => {
           type: 'APPLICATION',
           networkId: 'h4nw8r',
           region: 'us-east-1',
+          aws: { defaultSslCertificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/4f2a' },
         },
       })
       expect(printed()).toContain('Load balancer created: Public ALB (public-alb)')
@@ -203,15 +224,14 @@ describe('load-balancers command', () => {
       expect(printed()).toContain('Deployment: z3cy6t')
     })
 
-    it('requires a network and region when the chosen type needs them', async () => {
-      selectCloud.mockResolvedValueOnce('cloud_1')
+    it('requires a network for a type that needs one and takes its region from it', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_1', provider: 'AWS' })
       input.mockResolvedValueOnce('Public ALB')
       graphqlRequest
         .mockResolvedValueOnce(lbTypes)
         .mockResolvedValueOnce({ createLoadBalancer: { ...created, deploymentId: undefined } })
       select.mockResolvedValueOnce('APPLICATION')
       selectNetwork.mockResolvedValueOnce('h4nw8r')
-      selectRegion.mockResolvedValueOnce('eu-west-1')
 
       await run(['lb', 'create'])
 
@@ -230,7 +250,8 @@ describe('load-balancers command', () => {
           ],
         })
       )
-      expect(selectNetwork).toHaveBeenCalledWith('cloud_1')
+      expect(selectNetwork).toHaveBeenCalledWith('cloud_1', { allowNone: false })
+      expect(selectRegion).not.toHaveBeenCalled()
       expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
         input: {
           cloudAccountId: 'cloud_1',
@@ -238,10 +259,25 @@ describe('load-balancers command', () => {
           slug: 'public-alb',
           type: 'APPLICATION',
           networkId: 'h4nw8r',
-          region: 'eu-west-1',
+          region: undefined,
         },
       })
       expect(printed()).not.toContain('Deployment:')
+    })
+
+    it("asks for a region in the cloud's list when a regional type has no network", async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({
+          loadBalancerTypes: [{ ...lbTypes.loadBalancerTypes[0], requiresNetwork: false }],
+        })
+        .mockResolvedValueOnce({ createLoadBalancer: created })
+      selectNetwork.mockResolvedValueOnce(undefined)
+      selectRegion.mockResolvedValueOnce('eu-west-1')
+
+      await run(['lb', 'create', '--cloud', 'cloud_1', '--name', 'Edge', '--type', 'APPLICATION'])
+
+      expect(selectRegion).toHaveBeenCalledWith('AWS')
+      expect(graphqlRequest.mock.calls[1]?.[1]).toMatchObject({ input: { region: 'eu-west-1' } })
     })
 
     it('makes the network optional and skips the region for a global type', async () => {
@@ -254,7 +290,7 @@ describe('load-balancers command', () => {
 
       await run(['lb', 'create', '--cloud', 'cloud_1'])
 
-      expect(selectCloud).not.toHaveBeenCalled()
+      expect(resolveCloud).toHaveBeenCalledWith('cloud_1')
       expect(selectNetwork).toHaveBeenCalledWith('cloud_1', { allowNone: true })
       expect(selectRegion).not.toHaveBeenCalled()
       expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
@@ -269,21 +305,50 @@ describe('load-balancers command', () => {
       })
     })
 
-    it('treats an unknown selected type as having no requirements', async () => {
+    it("looks up a --type's network and region needs before prompting", async () => {
       graphqlRequest
         .mockResolvedValueOnce(lbTypes)
         .mockResolvedValueOnce({ createLoadBalancer: created })
-      select.mockResolvedValueOnce('GATEWAY_HTTP')
-      selectNetwork.mockResolvedValueOnce(undefined)
+      selectNetwork.mockResolvedValueOnce('h4nw8r')
 
-      await run(['lb', 'create', '--cloud', 'cloud_1', '--name', 'Gateway'])
+      await run(['lb', 'create', '--cloud', 'cloud_1', '--name', 'Web', '--type', 'APPLICATION'])
 
-      expect(selectNetwork).toHaveBeenCalledWith('cloud_1', { allowNone: true })
-      expect(selectRegion).not.toHaveBeenCalled()
+      expect(selectNetwork).toHaveBeenCalledWith('cloud_1', { allowNone: false })
+    })
+
+    it('refuses a type the cloud does not offer', async () => {
+      graphqlRequest.mockResolvedValueOnce(lbTypes)
+
+      await expect(
+        run(['lb', 'create', '--cloud', 'cloud_1', '--name', 'Gateway', '--type', 'GATEWAY_HTTP'])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain('That load balancer type is not offered on this cloud.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses a cloud with no load balancer types', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ loadBalancerTypes: [] })
+
+      await expect(run(['lb', 'create', '--cloud', 'ca_9mx4'])).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain("This cloud doesn't support load balancers yet.")
+    })
+
+    it('refuses AWS flags on another cloud', async () => {
+      resolveCloud.mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+
+      await expect(
+        run(['lb', 'create', '--cloud', 'ca_9mx4', '--aws-certificate-arn', 'arn:aws:acm:x'])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain('--aws-certificate-arn only applies to AWS cloud accounts.')
+      expect(graphqlRequest).not.toHaveBeenCalled()
     })
 
     it('strips terminal escapes from server IDs', async () => {
-      graphqlRequest.mockResolvedValueOnce({
+      graphqlRequest.mockResolvedValueOnce(lbTypes).mockResolvedValueOnce({
         createLoadBalancer: {
           ...created,
           loadBalancer: { ...created.loadBalancer, id: 'l5zq8c\x1b]0;pwned\x07' },
@@ -300,7 +365,7 @@ describe('load-balancers command', () => {
     })
 
     it('exits with the server message when creation fails', async () => {
-      graphqlRequest.mockResolvedValueOnce({
+      graphqlRequest.mockResolvedValueOnce(lbTypes).mockResolvedValueOnce({
         createLoadBalancer: { success: false, message: 'ALB requires a network' },
       })
 
@@ -310,7 +375,9 @@ describe('load-balancers command', () => {
     })
 
     it('falls back to a generic message when no load balancer is returned', async () => {
-      graphqlRequest.mockResolvedValueOnce({ createLoadBalancer: { success: true } })
+      graphqlRequest
+        .mockResolvedValueOnce(lbTypes)
+        .mockResolvedValueOnce({ createLoadBalancer: { success: true } })
 
       await expect(run(flags)).rejects.toThrow(ExitError)
 
@@ -318,7 +385,9 @@ describe('load-balancers command', () => {
     })
 
     it('prints the API error when the mutation throws', async () => {
-      graphqlRequest.mockRejectedValueOnce(new Error('Quota exceeded'))
+      graphqlRequest
+        .mockResolvedValueOnce(lbTypes)
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
 
       await expect(run(flags)).rejects.toThrow('process.exit(1)')
 

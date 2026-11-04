@@ -7,8 +7,6 @@ import {
   getEngineFamily,
   normalizeEngine,
   toCacheEngineEnum,
-  toCatalogEngine,
-  toAwsDatabaseFlavor,
   toDatabaseEngineEnum,
 } from './engine'
 
@@ -50,15 +48,6 @@ describe('engine', () => {
   })
 
   it.each([
-    ['VALKEY', 'valkey'],
-    ['valkey', 'valkey'],
-    ['POSTGRESQL', 'postgres'],
-    ['postgresql', 'postgres'],
-  ])('toCatalogEngine(%s) is %s', (engine, expected) => {
-    expect(toCatalogEngine(engine)).toBe(expected)
-  })
-
-  it.each([
     ['valkey', 'VALKEY'],
     ['Redis', 'REDIS'],
     ['MEMCACHED', 'MEMCACHED'],
@@ -96,20 +85,5 @@ describe('engine', () => {
   it('returns the generated enum types', () => {
     expectTypeOf(toCacheEngineEnum).returns.toEqualTypeOf<CacheEngineEnum>()
     expectTypeOf(toDatabaseEngineEnum).returns.toEqualTypeOf<DatabaseEngineEnum>()
-  })
-})
-
-describe('toAwsDatabaseFlavor', () => {
-  it.each([
-    ['rds', 'rds'],
-    [' Aurora ', 'aurora'],
-  ])('reads %j as %s', (flavor, expected) => {
-    expect(toAwsDatabaseFlavor(flavor)).toBe(expected)
-  })
-
-  it('rejects another service without echoing it back', () => {
-    expect(() => toAwsDatabaseFlavor('docdb')).toThrow(
-      /^Unknown database service\. Use rds or aurora\.$/
-    )
   })
 })

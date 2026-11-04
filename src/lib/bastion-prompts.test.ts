@@ -110,6 +110,7 @@ describe('bastion prompts', () => {
         bastionPrivateKey: {
           success: true,
           privateKey: 'KEY',
+          sshUser: 'ec2-user',
           hostPublicKey: HOST_PUBLIC_KEY,
           hostKeyFingerprint: HOST_FINGERPRINT,
         },
@@ -117,6 +118,7 @@ describe('bastion prompts', () => {
 
       await expect(fetchBastionCredentials('edge')).resolves.toEqual({
         privateKey: 'KEY',
+        sshUser: 'ec2-user',
         hostPublicKey: HOST_PUBLIC_KEY,
         hostKeyFingerprint: HOST_FINGERPRINT,
       })
@@ -127,6 +129,7 @@ describe('bastion prompts', () => {
         bastionPrivateKey: {
           success: true,
           privateKey: 'KEY',
+          sshUser: 'ec2-user',
           hostPublicKey: null,
           hostKeyFingerprint: null,
         },
@@ -134,6 +137,7 @@ describe('bastion prompts', () => {
 
       await expect(fetchBastionCredentials('edge')).resolves.toEqual({
         privateKey: 'KEY',
+        sshUser: 'ec2-user',
         hostPublicKey: null,
         hostKeyFingerprint: null,
       })

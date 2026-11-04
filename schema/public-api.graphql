@@ -50,6 +50,35 @@ input ArtifactUploadCliOutputsInput {
   zipSize: Float!
 }
 
+input AwsAlbDefaultActionInput {
+  """e.g. text/html or application/json"""
+  contentType: String!
+
+  """Response body, up to 1024 characters"""
+  messageBody: String!
+
+  """HTTP status code, e.g. 200 or 503"""
+  statusCode: String!
+}
+
+"""Burstable performance setting for T-series instances"""
+enum AwsBurstablePerformanceEnum {
+  EXCLUDED
+  INCLUDED
+  REQUIRED
+}
+
+"""Catalog filters that only apply to AWS"""
+input AwsCacheCatalogFilterInput {
+  deploymentMode: AwsCacheDeploymentModeEnum
+}
+
+"""Cache deployment mode"""
+enum AwsCacheDeploymentModeEnum {
+  NODE_BASED
+  SERVERLESS
+}
+
 """Cache settings only AWS has"""
 input AwsCacheSettingsInput {
   """Valkey and Redis only"""
@@ -59,7 +88,7 @@ input AwsCacheSettingsInput {
   dailySnapshotTime: String
 
   """Required on create"""
-  deploymentMode: CacheDeploymentModeEnum
+  deploymentMode: AwsCacheDeploymentModeEnum
 
   """KMS key ARN for encryption at rest"""
   kmsKeyId: String
@@ -80,10 +109,50 @@ input AwsCacheSettingsInput {
   replicasPerNodeGroup: Int
 }
 
+input AwsCapacityProviderInput {
+  """Managed instances only"""
+  instanceRequirements: AwsInstanceRequirementsInput
+  type: AwsCapacityProviderTypeEnum!
+}
+
+"""Type of capacity provider"""
+enum AwsCapacityProviderTypeEnum {
+  FARGATE
+  FARGATE_SPOT
+  MANAGED_INSTANCES
+}
+
+"""Certificate settings only AWS has"""
+input AwsCertificateSettingsInput {
+  """
+  Regions to issue the certificate in. AWS issues one certificate per region.
+  """
+  regions: [String!]!
+}
+
+"""Container orchestrator a cluster runs"""
+enum AwsClusterOrchestratorEnum {
+  ECS
+}
+
 """Cluster settings for an AWS cloud account"""
 input AwsClusterSettingsInput {
-  capacityProviders: [CapacityProviderInput!]!
-  orchestrator: ClusterTypeEnum!
+  capacityProviders: [AwsCapacityProviderInput!]!
+  orchestrator: AwsClusterOrchestratorEnum!
+}
+
+"""Catalog filters that only apply to AWS"""
+input AwsDatabaseCatalogFilterInput {
+  deploymentMode: AwsDatabaseDeploymentModeEnum
+
+  """rds or aurora. Required when filtering by engine."""
+  flavor: String
+}
+
+"""Database deployment mode"""
+enum AwsDatabaseDeploymentModeEnum {
+  PROVISIONED
+  SERVERLESS
 }
 
 """
@@ -94,7 +163,7 @@ input AwsDatabaseSettingsInput {
   dbName: String
 
   """Serverless is Aurora only. Required at creation."""
-  deploymentMode: DatabaseDeploymentModeEnum
+  deploymentMode: AwsDatabaseDeploymentModeEnum
 
   """rds or aurora. Required at creation."""
   flavor: String
@@ -160,10 +229,37 @@ input AwsFilesystemSettingsInput {
   throughputMode: AwsEfsThroughputModeEnum
 }
 
+"""Which EC2 instances a managed instances capacity provider may launch"""
+input AwsInstanceRequirementsInput {
+  """e.g. c5.* or m5.large"""
+  allowedInstanceTypes: [String!]
+  burstablePerformance: AwsBurstablePerformanceEnum
+
+  """arm64 or x86_64"""
+  cpuArchitecture: String
+
+  """e.g. amazon-web-services, intel, amd"""
+  cpuManufacturers: [String!]
+  memoryMib: IntRangeInput
+  vcpuCount: IntRangeInput
+}
+
 """Load balancer settings for an AWS cloud account"""
 input AwsLoadBalancerSettingsInput {
+  """Application load balancers only: response when no route matches"""
+  defaultAction: AwsAlbDefaultActionInput
+
   """Application load balancers only: ACM certificate for HTTPS traffic"""
   defaultSslCertificateArn: String
+}
+
+"""
+NAT gateways an AWS network gets: none, one, or one per availability zone
+"""
+enum AwsNatGatewayOptionEnum {
+  NONE
+  PER_AZ
+  SINGLE
 }
 
 """Network settings only AWS has"""
@@ -172,7 +268,7 @@ input AwsNetworkSettingsInput {
   enableInternetAccess: Boolean
 
   """Defaults to SINGLE with internet access and NONE without"""
-  natGatewayOption: NatGatewayOptionEnum
+  natGatewayOption: AwsNatGatewayOptionEnum
 }
 
 """Short-lived AWS credentials scoped to writing one artifact"""
@@ -196,9 +292,6 @@ type Bastion {
   """
   hostPublicKey: String
   id: String!
-
-  """Cloud instance ID, set once provisioned"""
-  instanceId: String
   name: String!
 
   """Network ID - must have public subnets"""
@@ -207,12 +300,18 @@ type Bastion {
   """Cloud the bastion runs in, from its cloud account"""
   provider: String!
 
+  """Cloud-specific data including instance details and SSH key reference"""
+  providerData: JSON!
+
   """Public IP address used for SSH, set once provisioned"""
   publicIp: String
   region: String!
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """User to sign in as over SSH"""
+  sshUser: String!
   status: BastionStatusEnum!
 
   """Team ID"""
@@ -243,6 +342,9 @@ type BastionPrivateKeyResult {
 
   """SSH private key in PEM format"""
   privateKey: String
+
+  """User to sign in as over SSH"""
+  sshUser: String
   success: Boolean!
 }
 
@@ -279,13 +381,6 @@ type BlueprintPublisher {
 type BuildArg {
   name: String!
   value: String!
-}
-
-"""Burstable performance setting for T-series instances"""
-enum BurstablePerformanceEnum {
-  EXCLUDED
-  INCLUDED
-  REQUIRED
 }
 
 type Cache {
@@ -328,12 +423,6 @@ type Cache {
   updatedAt: String!
 }
 
-"""Cache deployment mode"""
-enum CacheDeploymentModeEnum {
-  NODE_BASED
-  SERVERLESS
-}
-
 """Cache engine type"""
 enum CacheEngineEnum {
   MEMCACHED
@@ -342,10 +431,13 @@ enum CacheEngineEnum {
 }
 
 type CacheEngineVersion {
-  engine: String!
-  family: String!
-  supportedModes: [String!]!
+  engine: CacheEngineEnum!
+
+  """Catalog details only this cloud has"""
+  providerData: JSON!
   supportedRegions: [String!]!
+
+  """Version string, e.g. 7.2"""
   version: String!
 }
 
@@ -358,12 +450,17 @@ type CacheMutationResult {
   success: Boolean!
 }
 
-type CacheNodeType {
+"""A node size a cache can be created with"""
+type CacheSize {
+  """Node family, e.g. t4g or r7g"""
   family: String!
+
+  """Memory in GiB"""
   memoryGiB: Float!
-  nodeType: String!
+
+  """The value to send as size, e.g. cache.t4g.small"""
   size: String!
-  supportedEngines: [String!]!
+  supportedEngines: [CacheEngineEnum!]!
   supportedRegions: [String!]!
   vcpu: Int!
 }
@@ -381,7 +478,11 @@ type CacheTypeInfo {
   guidance: String!
   provider: String!
   requiresNetwork: Boolean!
+
+  """Whether this engine can shard data across nodes in this cloud"""
   supportsClusterMode: Boolean!
+
+  """Whether this engine can run serverless in this cloud"""
   supportsServerless: Boolean!
   type: CacheEngineEnum!
 }
@@ -392,28 +493,22 @@ type CancelDeploymentResult {
   success: Boolean!
 }
 
-input CapacityProviderInput {
-  """Managed instances only"""
-  instanceRequirements: InstanceRequirementsInput
-  type: CapacityProviderTypeEnum!
-}
-
-"""Type of capacity provider"""
-enum CapacityProviderTypeEnum {
-  FARGATE
-  FARGATE_SPOT
-  MANAGED_INSTANCES
-}
-
 type Certificate {
   additionalDomains: [String!]
   cloudAccountId: String!
   createdAt: String!
   domainId: String
-  hasRegionalCertificates: Boolean!
   id: String!
   lastCheckedAt: String
   primaryDomain: String!
+
+  """Cloud the certificate is issued in, e.g. aws"""
+  provider: String!
+
+  """Settings only this cloud has. Its `provider` equals `provider`."""
+  providerData: JSON!
+
+  """Per-region certificates, for clouds that issue certificates per region"""
   regionalCertificates: [RegionalCertificate!]
   status: CertificateStatusEnum!
 
@@ -513,6 +608,9 @@ type CloudResource {
   id: String!
   projectId: String
   projectName: String
+
+  """Cloud the resource lives in"""
+  provider: String!
   resourceId: String
   resourceType: String!
   serviceId: String
@@ -561,17 +659,14 @@ enum ClusterStatusEnum {
   PENDING
 }
 
-"""Container orchestrator a cluster runs"""
-enum ClusterTypeEnum {
-  ECS
-}
-
 type ClusterTypeInfo {
   description: String!
   displayName: String!
   guidance: String
   provider: String!
-  type: ClusterTypeEnum!
+
+  """Orchestrator id from the cloud catalog"""
+  type: String!
 }
 
 type CompleteCliStepResult {
@@ -655,10 +750,12 @@ input CreateCacheInput {
 
 input CreateCertificateInput {
   additionalDomains: [String!]
+
+  """Required when the cloud account is AWS"""
+  aws: AwsCertificateSettingsInput
   cloudAccountId: String!
   domainId: String
   primaryDomain: String!
-  regions: [String!]!
 }
 
 input CreateClusterInput {
@@ -793,8 +890,7 @@ input CreateNetworkInput {
 }
 
 input CreateProjectInput {
-  """Cloud provider: aws, gcp, or cloudflare"""
-  cloudProvider: String!
+  cloudProvider: CloudProviderEnum!
   name: String!
   tag: String
 }
@@ -871,7 +967,7 @@ type Database {
   region: String!
 
   """
-  Machine size (an instance class on AWS). Null when the server scales on its own.
+  Machine size from the cloud catalog. Null when the server scales on its own.
   """
   size: String
 
@@ -894,12 +990,6 @@ type DatabaseCredentialsResult {
   username: String
 }
 
-"""Database deployment mode"""
-enum DatabaseDeploymentModeEnum {
-  PROVISIONED
-  SERVERLESS
-}
-
 """Database engine type"""
 enum DatabaseEngineEnum {
   MARIADB
@@ -910,19 +1000,14 @@ enum DatabaseEngineEnum {
 type DatabaseEngineVersion {
   deprecationDate: String
   description: String!
-  engine: String!
-  family: String!
-  supportedModes: [String!]!
-  supportedRegions: [String!]!
-  version: String!
-}
+  engine: DatabaseEngineEnum!
 
-type DatabaseInstanceClass {
-  family: String!
-  instanceClass: String!
-  memoryMb: Float!
-  size: String!
-  vcpu: Float!
+  """Catalog details only this cloud has"""
+  providerData: JSON!
+  supportedRegions: [String!]!
+
+  """Version string, e.g. 16.4"""
+  version: String!
 }
 
 type DatabaseMutationResult {
@@ -949,7 +1034,7 @@ type DatabaseServiceUser {
   id: String!
 
   """
-  SSM parameter holding the password, for password users. Never the password.
+  Secret reference holding the password, for password users. Never the password.
   """
   passwordSecret: String
   serviceId: String!
@@ -967,6 +1052,19 @@ type DatabaseServiceUser {
   username: String!
 }
 
+"""A server size a database can be created with"""
+type DatabaseSize {
+  """Instance family, e.g. t4g or r6g"""
+  family: String!
+
+  """Memory in megabytes"""
+  memoryMb: Int!
+
+  """The value to send as size, e.g. db.t4g.medium"""
+  size: String!
+  vcpu: Int!
+}
+
 """Status of a database"""
 enum DatabaseStatusEnum {
   ACTIVE
@@ -978,11 +1076,11 @@ type DatabaseTypeInfo {
   description: String!
   displayName: String!
   engine: DatabaseEngineEnum!
-
-  """Which of the cloud's database services runs it (on AWS, rds or aurora)"""
-  flavor: String!
   guidance: String!
   provider: String!
+
+  """Catalog details only this cloud has"""
+  providerData: JSON!
   requiresNetwork: Boolean!
   supportsServerless: Boolean!
 }
@@ -1218,21 +1316,6 @@ enum FilesystemStatusEnum {
   PENDING
 }
 
-"""Which EC2 instances a managed instances capacity provider may launch"""
-input InstanceRequirementsInput {
-  """e.g. c5.* or m5.large"""
-  allowedInstanceTypes: [String!]
-  burstablePerformance: BurstablePerformanceEnum
-
-  """arm64 or x86_64"""
-  cpuArchitecture: String
-
-  """e.g. amazon-web-services, intel, amd"""
-  cpuManufacturers: [String!]
-  memoryMib: IntRangeInput
-  vcpuCount: IntRangeInput
-}
-
 input IntRangeInput {
   max: Int
   min: Int!
@@ -1252,7 +1335,7 @@ type LoadBalancer {
   id: String!
   name: String!
 
-  """Network ID (required for AWS ALB)"""
+  """Network ID (required for application load balancers)"""
   networkId: String
 
   """Cloud the load balancer runs in"""
@@ -1420,15 +1503,6 @@ type Mutation {
   updateSecret(input: UpdateSecretInput!, team: String): SecretMutationResult!
 }
 
-"""
-NAT gateways an AWS network gets: none, one, or one per availability zone
-"""
-enum NatGatewayOptionEnum {
-  NONE
-  PER_AZ
-  SINGLE
-}
-
 type Network {
   """Address range"""
   cidr: String!
@@ -1575,38 +1649,25 @@ type Query {
   bastions(networkId: String, team: String): [Bastion!]!
   blueprint(reference: String!): Blueprint
   cache(id: String!, team: String): Cache
-  cacheEngineVersions(engine: String, region: String): [CacheEngineVersion!]!
-  cacheNodeTypes(engine: String, region: String): [CacheNodeType!]!
-  cacheTypes(provider: String): [CacheTypeInfo!]!
+  cacheEngineVersions(aws: AwsCacheCatalogFilterInput, engine: CacheEngineEnum, provider: CloudProviderEnum!, region: String): [CacheEngineVersion!]!
+  cacheSizes(engine: CacheEngineEnum, provider: CloudProviderEnum!, region: String): [CacheSize!]!
+  cacheTypes(provider: CloudProviderEnum!): [CacheTypeInfo!]!
   caches(team: String): [Cache!]!
   certificates(cloudAccountId: String, domainId: String, team: String): [Certificate!]!
   cloudAccountResources(cloudAccountId: String!, groupBy: ResourceGroupingEnum = PROJECT, team: String): CloudAccountResourcesResult!
-  cloudRegions(provider: String = "aws"): [CloudRegion!]!
+  cloudRegions(provider: CloudProviderEnum!): [CloudRegion!]!
   clouds(team: String): [CloudAccount!]!
-  clusterTypes(provider: String): [ClusterTypeInfo!]!
+  clusterTypes(provider: CloudProviderEnum!): [ClusterTypeInfo!]!
   clusters(team: String): [Cluster!]!
   database(id: String!, team: String): Database
   databaseCredentials(id: String!, team: String): DatabaseCredentialsResult!
-  databaseEngineVersions(
-    deploymentMode: String
-    engine: String
-
-    """AWS: rds or aurora. Defaults to rds."""
-    flavor: String
-    region: String
-  ): [DatabaseEngineVersion!]!
-  databaseInstanceClasses(
-    engine: String
-
-    """AWS: rds or aurora. Defaults to rds."""
-    flavor: String
-    region: String
-  ): [DatabaseInstanceClass!]!
+  databaseEngineVersions(aws: AwsDatabaseCatalogFilterInput, engine: DatabaseEngineEnum, provider: CloudProviderEnum!, region: String): [DatabaseEngineVersion!]!
   databaseLogs(cursor: String, grep: String, id: String!, limit: Int, since: String = "1h", team: String): LogPage!
 
   """Database users Gantry created on this server, one per service binding"""
   databaseServiceUsers(id: String!, team: String): [DatabaseServiceUser!]!
-  databaseTypes(provider: String): [DatabaseTypeInfo!]!
+  databaseSizes(aws: AwsDatabaseCatalogFilterInput, engine: DatabaseEngineEnum, provider: CloudProviderEnum!, region: String): [DatabaseSize!]!
+  databaseTypes(provider: CloudProviderEnum!): [DatabaseTypeInfo!]!
   databases(team: String): [Database!]!
   deployment(id: String!, team: String): Deployment
   deploymentStep(id: String!, team: String): DeploymentStep
@@ -1616,7 +1677,7 @@ type Query {
   environments(projectId: String, team: String): [Environment!]!
   filesystem(id: String!, team: String): Filesystem
   filesystems(team: String): [Filesystem!]!
-  loadBalancerTypes(provider: String): [LoadBalancerTypeInfo!]!
+  loadBalancerTypes(provider: CloudProviderEnum!): [LoadBalancerTypeInfo!]!
   loadBalancers(team: String): [LoadBalancer!]!
   networks(team: String): [Network!]!
   project(id: String, slug: String, team: String): Project
@@ -1634,7 +1695,6 @@ type Query {
 }
 
 type RegionalCertificate {
-  acmCertificateArn: String
   certificateId: String!
   createdAt: String!
 
@@ -1642,6 +1702,12 @@ type RegionalCertificate {
   dnsRecords: [DnsValidationRecord!]
   id: String!
   lastValidatedAt: String
+
+  """Cloud the certificate is issued in, e.g. aws"""
+  provider: String!
+
+  """Outputs only this cloud has. Its `provider` equals `provider`."""
+  providerData: JSON!
   region: String!
   status: CertificateStatusEnum!
   validationAttempts: Float!

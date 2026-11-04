@@ -4,7 +4,9 @@ import type { MockInstance } from 'vitest'
 
 const graphqlRequest = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
-const selectCloud = vi.hoisted(() => vi.fn())
+const resolveCloud = vi.hoisted(() =>
+  vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' }))
+)
 const selectRegion = vi.hoisted(() => vi.fn())
 
 vi.mock('@inquirer/prompts', () => ({ input }))
@@ -12,7 +14,7 @@ vi.mock('../lib/client', () => ({
   formatApiError: (error: unknown) => (error instanceof Error ? error.message : 'API error'),
   graphqlRequest,
 }))
-vi.mock('../lib/interactive-prompts', () => ({ selectCloud, selectRegion }))
+vi.mock('../lib/interactive-prompts', () => ({ resolveCloud, selectRegion }))
 
 const { registerNetworksCommand } = await import('./networks')
 
@@ -131,11 +133,11 @@ describe('networks command', () => {
         '--subnet',
         'private:10.20.16.0/20:us-east-1a',
         '--least-privilege',
-        '--nat',
+        '--aws-nat',
         'per-az',
       ])
 
-      expect(selectCloud).not.toHaveBeenCalled()
+      expect(resolveCloud).toHaveBeenCalledWith(expect.any(String))
       expect(selectRegion).not.toHaveBeenCalled()
       expect(input).not.toHaveBeenCalled()
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('mutation CreateNetwork')
@@ -160,7 +162,7 @@ describe('networks command', () => {
     })
 
     it('prompts for missing values and derives the slug from the name', async () => {
-      selectCloud.mockResolvedValueOnce('cloud_1')
+      resolveCloud.mockResolvedValueOnce({ id: 'cloud_1', provider: 'AWS' })
       selectRegion.mockResolvedValueOnce('eu-west-1')
       input.mockResolvedValueOnce('Staging Network').mockResolvedValueOnce('10.30.0.0/16')
       graphqlRequest.mockResolvedValueOnce({
@@ -236,6 +238,32 @@ describe('networks command', () => {
       ).rejects.toThrow('process.exit(1)')
 
       expect(printedErrors()).toContain('Rate limited')
+    })
+
+    it('sends no aws section to another cloud and refuses AWS flags there', async () => {
+      resolveCloud
+        .mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+        .mockResolvedValueOnce({ id: 'ca_9mx4', provider: 'GCP' })
+      graphqlRequest.mockResolvedValueOnce({ createNetwork: created })
+
+      await run(['create', '--cloud', 'ca_9mx4', '--name', 'n', '--region', 'us-central1'])
+
+      expect(graphqlRequest.mock.calls[0]?.[1]).not.toHaveProperty('input.aws')
+
+      await expect(
+        run(['create', '--cloud', 'ca_9mx4', '--name', 'n', '--aws-nat', 'single'])
+      ).rejects.toThrow(ExitError)
+      expect(printedErrors()).toContain('--aws-nat only applies to AWS cloud accounts.')
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses an unknown NAT option before calling the API', async () => {
+      await expect(
+        run(['create', '--cloud', 'cloud_1', '--name', 'n', '--aws-nat', 'double'])
+      ).rejects.toThrow(ExitError)
+
+      expect(printedErrors()).toContain('--aws-nat must be none, single or per-az')
+      expect(graphqlRequest).not.toHaveBeenCalled()
     })
   })
 })

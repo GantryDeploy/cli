@@ -52,6 +52,131 @@ input ArtifactUploadCliOutputsInput {
   zipSize: Float!
 }
 
+"""Cache settings only AWS has"""
+input AwsCacheSettingsInput {
+  """Valkey and Redis only"""
+  clusterMode: Boolean
+
+  """Daily backup time, HH:MM in UTC"""
+  dailySnapshotTime: String
+
+  """Required on create"""
+  deploymentMode: CacheDeploymentModeEnum
+
+  """KMS key ARN for encryption at rest"""
+  kmsKeyId: String
+
+  """Serverless only, 1 to 5000"""
+  maxDataStorageGb: Int
+
+  """Serverless only, 1000 to 15000000"""
+  maxEcpuPerSecond: Int
+
+  """Node-based only"""
+  numCacheNodes: Int
+
+  """Shards, cluster mode only"""
+  numNodeGroups: Int
+
+  """Replicas per shard, cluster mode only"""
+  replicasPerNodeGroup: Int
+}
+
+"""Cluster settings for an AWS cloud account"""
+input AwsClusterSettingsInput {
+  capacityProviders: [CapacityProviderInput!]!
+  orchestrator: ClusterTypeEnum!
+}
+
+"""
+Settings only AWS servers have. Service, deployment mode, database name, encryption and master username are fixed at creation.
+"""
+input AwsDatabaseSettingsInput {
+  """Database RDS creates with the server"""
+  dbName: String
+
+  """Serverless is Aurora only. Required at creation."""
+  deploymentMode: DatabaseDeploymentModeEnum
+
+  """rds or aurora. Required at creation."""
+  flavor: String
+
+  """Required for io1 and io2 storage"""
+  iops: Int
+
+  """KMS key ARN for storage encryption"""
+  kmsKeyId: String
+
+  """Defaults to on. Changing this either way sets a new master password."""
+  masterPasswordRotation: Boolean
+
+  """Storage autoscaling ceiling in GB, RDS only"""
+  maxAllocatedStorage: Int
+
+  """Serverless only, in steps of 0.5"""
+  maxCapacity: Float
+
+  """Serverless only, in steps of 0.5"""
+  minCapacity: Float
+  performanceInsightsEnabled: Boolean
+
+  """Serverless with a minimum capacity of 0 only, 300 to 86400"""
+  secondsUntilAutoPause: Int
+  storageEncrypted: Boolean
+
+  """gp3, io1 or io2, RDS only"""
+  storageType: String
+
+  """Master username. Defaults to the slug."""
+  username: String
+}
+
+"""EFS performance mode"""
+enum AwsEfsPerformanceModeEnum {
+  GENERAL_PURPOSE
+  MAX_IO
+}
+
+"""EFS throughput mode"""
+enum AwsEfsThroughputModeEnum {
+  BURSTING
+  ELASTIC
+  PROVISIONED
+}
+
+"""Settings only EFS filesystems have"""
+input AwsFilesystemSettingsInput {
+  """Default: true"""
+  encrypted: Boolean
+
+  """KMS key ARN for encryption"""
+  kmsKeyId: String
+
+  """Default: generalPurpose"""
+  performanceMode: AwsEfsPerformanceModeEnum
+
+  """MiB/s, provisioned throughput only"""
+  provisionedThroughputMibps: Int
+
+  """Default: elastic"""
+  throughputMode: AwsEfsThroughputModeEnum
+}
+
+"""Load balancer settings for an AWS cloud account"""
+input AwsLoadBalancerSettingsInput {
+  """Application load balancers only: ACM certificate for HTTPS traffic"""
+  defaultSslCertificateArn: String
+}
+
+"""Network settings only AWS has"""
+input AwsNetworkSettingsInput {
+  """Defaults to true"""
+  enableInternetAccess: Boolean
+
+  """Defaults to SINGLE with internet access and NONE without"""
+  natGatewayOption: NatGatewayOptionEnum
+}
+
 type Bastion {
   cloudAccountId: String!
   createdAt: String!
@@ -74,8 +199,12 @@ type Bastion {
   """Network ID - must have public subnets"""
   networkId: String!
 
+  """Cloud the bastion runs in, from its cloud account"""
+  provider: String!
+
   """Public IP address used for SSH, set once provisioned"""
   publicIp: String
+  region: String!
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
@@ -147,13 +276,23 @@ type BuildArg {
   value: String!
 }
 
+"""Burstable performance setting for T-series instances"""
+enum BurstablePerformanceEnum {
+  EXCLUDED
+  INCLUDED
+  REQUIRED
+}
+
 type Cache {
+  """Days of backups kept"""
+  backupRetentionDays: Int!
   cloudAccountId: String!
   createdAt: String!
 
   """Hostname clients connect to, set once provisioned"""
   endpoint: String
   engine: CacheEngineEnum!
+  engineVersion: String
   id: String!
   name: String!
 
@@ -163,6 +302,18 @@ type Cache {
   """Port clients connect to, set once provisioned"""
   port: Int
 
+  """Cloud the cache runs in, e.g. aws"""
+  provider: String!
+
+  """
+  Settings and outputs only this cloud has. Its `provider` equals `provider`.
+  """
+  providerData: JSON!
+  region: String!
+
+  """Node size. Null for serverless."""
+  size: String
+
   """URL-friendly identifier for CLI and API references"""
   slug: String!
   status: CacheStatusEnum!
@@ -170,6 +321,12 @@ type Cache {
   """Team ID"""
   teamId: String!
   updatedAt: String!
+}
+
+"""Cache deployment mode"""
+enum CacheDeploymentModeEnum {
+  NODE_BASED
+  SERVERLESS
 }
 
 """Cache engine type"""
@@ -228,6 +385,19 @@ type CancelDeploymentResult {
   deployment: Deployment
   message: String
   success: Boolean!
+}
+
+input CapacityProviderInput {
+  """Managed instances only"""
+  instanceRequirements: InstanceRequirementsInput
+  type: CapacityProviderTypeEnum!
+}
+
+"""Type of capacity provider"""
+enum CapacityProviderTypeEnum {
+  FARGATE
+  FARGATE_SPOT
+  MANAGED_INSTANCES
 }
 
 type Certificate {
@@ -354,7 +524,11 @@ type Cluster {
   """Network ID (required for managed instances)"""
   networkId: String
 
-  """AWS region for the cluster"""
+  """Cloud the cluster runs in"""
+  provider: String!
+
+  """Settings and outputs only this cloud has, such as capacity providers"""
+  providerData: JSON!
   region: String!
 
   """URL-friendly identifier for CLI and API references"""
@@ -363,7 +537,6 @@ type Cluster {
 
   """Team ID"""
   teamId: String!
-  type: ClusterTypeEnum!
   updatedAt: String!
 }
 
@@ -383,7 +556,7 @@ enum ClusterStatusEnum {
   PENDING
 }
 
-"""Type of cluster"""
+"""Container orchestrator a cluster runs"""
 enum ClusterTypeEnum {
   ECS
 }
@@ -441,11 +614,20 @@ input CreateBastionInput {
 }
 
 input CreateCacheInput {
+  """Required when the cloud account is AWS"""
+  aws: AwsCacheSettingsInput
+
+  """Days of backups kept. Defaults to 0 (none). Memcached keeps none."""
+  backupRetentionDays: Int
+
   """Cloud account ID"""
   cloudAccountId: String!
 
   """Cache engine"""
   engine: CacheEngineEnum!
+
+  """Engine version, e.g. 8.0"""
+  engineVersion: String
 
   """User-friendly name"""
   name: String!
@@ -453,8 +635,8 @@ input CreateCacheInput {
   """Network ID - required for all caches"""
   networkId: String!
 
-  """Provider-specific configuration including region and deployment mode"""
-  providerData: JSON
+  """Node size. Leave out for a serverless cache."""
+  size: String
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
@@ -469,6 +651,9 @@ input CreateCertificateInput {
 }
 
 input CreateClusterInput {
+  """Required when the cloud account is AWS"""
+  aws: AwsClusterSettingsInput
+
   """Cloud account ID"""
   cloudAccountId: String!
 
@@ -477,26 +662,30 @@ input CreateClusterInput {
 
   """Network ID - required for managed instances"""
   networkId: String
-
-  """Provider-specific configuration including capacity providers"""
-  providerData: JSON
-
-  """AWS region for the cluster"""
   region: String!
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
-
-  """Cluster type"""
-  type: ClusterTypeEnum!
 }
 
+"""
+A new database server. Send the settings section for the cloud account it runs in.
+"""
 input CreateDatabaseInput {
+  aws: AwsDatabaseSettingsInput
+
+  """Days of automatic backups. Defaults to 7."""
+  backupRetentionDays: Int
+
   """Cloud account ID"""
   cloudAccountId: String!
 
   """Database engine"""
   engine: DatabaseEngineEnum!
+  engineVersion: String
+
+  """Keep a standby copy in a second zone"""
+  highAvailability: Boolean
 
   """User-friendly name"""
   name: String!
@@ -504,11 +693,17 @@ input CreateDatabaseInput {
   """Network ID - required for all databases"""
   networkId: String!
 
-  """Provider-specific configuration including region and deployment mode"""
-  providerData: JSON
+  """Reachable from outside the network"""
+  publiclyAccessible: Boolean
+
+  """Machine size. Not used when the server scales on its own."""
+  size: String
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Storage in GB"""
+  storageGb: Int
 }
 
 input CreateDomainInput {
@@ -528,37 +723,38 @@ input CreateEnvironmentInput {
 }
 
 input CreateFilesystemInput {
+  """Required when the cloud account is AWS"""
+  aws: AwsFilesystemSettingsInput
+
   """Cloud account ID"""
   cloudAccountId: String!
 
   """User-friendly name"""
   name: String!
 
-  """Network ID - required for all filesystems"""
+  """Network ID. The filesystem takes the network's region."""
   networkId: String!
-
-  """Provider-specific configuration including region"""
-  providerData: JSON
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
-
-  """Filesystem type (efs, filestore)"""
-  type: FilesystemTypeEnum!
 }
 
 input CreateLoadBalancerInput {
+  aws: AwsLoadBalancerSettingsInput
+
   """Cloud account ID"""
   cloudAccountId: String!
 
   """User-friendly name"""
   name: String!
 
-  """Network ID - required for AWS ALB"""
+  """Network ID. Required for application load balancers."""
   networkId: String
 
-  """Provider-specific configuration including region"""
-  providerData: JSON
+  """
+  Required for regional types without a network. A load balancer in a network takes the network's region.
+  """
+  region: String
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
@@ -568,12 +764,21 @@ input CreateLoadBalancerInput {
 }
 
 input CreateNetworkInput {
+  """Only for an AWS cloud account"""
+  aws: AwsNetworkSettingsInput
+
+  """Address range, e.g. 10.0.0.0/16"""
+  cidr: String!
   cloudAccountId: String!
+
+  """
+  When true, databases and caches get no network-wide ingress. Defaults to false.
+  """
+  leastPrivilegeMode: Boolean
   name: String!
-  providerConfig: JSON
   region: String!
   slug: String!
-  subnets: JSON
+  subnets: [NetworkSubnetInput!]!
 }
 
 input CreateProjectInput {
@@ -621,12 +826,18 @@ type CreateVersionResult {
 }
 
 type Database {
+  """Days of automatic backups. 0 means backups are off."""
+  backupRetentionDays: Int!
   cloudAccountId: String!
   createdAt: String!
 
   """Hostname clients connect to, set once provisioned"""
   endpoint: String
   engine: DatabaseEngineEnum!
+  engineVersion: String
+
+  """A standby copy in a second zone"""
+  highAvailability: Boolean!
   id: String!
   name: String!
 
@@ -636,12 +847,29 @@ type Database {
   """Port clients connect to, set once provisioned"""
   port: Int
 
+  """Cloud the server runs in, from its cloud account"""
+  provider: String!
+
+  """
+  Settings and outputs only this server cloud has, with `provider` inside
+  """
+  providerData: JSON!
+
   """Whether the database accepts connections from the internet"""
-  publiclyAccessible: Boolean
+  publiclyAccessible: Boolean!
+  region: String!
+
+  """
+  Machine size (an instance class on AWS). Null when the server scales on its own.
+  """
+  size: String
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
   status: DatabaseStatusEnum!
+
+  """Null when storage grows on its own"""
+  storageGb: Int
 
   """Team ID"""
   teamId: String!
@@ -655,10 +883,14 @@ type DatabaseCredentialsResult {
   username: String
 }
 
+"""Database deployment mode"""
+enum DatabaseDeploymentModeEnum {
+  PROVISIONED
+  SERVERLESS
+}
+
 """Database engine type"""
 enum DatabaseEngineEnum {
-  AURORA_MYSQL
-  AURORA_POSTGRESQL
   MARIADB
   MYSQL
   POSTGRESQL
@@ -734,11 +966,14 @@ enum DatabaseStatusEnum {
 type DatabaseTypeInfo {
   description: String!
   displayName: String!
+  engine: DatabaseEngineEnum!
+
+  """Which of the cloud's database services runs it (on AWS, rds or aurora)"""
+  flavor: String!
   guidance: String!
   provider: String!
   requiresNetwork: Boolean!
   supportsServerless: Boolean!
-  type: DatabaseEngineEnum!
 }
 
 """
@@ -941,13 +1176,19 @@ type Filesystem {
   """Network ID - required for all filesystems"""
   networkId: String!
 
+  """Cloud the filesystem lives in (aws, gcp, ...)"""
+  provider: String!
+
+  """Settings and outputs only this cloud has"""
+  providerData: JSON!
+  region: String!
+
   """URL-friendly identifier for CLI and API references"""
   slug: String!
   status: FilesystemStatusEnum!
 
   """Team ID"""
   teamId: String!
-  type: FilesystemTypeEnum!
   updatedAt: String!
 }
 
@@ -966,10 +1207,24 @@ enum FilesystemStatusEnum {
   PENDING
 }
 
-"""Filesystem provider type"""
-enum FilesystemTypeEnum {
-  EFS
-  FILESTORE
+"""Which EC2 instances a managed instances capacity provider may launch"""
+input InstanceRequirementsInput {
+  """e.g. c5.* or m5.large"""
+  allowedInstanceTypes: [String!]
+  burstablePerformance: BurstablePerformanceEnum
+
+  """arm64 or x86_64"""
+  cpuArchitecture: String
+
+  """e.g. amazon-web-services, intel, amd"""
+  cpuManufacturers: [String!]
+  memoryMib: IntRangeInput
+  vcpuCount: IntRangeInput
+}
+
+input IntRangeInput {
+  max: Int
+  min: Int!
 }
 
 """
@@ -980,11 +1235,23 @@ scalar JSON
 type LoadBalancer {
   cloudAccountId: String!
   createdAt: String!
+
+  """Hostname or URL clients reach, once provisioned"""
+  endpoint: String
   id: String!
   name: String!
 
   """Network ID (required for AWS ALB)"""
   networkId: String
+
+  """Cloud the load balancer runs in"""
+  provider: String!
+
+  """Settings and outputs only this cloud has, such as listener ARNs"""
+  providerData: JSON!
+
+  """Unset for global load balancers"""
+  region: String
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
@@ -1142,14 +1409,35 @@ type Mutation {
   updateSecret(input: UpdateSecretInput!, team: String): SecretMutationResult!
 }
 
+"""
+NAT gateways an AWS network gets: none, one, or one per availability zone
+"""
+enum NatGatewayOptionEnum {
+  NONE
+  PER_AZ
+  SINGLE
+}
+
 type Network {
+  """Address range"""
+  cidr: String!
   cloudAccountId: String!
   createdAt: String!
   id: String!
+
+  """When true, databases and caches get no network-wide ingress"""
+  leastPrivilegeMode: Boolean!
   name: String!
+
+  """Cloud the network is in, e.g. aws"""
+  provider: String!
+
+  """Settings and ids only this cloud has"""
+  providerData: JSON!
   region: String!
   slug: String!
   stackStatus: String
+  subnets: [NetworkSubnet!]!
 
   """Team ID"""
   teamId: String!
@@ -1160,6 +1448,27 @@ type NetworkMutationResult {
   message: String
   network: Network
   success: Boolean!
+}
+
+type NetworkSubnet {
+  cidr: String!
+  name: String!
+
+  """The subnet id in the cloud, set by provisioning"""
+  subnetId: String
+  type: SubnetTypeEnum!
+
+  """Availability zone"""
+  zone: String
+}
+
+input NetworkSubnetInput {
+  cidr: String!
+  name: String!
+  type: SubnetTypeEnum!
+
+  """Availability zone"""
+  zone: String
 }
 
 """A pre-signed S3 upload for one file"""
@@ -1252,8 +1561,21 @@ type Query {
   clusters(team: String): [Cluster!]!
   database(id: String!, team: String): Database
   databaseCredentials(id: String!, team: String): DatabaseCredentialsResult!
-  databaseEngineVersions(deploymentMode: String, engine: String, region: String): [DatabaseEngineVersion!]!
-  databaseInstanceClasses(engine: String, region: String): [DatabaseInstanceClass!]!
+  databaseEngineVersions(
+    deploymentMode: String
+    engine: String
+
+    """AWS: rds or aurora. Defaults to rds."""
+    flavor: String
+    region: String
+  ): [DatabaseEngineVersion!]!
+  databaseInstanceClasses(
+    engine: String
+
+    """AWS: rds or aurora. Defaults to rds."""
+    flavor: String
+    region: String
+  ): [DatabaseInstanceClass!]!
   databaseLogs(cursor: String, grep: String, id: String!, limit: Int, since: String = "1h", team: String): LogPage!
 
   """Database users Gantry created on this server, one per service binding"""
@@ -1417,8 +1739,14 @@ type Secret {
   id: String!
   keys: [String!]!
   name: String!
+
+  """Cloud the secret lives in, from its cloud account"""
+  provider: String!
+
+  """Cloud-specific identifiers. Never holds secret values."""
+  providerData: JSON!
   providerSecretId: String
-  region: String
+  region: String!
 
   """Team ID"""
   teamId: String!
@@ -1547,6 +1875,11 @@ type SubmitManifestResult {
   success: Boolean!
 }
 
+enum SubnetTypeEnum {
+  PRIVATE
+  PUBLIC
+}
+
 type TeardownPreviewResult {
   environmentId: String!
   environmentName: String!
@@ -1589,44 +1922,27 @@ type TriggerRerouteResult {
 }
 
 """
-Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; an instance class change restarts it briefly.
+Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly.
 """
 input UpdateDatabaseInput {
-  """Storage in GB, non-Aurora only. It can only grow."""
-  allocatedStorage: Int
+  aws: AwsDatabaseSettingsInput
 
   """
   Days of automatic backups. 0 turns backups off and deletes existing ones.
   """
-  backupRetentionPeriod: Int
+  backupRetentionDays: Int
 
-  """Provisioned servers only. Restarts the server."""
-  instanceClass: String
-
-  """Required for io1 and io2 storage"""
-  iops: Int
-
-  """Changing this either way sets a new master password"""
-  masterPasswordRotation: Boolean
-
-  """Serverless only, in steps of 0.5"""
-  maxCapacity: Float
-
-  """Serverless only, in steps of 0.5"""
-  minCapacity: Float
-
-  """Standby copy in a second zone, non-Aurora only"""
-  multiAz: Boolean
+  """Keep a standby copy in a second zone"""
+  highAvailability: Boolean
 
   """User-friendly name"""
   name: String
-  performanceInsightsEnabled: Boolean
 
-  """Serverless with a minimum capacity of 0 only, 300 to 86400"""
-  secondsUntilAutoPause: Int
+  """Provisioned servers only. Restarts the server."""
+  size: String
 
-  """gp3, io1 or io2, non-Aurora only"""
-  storageType: String
+  """Storage in GB. It can only grow."""
+  storageGb: Int
 }
 
 input UpdateSecretInput {

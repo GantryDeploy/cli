@@ -48,7 +48,7 @@ const created = {
     id: 'clu_3',
     name: 'Web',
     slug: 'web',
-    type: 'ECS',
+    provider: 'aws',
     status: 'PENDING',
     region: 'us-east-1',
   },
@@ -102,7 +102,7 @@ describe('clusters command', () => {
             id: 'clu_3',
             name: 'Web\x1b]0;pwned\x07',
             slug: 'web',
-            type: 'ECS',
+            provider: 'aws',
             status: 'active',
             region: 'us-east-1',
             cloudAccountId: 'cloud_1',
@@ -115,7 +115,7 @@ describe('clusters command', () => {
 
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetClusters')
       expect(printed()).toContain('clu_3')
-      expect(printed()).toContain('ECS')
+      expect(printed()).toContain('aws')
       expect(printed()).toContain('ACTIVE')
       expect(printed()).toContain('us-east-1')
       expect(printed()).not.toContain('pwned')
@@ -176,7 +176,7 @@ describe('clusters command', () => {
           cloudAccountId: 'cloud_1',
           name: 'Web',
           slug: 'web-prod',
-          type: 'ECS',
+          aws: { orchestrator: 'ECS', capacityProviders: [{ type: 'FARGATE' }] },
           region: 'us-east-1',
           networkId: 'h4nw8r',
         },
@@ -213,7 +213,7 @@ describe('clusters command', () => {
           cloudAccountId: 'cloud_1',
           name: 'Worker Pool',
           slug: 'worker-pool',
-          type: 'ECS',
+          aws: { orchestrator: 'ECS', capacityProviders: [{ type: 'FARGATE' }] },
           region: 'ap-southeast-2',
           networkId: undefined,
         },

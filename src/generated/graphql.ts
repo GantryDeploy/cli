@@ -21,6 +21,103 @@ export type ArtifactUploadCliOutputsInput = {
   zipSize: number;
 };
 
+/** Cache settings only AWS has */
+export type AwsCacheSettingsInput = {
+  /** Valkey and Redis only */
+  clusterMode?: boolean | null | undefined;
+  /** Daily backup time, HH:MM in UTC */
+  dailySnapshotTime?: string | null | undefined;
+  /** Required on create */
+  deploymentMode?: CacheDeploymentModeEnum | null | undefined;
+  /** KMS key ARN for encryption at rest */
+  kmsKeyId?: string | null | undefined;
+  /** Serverless only, 1 to 5000 */
+  maxDataStorageGb?: number | null | undefined;
+  /** Serverless only, 1000 to 15000000 */
+  maxEcpuPerSecond?: number | null | undefined;
+  /** Node-based only */
+  numCacheNodes?: number | null | undefined;
+  /** Shards, cluster mode only */
+  numNodeGroups?: number | null | undefined;
+  /** Replicas per shard, cluster mode only */
+  replicasPerNodeGroup?: number | null | undefined;
+};
+
+/** Cluster settings for an AWS cloud account */
+export type AwsClusterSettingsInput = {
+  capacityProviders: Array<CapacityProviderInput>;
+  orchestrator: ClusterTypeEnum;
+};
+
+/** Settings only AWS servers have. Service, deployment mode, database name, encryption and master username are fixed at creation. */
+export type AwsDatabaseSettingsInput = {
+  /** Database RDS creates with the server */
+  dbName?: string | null | undefined;
+  /** Serverless is Aurora only. Required at creation. */
+  deploymentMode?: DatabaseDeploymentModeEnum | null | undefined;
+  /** rds or aurora. Required at creation. */
+  flavor?: string | null | undefined;
+  /** Required for io1 and io2 storage */
+  iops?: number | null | undefined;
+  /** KMS key ARN for storage encryption */
+  kmsKeyId?: string | null | undefined;
+  /** Defaults to on. Changing this either way sets a new master password. */
+  masterPasswordRotation?: boolean | null | undefined;
+  /** Storage autoscaling ceiling in GB, RDS only */
+  maxAllocatedStorage?: number | null | undefined;
+  /** Serverless only, in steps of 0.5 */
+  maxCapacity?: number | null | undefined;
+  /** Serverless only, in steps of 0.5 */
+  minCapacity?: number | null | undefined;
+  performanceInsightsEnabled?: boolean | null | undefined;
+  /** Serverless with a minimum capacity of 0 only, 300 to 86400 */
+  secondsUntilAutoPause?: number | null | undefined;
+  storageEncrypted?: boolean | null | undefined;
+  /** gp3, io1 or io2, RDS only */
+  storageType?: string | null | undefined;
+  /** Master username. Defaults to the slug. */
+  username?: string | null | undefined;
+};
+
+/** EFS performance mode */
+export type AwsEfsPerformanceModeEnum =
+  | 'GENERAL_PURPOSE'
+  | 'MAX_IO';
+
+/** EFS throughput mode */
+export type AwsEfsThroughputModeEnum =
+  | 'BURSTING'
+  | 'ELASTIC'
+  | 'PROVISIONED';
+
+/** Settings only EFS filesystems have */
+export type AwsFilesystemSettingsInput = {
+  /** Default: true */
+  encrypted?: boolean | null | undefined;
+  /** KMS key ARN for encryption */
+  kmsKeyId?: string | null | undefined;
+  /** Default: generalPurpose */
+  performanceMode?: AwsEfsPerformanceModeEnum | null | undefined;
+  /** MiB/s, provisioned throughput only */
+  provisionedThroughputMibps?: number | null | undefined;
+  /** Default: elastic */
+  throughputMode?: AwsEfsThroughputModeEnum | null | undefined;
+};
+
+/** Load balancer settings for an AWS cloud account */
+export type AwsLoadBalancerSettingsInput = {
+  /** Application load balancers only: ACM certificate for HTTPS traffic */
+  defaultSslCertificateArn?: string | null | undefined;
+};
+
+/** Network settings only AWS has */
+export type AwsNetworkSettingsInput = {
+  /** Defaults to true */
+  enableInternetAccess?: boolean | null | undefined;
+  /** Defaults to SINGLE with internet access and NONE without */
+  natGatewayOption?: NatGatewayOptionEnum | null | undefined;
+};
+
 /** Status of a bastion host */
 export type BastionStatusEnum =
   | 'ACTIVE'
@@ -30,6 +127,17 @@ export type BastionStatusEnum =
   | 'FAILED'
   | 'PENDING'
   | 'PROVISIONING';
+
+/** Burstable performance setting for T-series instances */
+export type BurstablePerformanceEnum =
+  | 'EXCLUDED'
+  | 'INCLUDED'
+  | 'REQUIRED';
+
+/** Cache deployment mode */
+export type CacheDeploymentModeEnum =
+  | 'NODE_BASED'
+  | 'SERVERLESS';
 
 /** Cache engine type */
 export type CacheEngineEnum =
@@ -42,6 +150,18 @@ export type CacheStatusEnum =
   | 'ACTIVE'
   | 'FAILED'
   | 'PENDING';
+
+export type CapacityProviderInput = {
+  /** Managed instances only */
+  instanceRequirements?: InstanceRequirementsInput | null | undefined;
+  type: CapacityProviderTypeEnum;
+};
+
+/** Type of capacity provider */
+export type CapacityProviderTypeEnum =
+  | 'FARGATE'
+  | 'FARGATE_SPOT'
+  | 'MANAGED_INSTANCES';
 
 /** Certificate status values */
 export type CertificateStatusEnum =
@@ -84,7 +204,7 @@ export type ClusterStatusEnum =
   | 'FAILED'
   | 'PENDING';
 
-/** Type of cluster */
+/** Container orchestrator a cluster runs */
 export type ClusterTypeEnum =
   | 'ECS';
 
@@ -106,16 +226,22 @@ export type CreateBastionInput = {
 };
 
 export type CreateCacheInput = {
+  /** Required when the cloud account is AWS */
+  aws?: AwsCacheSettingsInput | null | undefined;
+  /** Days of backups kept. Defaults to 0 (none). Memcached keeps none. */
+  backupRetentionDays?: number | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** Cache engine */
   engine: CacheEngineEnum;
+  /** Engine version, e.g. 8.0 */
+  engineVersion?: string | null | undefined;
   /** User-friendly name */
   name: string;
   /** Network ID - required for all caches */
   networkId: string;
-  /** Provider-specific configuration including region and deployment mode */
-  providerData?: Record<string, unknown> | null | undefined;
+  /** Node size. Leave out for a serverless cache. */
+  size?: string | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
 };
@@ -129,35 +255,43 @@ export type CreateCertificateInput = {
 };
 
 export type CreateClusterInput = {
+  /** Required when the cloud account is AWS */
+  aws?: AwsClusterSettingsInput | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
   /** Network ID - required for managed instances */
   networkId?: string | null | undefined;
-  /** Provider-specific configuration including capacity providers */
-  providerData?: Record<string, unknown> | null | undefined;
-  /** AWS region for the cluster */
   region: string;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
-  /** Cluster type */
-  type: ClusterTypeEnum;
 };
 
+/** A new database server. Send the settings section for the cloud account it runs in. */
 export type CreateDatabaseInput = {
+  aws?: AwsDatabaseSettingsInput | null | undefined;
+  /** Days of automatic backups. Defaults to 7. */
+  backupRetentionDays?: number | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** Database engine */
   engine: DatabaseEngineEnum;
+  engineVersion?: string | null | undefined;
+  /** Keep a standby copy in a second zone */
+  highAvailability?: boolean | null | undefined;
   /** User-friendly name */
   name: string;
   /** Network ID - required for all databases */
   networkId: string;
-  /** Provider-specific configuration including region and deployment mode */
-  providerData?: Record<string, unknown> | null | undefined;
+  /** Reachable from outside the network */
+  publiclyAccessible?: boolean | null | undefined;
+  /** Machine size. Not used when the server scales on its own. */
+  size?: string | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
+  /** Storage in GB */
+  storageGb?: number | null | undefined;
 };
 
 export type CreateDomainInput = {
@@ -177,29 +311,28 @@ export type CreateEnvironmentInput = {
 };
 
 export type CreateFilesystemInput = {
+  /** Required when the cloud account is AWS */
+  aws?: AwsFilesystemSettingsInput | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
-  /** Network ID - required for all filesystems */
+  /** Network ID. The filesystem takes the network's region. */
   networkId: string;
-  /** Provider-specific configuration including region */
-  providerData?: Record<string, unknown> | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
-  /** Filesystem type (efs, filestore) */
-  type: FilesystemTypeEnum;
 };
 
 export type CreateLoadBalancerInput = {
+  aws?: AwsLoadBalancerSettingsInput | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
-  /** Network ID - required for AWS ALB */
+  /** Network ID. Required for application load balancers. */
   networkId?: string | null | undefined;
-  /** Provider-specific configuration including region */
-  providerData?: Record<string, unknown> | null | undefined;
+  /** Required for regional types without a network. A load balancer in a network takes the network's region. */
+  region?: string | null | undefined;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
   /** Load balancer type */
@@ -207,12 +340,17 @@ export type CreateLoadBalancerInput = {
 };
 
 export type CreateNetworkInput = {
+  /** Only for an AWS cloud account */
+  aws?: AwsNetworkSettingsInput | null | undefined;
+  /** Address range, e.g. 10.0.0.0/16 */
+  cidr: string;
   cloudAccountId: string;
+  /** When true, databases and caches get no network-wide ingress. Defaults to false. */
+  leastPrivilegeMode?: boolean | null | undefined;
   name: string;
-  providerConfig?: Record<string, unknown> | null | undefined;
   region: string;
   slug: string;
-  subnets?: Record<string, unknown> | null | undefined;
+  subnets: Array<NetworkSubnetInput>;
 };
 
 export type CreateProjectInput = {
@@ -229,10 +367,13 @@ export type CreateSecretInput = {
   name: string;
 };
 
+/** Database deployment mode */
+export type DatabaseDeploymentModeEnum =
+  | 'PROVISIONED'
+  | 'SERVERLESS';
+
 /** Database engine type */
 export type DatabaseEngineEnum =
-  | 'AURORA_MYSQL'
-  | 'AURORA_POSTGRESQL'
   | 'MARIADB'
   | 'MYSQL'
   | 'POSTGRESQL';
@@ -310,10 +451,23 @@ export type FilesystemStatusEnum =
   | 'FAILED'
   | 'PENDING';
 
-/** Filesystem provider type */
-export type FilesystemTypeEnum =
-  | 'EFS'
-  | 'FILESTORE';
+/** Which EC2 instances a managed instances capacity provider may launch */
+export type InstanceRequirementsInput = {
+  /** e.g. c5.* or m5.large */
+  allowedInstanceTypes?: Array<string> | null | undefined;
+  burstablePerformance?: BurstablePerformanceEnum | null | undefined;
+  /** arm64 or x86_64 */
+  cpuArchitecture?: string | null | undefined;
+  /** e.g. amazon-web-services, intel, amd */
+  cpuManufacturers?: Array<string> | null | undefined;
+  memoryMib?: IntRangeInput | null | undefined;
+  vcpuCount?: IntRangeInput | null | undefined;
+};
+
+export type IntRangeInput = {
+  max?: number | null | undefined;
+  min: number;
+};
 
 /** Status of a load balancer */
 export type LoadBalancerStatusEnum =
@@ -332,6 +486,20 @@ export type LocalBuildCliOutputsInput = {
   localImageTag?: string | null | undefined;
   serviceName: string;
   success: boolean;
+};
+
+/** NAT gateways an AWS network gets: none, one, or one per availability zone */
+export type NatGatewayOptionEnum =
+  | 'NONE'
+  | 'PER_AZ'
+  | 'SINGLE';
+
+export type NetworkSubnetInput = {
+  cidr: string;
+  name: string;
+  type: SubnetTypeEnum;
+  /** Availability zone */
+  zone?: string | null | undefined;
 };
 
 export type PromoteVersionInput = {
@@ -387,31 +555,23 @@ export type SubmitManifestInput = {
   stepId: string;
 };
 
-/** Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; an instance class change restarts it briefly. */
+export type SubnetTypeEnum =
+  | 'PRIVATE'
+  | 'PUBLIC';
+
+/** Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly. */
 export type UpdateDatabaseInput = {
-  /** Storage in GB, non-Aurora only. It can only grow. */
-  allocatedStorage?: number | null | undefined;
+  aws?: AwsDatabaseSettingsInput | null | undefined;
   /** Days of automatic backups. 0 turns backups off and deletes existing ones. */
-  backupRetentionPeriod?: number | null | undefined;
-  /** Provisioned servers only. Restarts the server. */
-  instanceClass?: string | null | undefined;
-  /** Required for io1 and io2 storage */
-  iops?: number | null | undefined;
-  /** Changing this either way sets a new master password */
-  masterPasswordRotation?: boolean | null | undefined;
-  /** Serverless only, in steps of 0.5 */
-  maxCapacity?: number | null | undefined;
-  /** Serverless only, in steps of 0.5 */
-  minCapacity?: number | null | undefined;
-  /** Standby copy in a second zone, non-Aurora only */
-  multiAz?: boolean | null | undefined;
+  backupRetentionDays?: number | null | undefined;
+  /** Keep a standby copy in a second zone */
+  highAvailability?: boolean | null | undefined;
   /** User-friendly name */
   name?: string | null | undefined;
-  performanceInsightsEnabled?: boolean | null | undefined;
-  /** Serverless with a minimum capacity of 0 only, 300 to 86400 */
-  secondsUntilAutoPause?: number | null | undefined;
-  /** gp3, io1 or io2, non-Aurora only */
-  storageType?: string | null | undefined;
+  /** Provisioned servers only. Restarts the server. */
+  size?: string | null | undefined;
+  /** Storage in GB. It can only grow. */
+  storageGb?: number | null | undefined;
 };
 
 export type UpdateSecretInput = {
@@ -518,7 +678,7 @@ export type GetCloudsQuery = { clouds: Array<{ id: string, name: string, provide
 export type GetClustersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetClustersQuery = { clusters: Array<{ id: string, name: string, slug: string, type: ClusterTypeEnum, status: ClusterStatusEnum, region: string, cloudAccountId: string, createdAt: string }> };
+export type GetClustersQuery = { clusters: Array<{ id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string, cloudAccountId: string, createdAt: string }> };
 
 export type GetClusterTypesQueryVariables = Exact<{
   provider?: string | null | undefined;
@@ -532,7 +692,7 @@ export type CreateClusterMutationVariables = Exact<{
 }>;
 
 
-export type CreateClusterMutation = { createCluster: { success: boolean, message: string | null, deploymentId: string | null, cluster: { id: string, name: string, slug: string, type: ClusterTypeEnum, status: ClusterStatusEnum, region: string } | null } };
+export type CreateClusterMutation = { createCluster: { success: boolean, message: string | null, deploymentId: string | null, cluster: { id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string } | null } };
 
 export type RunConsoleCommandMutationVariables = Exact<{
   projectId: string;
@@ -548,7 +708,7 @@ export type RunConsoleCommandMutation = { runConsoleCommand: { success: boolean,
 export type GetDatabasesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetDatabasesQuery = { databases: Array<{ id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum, cloudAccountId: string, networkId: string, endpoint: string | null, port: number | null, publiclyAccessible: boolean | null, createdAt: string }> };
+export type GetDatabasesQuery = { databases: Array<{ id: string, name: string, slug: string, engine: DatabaseEngineEnum, status: DatabaseStatusEnum, cloudAccountId: string, networkId: string, endpoint: string | null, port: number | null, publiclyAccessible: boolean, createdAt: string }> };
 
 export type GetDatabaseCredentialsQueryVariables = Exact<{
   id: string;
@@ -562,10 +722,11 @@ export type GetDatabaseTypesQueryVariables = Exact<{
 }>;
 
 
-export type GetDatabaseTypesQuery = { databaseTypes: Array<{ type: DatabaseEngineEnum, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, requiresNetwork: boolean }> };
+export type GetDatabaseTypesQuery = { databaseTypes: Array<{ engine: DatabaseEngineEnum, flavor: string, displayName: string, provider: string, description: string, guidance: string, supportsServerless: boolean, requiresNetwork: boolean }> };
 
 export type GetDatabaseEngineVersionsQueryVariables = Exact<{
   engine?: string | null | undefined;
+  flavor?: string | null | undefined;
   deploymentMode?: string | null | undefined;
   region?: string | null | undefined;
 }>;
@@ -575,6 +736,7 @@ export type GetDatabaseEngineVersionsQuery = { databaseEngineVersions: Array<{ e
 
 export type GetDatabaseInstanceClassesQueryVariables = Exact<{
   engine?: string | null | undefined;
+  flavor?: string | null | undefined;
   region?: string | null | undefined;
 }>;
 
@@ -704,19 +866,19 @@ export type CreateEnvironmentMutation = { createEnvironment: { success: boolean,
 export type GetFilesystemsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetFilesystemsQuery = { filesystems: Array<{ id: string, name: string, slug: string, type: FilesystemTypeEnum, status: FilesystemStatusEnum, cloudAccountId: string, networkId: string, createdAt: string }> };
+export type GetFilesystemsQuery = { filesystems: Array<{ id: string, name: string, slug: string, provider: string, region: string, status: FilesystemStatusEnum, cloudAccountId: string, networkId: string, createdAt: string }> };
 
 export type GetFilesystemNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetFilesystemNetworksQuery = { networks: Array<{ id: string, name: string, region: string, cloudAccountId: string }> };
+export type GetFilesystemNetworksQuery = { networks: Array<{ id: string, name: string, region: string, provider: string, cloudAccountId: string }> };
 
 export type CreateFilesystemMutationVariables = Exact<{
   input: CreateFilesystemInput;
 }>;
 
 
-export type CreateFilesystemMutation = { createFilesystem: { success: boolean, message: string | null, filesystem: { id: string, name: string, slug: string, type: FilesystemTypeEnum, status: FilesystemStatusEnum } | null } };
+export type CreateFilesystemMutation = { createFilesystem: { success: boolean, message: string | null, filesystem: { id: string, name: string, slug: string, provider: string, status: FilesystemStatusEnum } | null } };
 
 export type CreateVersionMutationVariables = Exact<{
   config: Record<string, unknown>;
@@ -804,7 +966,7 @@ export type VersionDnsRecordsQuery = { versionDnsRecords: Array<{ hostname: stri
 export type GetLoadBalancersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
+export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, region: string | null, endpoint: string | null, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
 
 export type GetLoadBalancerTypesQueryVariables = Exact<{
   provider?: string | null | undefined;

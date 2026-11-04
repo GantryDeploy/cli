@@ -40,7 +40,7 @@ import { isTerminalStatus } from '../lib/deployment-status'
 import {
   getDefaultPort,
   normalizeEngine,
-  toCatalogEngine,
+  toAwsDatabaseFlavor,
   toDatabaseEngineEnum,
 } from '../lib/engine'
 import { selectCloud, selectNetwork } from '../lib/interactive-prompts'
@@ -90,7 +90,8 @@ const DATABASE_CREDENTIALS_QUERY = /* GraphQL */ `
 const DATABASE_TYPES_QUERY = /* GraphQL */ `
   query GetDatabaseTypes($provider: String) {
     databaseTypes(provider: $provider) {
-      type
+      engine
+      flavor
       displayName
       provider
       description
@@ -102,8 +103,18 @@ const DATABASE_TYPES_QUERY = /* GraphQL */ `
 `
 
 const DATABASE_ENGINE_VERSIONS_QUERY = /* GraphQL */ `
-  query GetDatabaseEngineVersions($engine: String, $deploymentMode: String, $region: String) {
-    databaseEngineVersions(engine: $engine, deploymentMode: $deploymentMode, region: $region) {
+  query GetDatabaseEngineVersions(
+    $engine: String
+    $flavor: String
+    $deploymentMode: String
+    $region: String
+  ) {
+    databaseEngineVersions(
+      engine: $engine
+      flavor: $flavor
+      deploymentMode: $deploymentMode
+      region: $region
+    ) {
       engine
       version
       family
@@ -114,8 +125,8 @@ const DATABASE_ENGINE_VERSIONS_QUERY = /* GraphQL */ `
 `
 
 const DATABASE_INSTANCE_CLASSES_QUERY = /* GraphQL */ `
-  query GetDatabaseInstanceClasses($engine: String, $region: String) {
-    databaseInstanceClasses(engine: $engine, region: $region) {
+  query GetDatabaseInstanceClasses($engine: String, $flavor: String, $region: String) {
+    databaseInstanceClasses(engine: $engine, flavor: $flavor, region: $region) {
       instanceClass
       family
       size
@@ -199,6 +210,11 @@ const OPERATION_QUERY = /* GraphQL */ `
     }
   }
 `
+
+/** The engine as the database catalog queries take it, e.g. `postgresql`. */
+function apiEngine(engine: string): string {
+  return normalizeEngine(toDatabaseEngineEnum(engine))
+}
 
 const OPERATION_POLL_MS = 2000
 const OPERATION_TIMEOUT_MS = 5 * 60 * 1000
@@ -332,11 +348,17 @@ export function registerDatabasesCommand(program: Command): void {
         )
 
         const table = createTable({
-          head: ['Engine', 'Name', 'Description', 'Serverless'],
+          head: ['Engine', 'Service', 'Name', 'Description', 'Serverless'],
         })
 
         for (const t of data.databaseTypes) {
-          table.push([t.type, t.displayName, t.description, t.supportsServerless ? 'Yes' : 'No'])
+          table.push([
+            normalizeEngine(t.engine),
+            t.flavor,
+            t.displayName,
+            t.description,
+            t.supportsServerless ? 'Yes' : 'No',
+          ])
         }
 
         console.log(table.toString())
@@ -352,47 +374,53 @@ export function registerDatabasesCommand(program: Command): void {
     .option('--engine <engine>', 'Filter by engine')
     .option('--region <region>', 'Filter by region')
     .option('--mode <mode>', 'Filter by deployment mode (provisioned, serverless)')
-    .action(async (options: { engine?: string; region?: string; mode?: string }) => {
-      try {
-        const variables: GetDatabaseEngineVersionsQueryVariables = {}
-        if (options.engine) variables.engine = toCatalogEngine(options.engine)
-        if (options.region) variables.region = options.region
-        if (options.mode) variables.deploymentMode = options.mode
+    .option('--flavor <service>', 'AWS: rds or aurora (default rds)')
+    .action(
+      async (options: { engine?: string; flavor?: string; region?: string; mode?: string }) => {
+        try {
+          const variables: GetDatabaseEngineVersionsQueryVariables = {}
+          if (options.engine) variables.engine = apiEngine(options.engine)
+          if (options.flavor) variables.flavor = toAwsDatabaseFlavor(options.flavor)
+          if (options.region) variables.region = options.region
+          if (options.mode) variables.deploymentMode = options.mode
 
-        const data = await graphqlRequest<
-          GetDatabaseEngineVersionsQuery,
-          GetDatabaseEngineVersionsQueryVariables
-        >(DATABASE_ENGINE_VERSIONS_QUERY, variables)
+          const data = await graphqlRequest<
+            GetDatabaseEngineVersionsQuery,
+            GetDatabaseEngineVersionsQueryVariables
+          >(DATABASE_ENGINE_VERSIONS_QUERY, variables)
 
-        if (data.databaseEngineVersions.length === 0) {
-          console.log('No engine versions found matching the filters.')
-          return
+          if (data.databaseEngineVersions.length === 0) {
+            console.log('No engine versions found matching the filters.')
+            return
+          }
+
+          const table = createTable({
+            head: ['Engine', 'Version', 'Family', 'Modes', 'Description'],
+          })
+
+          for (const v of data.databaseEngineVersions) {
+            table.push([v.engine, v.version, v.family, v.supportedModes.join(', '), v.description])
+          }
+
+          console.log(table.toString())
+        } catch (error) {
+          printError(formatApiError(error))
+          process.exit(1)
         }
-
-        const table = createTable({
-          head: ['Engine', 'Version', 'Family', 'Modes', 'Description'],
-        })
-
-        for (const v of data.databaseEngineVersions) {
-          table.push([v.engine, v.version, v.family, v.supportedModes.join(', '), v.description])
-        }
-
-        console.log(table.toString())
-      } catch (error) {
-        printError(formatApiError(error))
-        process.exit(1)
       }
-    })
+    )
 
   dbCmd
     .command('instance-classes')
     .description('List available database instance classes')
     .option('--engine <engine>', 'Filter by engine')
     .option('--region <region>', 'Filter by region')
-    .action(async (options: { engine?: string; region?: string }) => {
+    .option('--flavor <service>', 'AWS: rds or aurora (default rds)')
+    .action(async (options: { engine?: string; flavor?: string; region?: string }) => {
       try {
         const variables: GetDatabaseInstanceClassesQueryVariables = {}
-        if (options.engine) variables.engine = toCatalogEngine(options.engine)
+        if (options.engine) variables.engine = apiEngine(options.engine)
+        if (options.flavor) variables.flavor = toAwsDatabaseFlavor(options.flavor)
         if (options.region) variables.region = options.region
 
         const data = await graphqlRequest<
@@ -427,10 +455,12 @@ export function registerDatabasesCommand(program: Command): void {
     .option('--network <id>', 'Network ID')
     .option('--name <name>', 'Database name')
     .option('--slug <slug>', 'Database slug (auto-generated from name if omitted)')
-    .option('--engine <engine>', 'Database engine (see "gantry db engines")')
-    .option('--instance-class <class>', 'Instance class (see "gantry db instance-classes")')
+    .option('--engine <engine>', 'postgresql, mysql or mariadb (see "gantry db engines")')
+    .option('--flavor <service>', 'AWS: rds or aurora (see "gantry db engines")')
+    .option('--size <size>', 'Server size (see "gantry db instance-classes")')
+    .option('--storage <gb>', 'Storage in GB. Defaults to 20 on RDS.')
     .option('--engine-version <version>', 'Engine version (see "gantry db engine-versions")')
-    .option('--serverless', 'Use serverless mode (Aurora only)')
+    .option('--serverless', 'Use serverless mode (AWS Aurora only)')
     .option(
       '--no-master-rotation',
       'Keep the master password in a Gantry secret that never rotates, instead of the cloud provider rotating it'
@@ -442,7 +472,9 @@ export function registerDatabasesCommand(program: Command): void {
         name?: string
         slug?: string
         engine?: string
-        instanceClass?: string
+        flavor?: string
+        size?: string
+        storage?: string
         engineVersion?: string
         serverless?: boolean
         masterRotation: boolean
@@ -462,52 +494,63 @@ export function registerDatabasesCommand(program: Command): void {
               validate: (v) => (v.trim().length > 0 ? true : 'Name is required'),
             }))
 
-          let selectedEngine = options.engine
-          if (!selectedEngine) {
-            const enginesData = await graphqlRequest<
-              GetDatabaseTypesQuery,
-              GetDatabaseTypesQueryVariables
-            >(DATABASE_TYPES_QUERY)
+          const storageGb = options.storage === undefined ? undefined : Number(options.storage)
+          if (storageGb !== undefined && !Number.isInteger(storageGb)) {
+            printError('--storage must be a whole number.')
+            process.exit(1)
+          }
 
-            selectedEngine = await select({
+          const requested =
+            options.engine === undefined
+              ? undefined
+              : {
+                  engine: toDatabaseEngineEnum(options.engine),
+                  flavor: toAwsDatabaseFlavor(options.flavor ?? 'rds'),
+                }
+
+          const { databaseTypes } = await graphqlRequest<
+            GetDatabaseTypesQuery,
+            GetDatabaseTypesQueryVariables
+          >(DATABASE_TYPES_QUERY)
+
+          let databaseType = databaseTypes.find(
+            (t) => t.engine === requested?.engine && t.flavor === requested.flavor
+          )
+          if (!databaseType) {
+            if (requested) {
+              printError('That engine is not offered. See "gantry db engines".')
+              process.exit(1)
+            }
+            databaseType = await select({
               message: 'Database engine:',
-              choices: enginesData.databaseTypes.map((t) => ({
+              choices: databaseTypes.map((t) => ({
                 name: `${t.displayName} — ${t.description}`,
-                value: t.type,
+                value: t,
               })),
             })
           }
-          const engine = toDatabaseEngineEnum(selectedEngine)
+          const { engine, flavor } = databaseType
 
           let useServerless = options.serverless ?? false
-          if (!options.serverless && options.serverless === undefined) {
-            const enginesData = await graphqlRequest<
-              GetDatabaseTypesQuery,
-              GetDatabaseTypesQueryVariables
-            >(DATABASE_TYPES_QUERY)
-            const engineInfo = enginesData.databaseTypes.find(
-              (t) => normalizeEngine(t.type) === normalizeEngine(engine)
-            )
-            if (engineInfo?.supportsServerless) {
-              useServerless = await select({
-                message: 'Use serverless mode?',
-                choices: [
-                  { name: 'No', value: false },
-                  { name: 'Yes', value: true },
-                ],
-              })
-            }
+          if (options.serverless === undefined && databaseType.supportsServerless) {
+            useServerless = await select({
+              message: 'Use serverless mode?',
+              choices: [
+                { name: 'No', value: false },
+                { name: 'Yes', value: true },
+              ],
+            })
           }
 
           let engineVersion = options.engineVersion
           if (!engineVersion) {
-            const mode = useServerless ? 'serverless' : 'provisioned'
             const versionsData = await graphqlRequest<
               GetDatabaseEngineVersionsQuery,
               GetDatabaseEngineVersionsQueryVariables
             >(DATABASE_ENGINE_VERSIONS_QUERY, {
-              engine: toCatalogEngine(engine),
-              deploymentMode: mode,
+              engine: normalizeEngine(engine),
+              flavor,
+              deploymentMode: useServerless ? 'serverless' : 'provisioned',
             })
 
             if (versionsData.databaseEngineVersions.length > 0) {
@@ -521,16 +564,16 @@ export function registerDatabasesCommand(program: Command): void {
             }
           }
 
-          let instanceClass = options.instanceClass
-          if (!instanceClass && !useServerless) {
+          let size = options.size
+          if (!size && !useServerless) {
             const classesData = await graphqlRequest<
               GetDatabaseInstanceClassesQuery,
               GetDatabaseInstanceClassesQueryVariables
-            >(DATABASE_INSTANCE_CLASSES_QUERY, { engine: toCatalogEngine(engine) })
+            >(DATABASE_INSTANCE_CLASSES_QUERY, { engine: normalizeEngine(engine), flavor })
 
             if (classesData.databaseInstanceClasses.length > 0) {
-              instanceClass = await select({
-                message: 'Instance class:',
+              size = await select({
+                message: 'Server size:',
                 choices: classesData.databaseInstanceClasses.map((ic) => ({
                   name: `${ic.instanceClass} — ${String(ic.vcpu)} vCPU, ${String(ic.memoryMb)} MB RAM`,
                   value: ic.instanceClass,
@@ -541,12 +584,6 @@ export function registerDatabasesCommand(program: Command): void {
 
           // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to a slug derived from the name, not be used verbatim
           const slug = options.slug || slugify(name)
-          const providerData: Record<string, unknown> = {
-            deploymentMode: useServerless ? 'serverless' : 'provisioned',
-          }
-          if (instanceClass) providerData.instanceClass = instanceClass
-          if (engineVersion) providerData.engineVersion = engineVersion
-          if (!options.masterRotation) providerData.masterPasswordRotation = false
 
           const data = await graphqlRequest<
             CreateDatabaseMutation,
@@ -558,7 +595,14 @@ export function registerDatabasesCommand(program: Command): void {
               name,
               slug,
               engine,
-              providerData,
+              engineVersion,
+              size,
+              storageGb,
+              aws: {
+                flavor,
+                deploymentMode: useServerless ? 'SERVERLESS' : 'PROVISIONED',
+                ...(options.masterRotation ? {} : { masterPasswordRotation: false }),
+              },
             },
           })
 
@@ -807,18 +851,18 @@ export function registerDatabasesCommand(program: Command): void {
     .description('Change a database server. Setting changes apply right away.')
     .argument('<server>', 'Database server slug')
     .option('--name <name>', 'New display name')
-    .option('--instance-class <class>', 'Provisioned servers. Restarts the server briefly.')
-    .option('--min-capacity <acu>', 'Serverless minimum capacity, in steps of 0.5')
-    .option('--max-capacity <acu>', 'Serverless maximum capacity, in steps of 0.5')
+    .option('--size <size>', 'Provisioned servers. Restarts the server briefly.')
+    .option('--min-capacity <acu>', 'AWS Aurora Serverless minimum capacity, in steps of 0.5')
+    .option('--max-capacity <acu>', 'AWS Aurora Serverless maximum capacity, in steps of 0.5')
     .option('--pause-after <seconds>', 'Serverless with minimum 0: idle seconds before pausing')
-    .option('--storage <gb>', 'Storage in GB (non-Aurora). It can only grow.')
-    .option('--storage-type <type>', 'gp3, io1 or io2 (non-Aurora)')
-    .option('--iops <iops>', 'Required for io1 and io2 storage')
+    .option('--storage <gb>', 'Storage in GB. It can only grow.')
+    .option('--storage-type <type>', 'AWS RDS: gp3, io1 or io2')
+    .option('--iops <iops>', 'AWS RDS: required for io1 and io2 storage')
     .option('--backup-days <days>', 'Days of automatic backups. 0 turns backups off.')
-    .option('--multi-az', 'Add a standby copy in a second zone (non-Aurora)')
-    .option('--no-multi-az', 'Remove the standby copy')
-    .option('--performance-insights', 'Turn Performance Insights on')
-    .option('--no-performance-insights', 'Turn Performance Insights off')
+    .option('--high-availability', 'Add a standby copy in a second zone')
+    .option('--no-high-availability', 'Remove the standby copy')
+    .option('--performance-insights', 'AWS: turn Performance Insights on')
+    .option('--no-performance-insights', 'AWS: turn Performance Insights off')
     .option('--master-rotation', 'Let the cloud provider rotate the master password')
     .option(
       '--no-master-rotation',
@@ -894,7 +938,7 @@ export function registerDatabasesCommand(program: Command): void {
             process.exit(1)
           }
 
-          const isPublic = (d: Database) => d.publiclyAccessible === true
+          const isPublic = (d: Database) => d.publiclyAccessible
 
           const selectedId = await select({
             message: 'Select a database:',
@@ -912,7 +956,7 @@ export function registerDatabasesCommand(program: Command): void {
           db = selected
         }
 
-        const isPublicDb = db.publiclyAccessible === true
+        const isPublicDb = db.publiclyAccessible
         const remoteHost = db.endpoint?.split(':')[0] ?? ''
 
         if (!remoteHost) {

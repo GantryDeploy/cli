@@ -36,6 +36,8 @@ const LOAD_BALANCERS_QUERY = /* GraphQL */ `
       name
       slug
       type
+      region
+      endpoint
       status
       cloudAccountId
       createdAt
@@ -93,7 +95,7 @@ export function registerLoadBalancersCommand(program: Command): void {
         }
 
         const table = createTable({
-          head: ['ID', 'Name', 'Slug', 'Type', 'Status', 'Created'],
+          head: ['ID', 'Name', 'Slug', 'Type', 'Region', 'Endpoint', 'Status', 'Created'],
         })
 
         for (const lb of loadBalancers) {
@@ -102,6 +104,8 @@ export function registerLoadBalancersCommand(program: Command): void {
             lb.name,
             lb.slug,
             lb.type,
+            lb.region ?? '-',
+            lb.endpoint ?? '-',
             lb.status.toUpperCase(),
             formatDate(lb.createdAt),
           ])
@@ -154,7 +158,7 @@ export function registerLoadBalancersCommand(program: Command): void {
     .option('--slug <slug>', 'Load balancer slug (auto-generated from name if omitted)')
     .option('--type <type>', 'Load balancer type (see "gantry lb types")')
     .option('--network <id>', 'Network ID (required for ALB)')
-    .option('--region <region>', 'AWS region (see "gantry regions")')
+    .option('--region <region>', 'Region (see "gantry regions")')
     .action(
       async (options: {
         cloud?: string
@@ -212,8 +216,6 @@ export function registerLoadBalancersCommand(program: Command): void {
 
           // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to the generated slug
           const slug = options.slug || slugify(name)
-          const providerData: Record<string, unknown> = {}
-          if (region) providerData.region = region
 
           const data = await graphqlRequest<
             CreateLoadBalancerMutation,
@@ -225,7 +227,7 @@ export function registerLoadBalancersCommand(program: Command): void {
               slug,
               type: lbType,
               networkId,
-              providerData: Object.keys(providerData).length > 0 ? providerData : undefined,
+              region,
             },
           })
 

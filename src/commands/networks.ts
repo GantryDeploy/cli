@@ -9,6 +9,7 @@ import type {
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { selectCloud, selectRegion } from '../lib/interactive-prompts'
+import { buildNetworkSettings, type NetworkCreateOptions } from '../lib/network-create'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -41,6 +42,15 @@ const CREATE_NETWORK_MUTATION = /* GraphQL */ `
     }
   }
 `
+
+interface NetworkCreateFlags extends NetworkCreateOptions {
+  cloud?: string
+  name?: string
+  slug?: string
+  region?: string
+  cidr?: string
+  leastPrivilege?: boolean
+}
 
 export function registerNetworksCommand(program: Command): void {
   const networksCmd = program.command('networks').description('Manage networks')
@@ -88,8 +98,18 @@ export function registerNetworksCommand(program: Command): void {
     .option('--cloud <id>', 'Cloud account ID')
     .option('--name <name>', 'Network name')
     .option('--slug <slug>', 'Network slug (auto-generated from name if omitted)')
-    .option('--region <region>', 'AWS region (e.g., us-east-1)')
-    .action(async (options: { cloud?: string; name?: string; slug?: string; region?: string }) => {
+    .option('--region <region>', 'Region (e.g., us-east-1)')
+    .option('--cidr <cidr>', 'Address range (e.g., 10.0.0.0/16)')
+    .option(
+      '--subnet <type:cidr[:zone]>',
+      'Add a subnet, e.g. private:10.0.16.0/20:us-east-1a (repeatable)',
+      (value: string, previous: string[]) => [...previous, value],
+      []
+    )
+    .option('--least-privilege', 'Give databases and caches no network-wide ingress')
+    .option('--nat <option>', 'AWS only: NAT gateways, none, single or per-az')
+    .option('--no-internet', 'AWS only: no internet gateway')
+    .action(async (options: NetworkCreateFlags) => {
       try {
         const cloudAccountId = options.cloud ?? (await selectCloud())
         const region = options.region ?? (await selectRegion())
@@ -103,6 +123,15 @@ export function registerNetworksCommand(program: Command): void {
 
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to the generated slug
         const slug = options.slug || slugify(name)
+        const cidr =
+          options.cidr ?? (await input({ message: 'Address range:', default: '10.0.0.0/16' }))
+
+        const settings = buildNetworkSettings(slug, options)
+        if (!settings.ok) {
+          printError(settings.message)
+          process.exit(1)
+        }
+
         const data = await graphqlRequest<CreateNetworkMutation, CreateNetworkMutationVariables>(
           CREATE_NETWORK_MUTATION,
           {
@@ -111,6 +140,10 @@ export function registerNetworksCommand(program: Command): void {
               name,
               slug,
               region,
+              cidr,
+              subnets: settings.subnets,
+              ...(options.leastPrivilege ? { leastPrivilegeMode: true } : {}),
+              ...(settings.aws ? { aws: settings.aws } : {}),
             },
           }
         )

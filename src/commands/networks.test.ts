@@ -124,6 +124,15 @@ describe('networks command', () => {
         'prod',
         '--region',
         'us-east-1',
+        '--cidr',
+        '10.20.0.0/16',
+        '--subnet',
+        'public:10.20.0.0/24:us-east-1a',
+        '--subnet',
+        'private:10.20.16.0/20:us-east-1a',
+        '--least-privilege',
+        '--nat',
+        'per-az',
       ])
 
       expect(selectCloud).not.toHaveBeenCalled()
@@ -136,6 +145,13 @@ describe('networks command', () => {
           name: 'Production VPC',
           slug: 'prod',
           region: 'us-east-1',
+          cidr: '10.20.0.0/16',
+          subnets: [
+            { name: 'prod-public-0', cidr: '10.20.0.0/24', type: 'PUBLIC', zone: 'us-east-1a' },
+            { name: 'prod-private-0', cidr: '10.20.16.0/20', type: 'PRIVATE', zone: 'us-east-1a' },
+          ],
+          leastPrivilegeMode: true,
+          aws: { natGatewayOption: 'PER_AZ' },
         },
       })
       expect(printed()).toContain('Network created: Production VPC (prod)')
@@ -146,7 +162,7 @@ describe('networks command', () => {
     it('prompts for missing values and derives the slug from the name', async () => {
       selectCloud.mockResolvedValueOnce('cloud_1')
       selectRegion.mockResolvedValueOnce('eu-west-1')
-      input.mockResolvedValueOnce('Staging Network')
+      input.mockResolvedValueOnce('Staging Network').mockResolvedValueOnce('10.30.0.0/16')
       graphqlRequest.mockResolvedValueOnce({
         createNetwork: { ...created, deploymentId: undefined },
       })
@@ -156,12 +172,18 @@ describe('networks command', () => {
       const { validate } = input.mock.calls[0]?.[0] as { validate: (v: string) => string | true }
       expect(validate(' ')).toBe('Name is required')
       expect(validate('ok')).toBe(true)
+      expect(input.mock.calls[1]?.[0]).toEqual({
+        message: 'Address range:',
+        default: '10.0.0.0/16',
+      })
       expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
         input: {
           cloudAccountId: 'cloud_1',
           name: 'Staging Network',
           slug: 'staging-network',
           region: 'eu-west-1',
+          cidr: '10.30.0.0/16',
+          subnets: [],
         },
       })
       expect(printed()).not.toContain('Deployment:')

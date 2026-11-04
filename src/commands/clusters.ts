@@ -31,7 +31,7 @@ const CLUSTERS_QUERY = /* GraphQL */ `
       id
       name
       slug
-      type
+      provider
       status
       region
       cloudAccountId
@@ -61,7 +61,7 @@ const CREATE_CLUSTER_MUTATION = /* GraphQL */ `
         id
         name
         slug
-        type
+        provider
         status
         region
       }
@@ -89,7 +89,7 @@ export function registerClustersCommand(program: Command): void {
         }
 
         const table = createTable({
-          head: ['ID', 'Name', 'Slug', 'Type', 'Region', 'Status', 'Created'],
+          head: ['ID', 'Name', 'Slug', 'Cloud', 'Region', 'Status', 'Created'],
         })
 
         for (const cluster of clusters) {
@@ -97,7 +97,7 @@ export function registerClustersCommand(program: Command): void {
             cluster.id,
             cluster.name,
             cluster.slug,
-            cluster.type,
+            cluster.provider,
             cluster.region,
             cluster.status.toUpperCase(),
             formatDate(cluster.createdAt),
@@ -142,7 +142,7 @@ export function registerClustersCommand(program: Command): void {
     .option('--name <name>', 'Cluster name')
     .option('--slug <slug>', 'Cluster slug (auto-generated from name if omitted)')
     .option('--type <type>', 'Cluster type (see "gantry clusters types")')
-    .option('--region <region>', 'AWS region (see "gantry regions")')
+    .option('--region <region>', 'Region (see "gantry regions")')
     .option('--network <id>', 'Network ID')
     .action(
       async (options: {
@@ -194,7 +194,7 @@ export function registerClustersCommand(program: Command): void {
                 cloudAccountId,
                 name,
                 slug,
-                type: clusterType,
+                aws: { orchestrator: clusterType, capacityProviders: [{ type: 'FARGATE' }] },
                 region,
                 networkId,
               },

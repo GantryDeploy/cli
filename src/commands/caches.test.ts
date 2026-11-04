@@ -189,7 +189,8 @@ describe('caches command', () => {
         input: {
           engine: 'VALKEY',
           slug: 'sessions',
-          providerData: { engineVersion: '7.2', deploymentMode: 'serverless' },
+          engineVersion: '7.2',
+          aws: { deploymentMode: 'SERVERLESS' },
         },
       })
     })
@@ -234,11 +235,9 @@ describe('caches command', () => {
       expect(graphqlRequest.mock.calls[4]?.[1]).toMatchObject({
         input: {
           engine: 'VALKEY',
-          providerData: {
-            deploymentMode: 'node-based',
-            engineVersion: '7.2',
-            nodeType: 'cache.t4g.micro',
-          },
+          engineVersion: '7.2',
+          size: 'cache.t4g.micro',
+          aws: { deploymentMode: 'NODE_BASED' },
         },
       })
     })
@@ -774,11 +773,9 @@ describe('caches command', () => {
           name: 'Sessions',
           slug: 'session-store',
           engine: 'REDIS',
-          providerData: {
-            deploymentMode: 'node-based',
-            nodeType: 'cache.t4g.micro',
-            engineVersion: '7.1',
-          },
+          engineVersion: '7.1',
+          size: 'cache.t4g.micro',
+          aws: { deploymentMode: 'NODE_BASED' },
         },
       })
       const output = logOutput()
@@ -786,6 +783,25 @@ describe('caches command', () => {
       expect(output).toContain('  ID: cache-id-1')
       expect(output).toContain('  Deployment: h6cz1y')
     })
+
+    it('sends --backup-days as a shared setting', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ cacheTypes: [{ type: 'REDIS', supportsServerless: false }] })
+        .mockResolvedValueOnce({ createCache: { success: true, cache } })
+
+      await run([...fullArgs, '--backup-days', '7'])
+
+      expect(sentVariables(1)).toMatchObject({ input: { backupRetentionDays: 7 } })
+    })
+
+    it.each(['-1', '1.5', 'week'])(
+      'rejects --backup-days %s before calling the API',
+      async (days) => {
+        await expect(run([...fullArgs, '--backup-days', days])).rejects.toThrow('process.exit(1)')
+
+        expect(graphqlRequest).not.toHaveBeenCalled()
+      }
+    )
 
     it.each([
       ['memcached', 'MEMCACHED'],
@@ -821,7 +837,7 @@ describe('caches command', () => {
           name: 'Sessions',
           slug: 'sessions',
           engine: enumName,
-          providerData: { deploymentMode: 'node-based' },
+          aws: { deploymentMode: 'NODE_BASED' },
         },
       })
     })
@@ -867,11 +883,9 @@ describe('caches command', () => {
           name: 'Rate Limits',
           slug: 'rate-limits',
           engine: 'VALKEY',
-          providerData: {
-            deploymentMode: 'node-based',
-            nodeType: 'cache.t4g.small',
-            engineVersion: '7.2',
-          },
+          engineVersion: '7.2',
+          size: 'cache.t4g.small',
+          aws: { deploymentMode: 'NODE_BASED' },
         },
       })
     })
@@ -901,7 +915,7 @@ describe('caches command', () => {
       expect(versionChoices).toEqual(['8.0', '7.1'])
       expect(sentQuery(2)).toContain('mutation CreateCache')
       expect(sentVariables(2)).toMatchObject({
-        input: { providerData: { engineVersion: '8.0', deploymentMode: 'serverless' } },
+        input: { engineVersion: '8.0', aws: { deploymentMode: 'SERVERLESS' } },
       })
     })
 

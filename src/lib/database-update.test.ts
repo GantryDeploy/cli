@@ -3,38 +3,52 @@ import { describe, expect, it } from 'vitest'
 import { buildDatabaseUpdate } from './database-update'
 
 describe('buildDatabaseUpdate', () => {
-  it('maps flags to the API fields', () => {
+  it('puts shared settings at the top level and AWS settings under aws', () => {
     expect(
       buildDatabaseUpdate({
         name: 'Orders primary',
+        size: 'db.m7g.large',
+        storage: '200',
+        backupDays: '14',
+        highAvailability: true,
         minCapacity: '0.5',
         maxCapacity: '16',
         pauseAfter: '900',
-        storage: '200',
         storageType: 'io2',
         iops: '3000',
-        backupDays: '14',
         performanceInsights: true,
       })
     ).toEqual({
       ok: true,
       input: {
         name: 'Orders primary',
-        minCapacity: 0.5,
-        maxCapacity: 16,
-        secondsUntilAutoPause: 900,
-        allocatedStorage: 200,
-        storageType: 'io2',
-        iops: 3000,
-        backupRetentionPeriod: 14,
-        performanceInsightsEnabled: true,
+        size: 'db.m7g.large',
+        storageGb: 200,
+        backupRetentionDays: 14,
+        highAvailability: true,
+        aws: {
+          minCapacity: 0.5,
+          maxCapacity: 16,
+          secondsUntilAutoPause: 900,
+          storageType: 'io2',
+          iops: 3000,
+          performanceInsightsEnabled: true,
+        },
       },
+      warnings: ['The server restarts briefly to apply the new size.'],
+    })
+  })
+
+  it('sends no AWS section when no AWS flag is passed', () => {
+    expect(buildDatabaseUpdate({ backupDays: '7' })).toEqual({
+      ok: true,
+      input: { backupRetentionDays: 7 },
       warnings: [],
     })
   })
 
   it.each([
-    [{ instanceClass: 'db.m7g.large' }, 'The server restarts briefly'],
+    [{ size: 'db.m7g.large' }, 'The server restarts briefly'],
     [{ backupDays: '0' }, 'existing automatic backups are deleted'],
     [{ masterRotation: false }, 'sets a new master password'],
   ])('warns before %o', (options, warning) => {

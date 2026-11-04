@@ -3,6 +3,9 @@ import type { Command } from 'commander'
 import ora from 'ora'
 
 import type {
+  AwsEfsPerformanceModeEnum,
+  AwsEfsThroughputModeEnum,
+  AwsFilesystemSettingsInput,
   CreateFilesystemMutation,
   CreateFilesystemMutationVariables,
   GetFilesystemNetworksQuery,
@@ -21,7 +24,8 @@ const FILESYSTEMS_QUERY = /* GraphQL */ `
       id
       name
       slug
-      type
+      provider
+      region
       status
       cloudAccountId
       networkId
@@ -36,6 +40,7 @@ const NETWORKS_QUERY = /* GraphQL */ `
       id
       name
       region
+      provider
       cloudAccountId
     }
   }
@@ -50,7 +55,7 @@ const CREATE_FILESYSTEM_MUTATION = /* GraphQL */ `
         id
         name
         slug
-        type
+        provider
         status
       }
     }
@@ -76,7 +81,7 @@ export function registerFilesystemsCommand(program: Command): void {
         }
 
         const table = createTable({
-          head: ['ID', 'Name', 'Slug', 'Type', 'Status', 'Created'],
+          head: ['ID', 'Name', 'Slug', 'Cloud', 'Region', 'Status', 'Created'],
         })
 
         for (const fs of filesystems) {
@@ -84,7 +89,8 @@ export function registerFilesystemsCommand(program: Command): void {
             fs.id,
             fs.name,
             fs.slug,
-            fs.type.toUpperCase(),
+            fs.provider.toUpperCase(),
+            fs.region,
             fs.status.toUpperCase(),
             formatDate(fs.createdAt),
           ])
@@ -134,30 +140,8 @@ export function registerFilesystemsCommand(program: Command): void {
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to the generated slug
         const slug = options.slug || slugify(name)
 
-        const performanceMode = await select({
-          message: 'Performance mode:',
-          choices: [
-            { name: 'General Purpose — Recommended for most workloads', value: 'generalPurpose' },
-            { name: 'Max I/O — For highly parallelized applications', value: 'maxIO' },
-          ],
-        })
-
-        const throughputMode = await select({
-          message: 'Throughput mode:',
-          choices: [
-            { name: 'Elastic — Recommended, scales automatically', value: 'elastic' },
-            { name: 'Bursting — Scales with storage size', value: 'bursting' },
-            { name: 'Provisioned — Fixed throughput', value: 'provisioned' },
-          ],
-        })
-
-        const encrypted = await select({
-          message: 'Enable encryption at rest?',
-          choices: [
-            { name: 'Yes', value: true },
-            { name: 'No', value: false },
-          ],
-        })
+        const aws =
+          selectedNetwork.provider === 'aws' ? await promptAwsFilesystemSettings() : undefined
 
         const spinner = ora('Creating filesystem...').start()
 
@@ -165,19 +149,7 @@ export function registerFilesystemsCommand(program: Command): void {
           CreateFilesystemMutation,
           CreateFilesystemMutationVariables
         >(CREATE_FILESYSTEM_MUTATION, {
-          input: {
-            cloudAccountId,
-            networkId,
-            name,
-            slug,
-            type: 'EFS',
-            providerData: {
-              region: selectedNetwork.region,
-              performanceMode,
-              throughputMode,
-              encrypted,
-            },
-          },
+          input: { cloudAccountId, networkId, name, slug, aws },
         }).finally(() => spinner.stop())
 
         const result = data.createFilesystem
@@ -194,4 +166,51 @@ export function registerFilesystemsCommand(program: Command): void {
         process.exit(1)
       }
     })
+}
+
+async function promptAwsFilesystemSettings(): Promise<AwsFilesystemSettingsInput> {
+  const performanceMode = await select<AwsEfsPerformanceModeEnum>({
+    message: 'Performance mode:',
+    choices: [
+      { name: 'General Purpose: Recommended for most workloads', value: 'GENERAL_PURPOSE' },
+      { name: 'Max I/O: For highly parallelized applications', value: 'MAX_IO' },
+    ],
+  })
+
+  const throughputChoices: { name: string; value: AwsEfsThroughputModeEnum }[] = [
+    { name: 'Elastic: Recommended, scales automatically', value: 'ELASTIC' },
+    { name: 'Bursting: Scales with storage size', value: 'BURSTING' },
+    { name: 'Provisioned: Fixed throughput', value: 'PROVISIONED' },
+  ]
+  const throughputMode = await select<AwsEfsThroughputModeEnum>({
+    message: 'Throughput mode:',
+    choices:
+      performanceMode === 'MAX_IO'
+        ? throughputChoices.filter((choice) => choice.value !== 'ELASTIC')
+        : throughputChoices,
+  })
+
+  const provisionedThroughputMibps =
+    throughputMode === 'PROVISIONED'
+      ? Number(
+          await input({
+            message: 'Provisioned throughput (MiB/s):',
+            default: '128',
+            validate: (v) =>
+              /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 3414
+                ? true
+                : 'Enter a whole number from 1 to 3414',
+          })
+        )
+      : undefined
+
+  const encrypted = await select({
+    message: 'Enable encryption at rest?',
+    choices: [
+      { name: 'Yes', value: true },
+      { name: 'No', value: false },
+    ],
+  })
+
+  return { performanceMode, throughputMode, provisionedThroughputMibps, encrypted }
 }

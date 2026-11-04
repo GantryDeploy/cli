@@ -116,6 +116,8 @@ describe('load-balancers command', () => {
             name: 'Public ALB\x1b]0;pwned\x07',
             slug: 'public-alb',
             type: 'APPLICATION',
+            region: 'us-east-2',
+            endpoint: 'gantry-web-1234567890.us-east-2.elb.amazonaws.com',
             status: 'active',
             cloudAccountId: 'cloud_1',
             createdAt: '2026-07-04T12:00:00Z',
@@ -130,6 +132,7 @@ describe('load-balancers command', () => {
       expect(printed()).toContain('APPLICATION')
       expect(printed()).toContain('ACTIVE')
       expect(printed()).toContain('Jul 4, 2026')
+      expect(printed()).toContain('gantry-web-1234567890.us-east-2.elb.amazonaws.com')
       expect(printed()).not.toContain('pwned')
     })
 
@@ -192,7 +195,7 @@ describe('load-balancers command', () => {
           slug: 'alb',
           type: 'APPLICATION',
           networkId: 'h4nw8r',
-          providerData: { region: 'us-east-1' },
+          region: 'us-east-1',
         },
       })
       expect(printed()).toContain('Load balancer created: Public ALB (public-alb)')
@@ -235,7 +238,7 @@ describe('load-balancers command', () => {
           slug: 'public-alb',
           type: 'APPLICATION',
           networkId: 'h4nw8r',
-          providerData: { region: 'eu-west-1' },
+          region: 'eu-west-1',
         },
       })
       expect(printed()).not.toContain('Deployment:')
@@ -261,7 +264,7 @@ describe('load-balancers command', () => {
           slug: 'edge',
           type: 'GLOBAL',
           networkId: undefined,
-          providerData: undefined,
+          region: undefined,
         },
       })
     })

@@ -33,8 +33,27 @@ async function run(args: string[]): Promise<void> {
 
 const networks = {
   networks: [
-    { id: 'net_other', name: 'Other', region: 'us-west-2', cloudAccountId: 'cloud_1' },
-    { id: 'h4nw8r', name: 'Production VPC', region: 'us-east-1', cloudAccountId: 'cloud_1' },
+    {
+      id: 'net_other',
+      name: 'Other',
+      region: 'us-west-2',
+      provider: 'aws',
+      cloudAccountId: 'cloud_1',
+    },
+    {
+      id: 'q8vm3t',
+      name: 'Edge VPC',
+      region: 'us-central1',
+      provider: 'gcp',
+      cloudAccountId: 'cloud_2',
+    },
+    {
+      id: 'h4nw8r',
+      name: 'Production VPC',
+      region: 'us-east-1',
+      provider: 'aws',
+      cloudAccountId: 'cloud_1',
+    },
   ],
 }
 
@@ -44,7 +63,7 @@ const created = {
     id: 'f7kd2x',
     name: 'Uploads',
     slug: 'uploads',
-    type: 'EFS',
+    provider: 'aws',
     status: 'PENDING',
   },
 }
@@ -77,20 +96,22 @@ describe('filesystems command', () => {
 
   function answerModes(): void {
     select
-      .mockResolvedValueOnce('maxIO')
-      .mockResolvedValueOnce('provisioned')
+      .mockResolvedValueOnce('MAX_IO')
+      .mockResolvedValueOnce('PROVISIONED')
       .mockResolvedValueOnce(false)
+    input.mockResolvedValueOnce('256')
   }
 
   describe('list', () => {
-    it('prints filesystems with uppercased type and status', async () => {
+    it('prints filesystems with their cloud, region and uppercased status', async () => {
       graphqlRequest.mockResolvedValueOnce({
         filesystems: [
           {
             id: 'f7kd2x',
             name: 'Uploads\x1b]0;pwned\x07',
             slug: 'uploads',
-            type: 'efs',
+            provider: 'aws',
+            region: 'eu-west-1',
             status: 'active',
             cloudAccountId: 'cloud_1',
             networkId: 'h4nw8r',
@@ -103,7 +124,8 @@ describe('filesystems command', () => {
 
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetFilesystems')
       expect(printed()).toContain('f7kd2x')
-      expect(printed()).toContain('EFS')
+      expect(printed()).toContain('AWS')
+      expect(printed()).toContain('eu-west-1')
       expect(printed()).toContain('ACTIVE')
       expect(printed()).toContain('May 5, 2026')
       expect(printed()).not.toContain('pwned')
@@ -127,7 +149,7 @@ describe('filesystems command', () => {
   })
 
   describe('create', () => {
-    it('creates an EFS filesystem in the network region from flags and prompts', async () => {
+    it('creates a filesystem with the AWS settings from flags and prompts', async () => {
       graphqlRequest
         .mockResolvedValueOnce(networks)
         .mockResolvedValueOnce({ createFilesystem: created })
@@ -147,7 +169,10 @@ describe('filesystems command', () => {
 
       expect(selectCloud).not.toHaveBeenCalled()
       expect(selectNetwork).not.toHaveBeenCalled()
-      expect(input).not.toHaveBeenCalled()
+      expect(input).toHaveBeenCalledTimes(1)
+      expect(input.mock.calls[0]?.[0]).toMatchObject({
+        message: 'Provisioned throughput (MiB/s):',
+      })
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetFilesystemNetworks')
       expect(String(graphqlRequest.mock.calls[1]?.[0])).toContain('mutation CreateFilesystem')
       expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
@@ -156,11 +181,10 @@ describe('filesystems command', () => {
           networkId: 'h4nw8r',
           name: 'Uploads',
           slug: 'up',
-          type: 'EFS',
-          providerData: {
-            region: 'us-east-1',
-            performanceMode: 'maxIO',
-            throughputMode: 'provisioned',
+          aws: {
+            performanceMode: 'MAX_IO',
+            throughputMode: 'PROVISIONED',
+            provisionedThroughputMibps: 256,
             encrypted: false,
           },
         },
@@ -178,8 +202,8 @@ describe('filesystems command', () => {
         .mockResolvedValueOnce(networks)
         .mockResolvedValueOnce({ createFilesystem: created })
       select
-        .mockResolvedValueOnce('generalPurpose')
-        .mockResolvedValueOnce('elastic')
+        .mockResolvedValueOnce('GENERAL_PURPOSE')
+        .mockResolvedValueOnce('ELASTIC')
         .mockResolvedValueOnce(true)
 
       await run(['create'])
@@ -191,11 +215,46 @@ describe('filesystems command', () => {
       expect(graphqlRequest.mock.calls[1]?.[1]).toMatchObject({
         input: {
           slug: 'media-assets',
-          providerData: {
-            performanceMode: 'generalPurpose',
-            throughputMode: 'elastic',
+          aws: {
+            performanceMode: 'GENERAL_PURPOSE',
+            throughputMode: 'ELASTIC',
             encrypted: true,
           },
+        },
+      })
+    })
+
+    it('offers no elastic throughput with Max I/O and checks the throughput range', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce(networks)
+        .mockResolvedValueOnce({ createFilesystem: created })
+      answerModes()
+
+      await run(['create', '--cloud', 'cloud_1', '--network', 'h4nw8r', '--name', 'Uploads'])
+
+      const { choices } = select.mock.calls[1]?.[0] as { choices: { value: string }[] }
+      expect(choices.map((choice) => choice.value)).toEqual(['BURSTING', 'PROVISIONED'])
+      const { validate } = input.mock.calls[0]?.[0] as { validate: (v: string) => string | true }
+      expect(validate('0')).toBe('Enter a whole number from 1 to 3414')
+      expect(validate('12.5')).toBe('Enter a whole number from 1 to 3414')
+      expect(validate('3414')).toBe(true)
+    })
+
+    it('asks for no AWS settings on a network in another cloud', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce(networks)
+        .mockResolvedValueOnce({ createFilesystem: created })
+
+      await run(['create', '--cloud', 'cloud_2', '--network', 'q8vm3t', '--name', 'Uploads'])
+
+      expect(select).not.toHaveBeenCalled()
+      expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({
+        input: {
+          cloudAccountId: 'cloud_2',
+          networkId: 'q8vm3t',
+          name: 'Uploads',
+          slug: 'uploads',
+          aws: undefined,
         },
       })
     })

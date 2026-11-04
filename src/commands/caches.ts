@@ -281,6 +281,7 @@ export function registerCachesCommand(program: Command): void {
     .option('--node-type <type>', 'Node type (see "gantry caches node-types")')
     .option('--engine-version <version>', 'Engine version (see "gantry caches engine-versions")')
     .option('--serverless', 'Use serverless mode')
+    .option('--backup-days <days>', 'Days of backups kept (Valkey and Redis only). Default 0.')
     .action(
       async (options: {
         cloud?: string
@@ -291,8 +292,19 @@ export function registerCachesCommand(program: Command): void {
         nodeType?: string
         engineVersion?: string
         serverless?: boolean
+        backupDays?: string
       }) => {
         try {
+          const backupRetentionDays =
+            options.backupDays === undefined ? undefined : Number(options.backupDays)
+          if (
+            backupRetentionDays !== undefined &&
+            (!Number.isInteger(backupRetentionDays) || backupRetentionDays < 0)
+          ) {
+            printError('--backup-days must be a whole number of 0 or more.')
+            process.exit(1)
+          }
+
           const cloudAccountId = options.cloud ?? (await selectCloud())
           const networkId = options.network ?? (await selectNetwork(cloudAccountId))
           if (!networkId) {
@@ -382,12 +394,6 @@ export function registerCachesCommand(program: Command): void {
 
           // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty --slug string should fall back to a slug derived from the name, not be used verbatim
           const slug = options.slug || slugify(name)
-          const providerData: Record<string, unknown> = {
-            deploymentMode: useServerless ? 'serverless' : 'node-based',
-          }
-          if (nodeType) providerData.nodeType = nodeType
-          if (engineVersion) providerData.engineVersion = engineVersion
-
           const data = await graphqlRequest<CreateCacheMutation, CreateCacheMutationVariables>(
             CREATE_CACHE_MUTATION,
             {
@@ -397,7 +403,10 @@ export function registerCachesCommand(program: Command): void {
                 name,
                 slug,
                 engine,
-                providerData,
+                ...(engineVersion ? { engineVersion } : {}),
+                ...(nodeType ? { size: nodeType } : {}),
+                ...(backupRetentionDays !== undefined ? { backupRetentionDays } : {}),
+                aws: { deploymentMode: useServerless ? 'SERVERLESS' : 'NODE_BASED' },
               },
             }
           )

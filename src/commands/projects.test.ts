@@ -71,8 +71,9 @@ describe('projects command', () => {
         ],
       })
 
-      await run([])
+      await run(['list'])
 
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetProjects')
       expect(printed()).toContain('storefront')
       expect(printed()).toContain('ecommerce')
@@ -84,7 +85,7 @@ describe('projects command', () => {
     it('reports when there are no projects', async () => {
       graphqlRequest.mockResolvedValueOnce({ projects: [] })
 
-      await run([])
+      await run(['list'])
 
       expect(printed()).toBe('No projects found.')
     })
@@ -92,9 +93,20 @@ describe('projects command', () => {
     it('prints the API error and exits non-zero', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('Unauthorized'))
 
-      await expect(run([])).rejects.toThrow('process.exit(1)')
+      await expect(run(['list'])).rejects.toThrow('process.exit(1)')
 
       expect(printedErrors()).toContain('Unauthorized')
+    })
+  })
+
+  describe('with no subcommand', () => {
+    it('shows help and queries nothing, like the other resource commands', async () => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+      await expect(run([])).rejects.toThrow('process.exit(1)')
+
+      expect(stderr.mock.calls.join('')).toContain('Usage:')
+      expect(graphqlRequest).not.toHaveBeenCalled()
     })
   })
 
@@ -120,7 +132,7 @@ describe('projects command', () => {
           ],
         })
 
-      await run(['storefront'])
+      await run(['show', 'storefront'])
 
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetProject(')
       expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ id: 'storefront' })
@@ -142,7 +154,7 @@ describe('projects command', () => {
         .mockResolvedValueOnce({ project: { ...project, tag: null, cloudProvider: null } })
         .mockResolvedValueOnce({ environments: [] })
 
-      await run(['p9ue62'])
+      await run(['show', 'p9ue62'])
 
       expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({ id: 'p9ue62' })
       expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({ projectId: project.id })
@@ -173,7 +185,7 @@ describe('projects command', () => {
           ],
         })
 
-      await run(['storefront'])
+      await run(['show', 'storefront'])
 
       expect(printed()).toContain('Project: Storefront')
       expect(printed()).not.toContain('pwned')
@@ -187,7 +199,7 @@ describe('projects command', () => {
         .mockResolvedValueOnce({ project: null })
         .mockResolvedValueOnce({ project: null })
 
-      await expect(run(['ghost'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['show', 'ghost'])).rejects.toThrow('process.exit(1)')
 
       expect(printedErrors()).toContain('Project not found: ghost')
       expect(graphqlRequest).toHaveBeenCalledTimes(2)
@@ -198,10 +210,25 @@ describe('projects command', () => {
     it('prints the API error when the lookup throws', async () => {
       graphqlRequest.mockRejectedValueOnce(new Error('Forbidden'))
 
-      await expect(run(['storefront'])).rejects.toThrow('process.exit(1)')
+      await expect(run(['show', 'storefront'])).rejects.toThrow('process.exit(1)')
 
       expect(printedErrors()).toContain('Forbidden')
     })
+
+    it.each(['list', 'create', 'show'])(
+      'shows a project whose slug is the subcommand name %s',
+      async (slug) => {
+        graphqlRequest
+          .mockResolvedValueOnce({ project: null })
+          .mockResolvedValueOnce({ project: { ...project, slug } })
+          .mockResolvedValueOnce({ environments: [] })
+
+        await run(['show', slug])
+
+        expect(graphqlRequest.mock.calls[1]?.[1]).toEqual({ slug })
+        expect(printed()).toContain('Project: Storefront')
+      }
+    )
   })
 
   describe('create', () => {

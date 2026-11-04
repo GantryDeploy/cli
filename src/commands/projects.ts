@@ -81,74 +81,84 @@ async function findProject(idOrSlug: string): Promise<GetProjectQuery['project']
 }
 
 export function registerProjectsCommand(program: Command): void {
-  const projectsCmd = program
-    .command('projects [idOrSlug]')
-    .description('List projects or show project details')
-    .action(async (idOrSlug?: string) => {
+  const projectsCmd = program.command('projects').description('Manage projects')
+
+  projectsCmd
+    .command('list')
+    .description('List projects')
+    .action(async () => {
       try {
-        if (idOrSlug) {
-          const project = await findProject(idOrSlug)
+        const data = await graphqlRequest<GetProjectsQuery, GetProjectsQueryVariables>(
+          PROJECTS_QUERY
+        )
+        const { projects } = data
 
-          if (!project) {
-            printError(`Project not found: ${idOrSlug}`)
-            process.exit(1)
-          }
+        if (projects.length === 0) {
+          console.log('No projects found.')
+          return
+        }
 
-          console.log(`\nProject: ${sanitizeTerminal(project.name)}`)
-          console.log(`  ID:             ${sanitizeTerminal(project.id)}`)
-          console.log(`  Slug:           ${sanitizeTerminal(project.slug)}`)
-          console.log(`  Cloud Provider: ${sanitizeTerminal(project.cloudProvider ?? '-')}`)
-          console.log(`  Tag:            ${sanitizeTerminal(project.tag ?? '-')}`)
-          console.log(`  Created:        ${formatDate(project.createdAt)}`)
+        const table = createTable({
+          head: ['ID', 'Name', 'Slug', 'Tag', 'Created'],
+        })
 
-          const envData = await graphqlRequest<
-            GetProjectEnvironmentsQuery,
-            GetProjectEnvironmentsQueryVariables
-          >(ENVIRONMENTS_QUERY, { projectId: project.id })
+        for (const project of projects) {
+          table.push([
+            project.id,
+            project.name,
+            project.slug,
+            project.tag ?? '-',
+            formatDate(project.createdAt),
+          ])
+        }
 
-          if (envData.environments.length > 0) {
-            console.log(`\nEnvironments:`)
-            const table = createTable({
-              head: ['ID', 'Name', 'Production', 'Created'],
-            })
-            for (const env of envData.environments) {
-              table.push([
-                env.id,
-                env.name,
-                styledCell(env.isProduction ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m'),
-                formatDate(env.createdAt),
-              ])
-            }
-            console.log(table.toString())
-          } else {
-            console.log('\nNo environments found.')
-          }
-        } else {
-          const data = await graphqlRequest<GetProjectsQuery, GetProjectsQueryVariables>(
-            PROJECTS_QUERY
-          )
-          const { projects } = data
+        console.log(table.toString())
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
 
-          if (projects.length === 0) {
-            console.log('No projects found.')
-            return
-          }
+  projectsCmd
+    .command('show <idOrSlug>')
+    .description('Show project details')
+    .action(async (idOrSlug: string) => {
+      try {
+        const project = await findProject(idOrSlug)
 
+        if (!project) {
+          printError(`Project not found: ${idOrSlug}`)
+          process.exit(1)
+        }
+
+        console.log(`\nProject: ${sanitizeTerminal(project.name)}`)
+        console.log(`  ID:             ${sanitizeTerminal(project.id)}`)
+        console.log(`  Slug:           ${sanitizeTerminal(project.slug)}`)
+        console.log(`  Cloud Provider: ${sanitizeTerminal(project.cloudProvider ?? '-')}`)
+        console.log(`  Tag:            ${sanitizeTerminal(project.tag ?? '-')}`)
+        console.log(`  Created:        ${formatDate(project.createdAt)}`)
+
+        const envData = await graphqlRequest<
+          GetProjectEnvironmentsQuery,
+          GetProjectEnvironmentsQueryVariables
+        >(ENVIRONMENTS_QUERY, { projectId: project.id })
+
+        if (envData.environments.length > 0) {
+          console.log(`\nEnvironments:`)
           const table = createTable({
-            head: ['ID', 'Name', 'Slug', 'Tag', 'Created'],
+            head: ['ID', 'Name', 'Production', 'Created'],
           })
-
-          for (const project of projects) {
+          for (const env of envData.environments) {
             table.push([
-              project.id,
-              project.name,
-              project.slug,
-              project.tag ?? '-',
-              formatDate(project.createdAt),
+              env.id,
+              env.name,
+              styledCell(env.isProduction ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m'),
+              formatDate(env.createdAt),
             ])
           }
-
           console.log(table.toString())
+        } else {
+          console.log('\nNo environments found.')
         }
       } catch (error) {
         printError(formatApiError(error))

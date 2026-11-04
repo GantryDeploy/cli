@@ -16,8 +16,10 @@ const CLOUDS_QUERY = /* GraphQL */ `
 `
 
 export function registerCloudsCommand(program: Command): void {
-  program
-    .command('clouds')
+  const cloudsCmd = program.command('clouds').description('Manage cloud accounts')
+
+  cloudsCmd
+    .command('list')
     .description('List all cloud accounts')
     .action(async () => {
       try {

@@ -38,9 +38,15 @@ export interface RoutingPlanEntry {
   paths: RoutingPathEntry[]
 }
 
+export interface BuildPlanEntry {
+  name: string
+  architecture: string
+}
+
 export interface DeploymentPlan {
   services: ServicePlanEntry[]
   routing: RoutingPlanEntry[]
+  builds: BuildPlanEntry[]
 }
 
 /** A named Docker build declared under `setup.builds`, read by `gantry lift`. */

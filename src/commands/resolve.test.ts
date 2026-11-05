@@ -35,7 +35,7 @@ const RESOLVED: ResolveYamlResult = {
     replicas: { type: 'number', value: 2, source: 'env_override' },
     debug: { type: 'boolean', value: true, source: 'cli' },
   },
-  plan: { services: [], routing: [] },
+  plan: { services: [], routing: [], builds: [] },
 }
 
 describe('resolve command', () => {

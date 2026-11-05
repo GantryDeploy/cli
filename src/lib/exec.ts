@@ -8,10 +8,16 @@ export interface RunDockerOptions {
 export interface DockerBuildArgsOptions {
   tag: string
   dockerfile: string
+  architecture: string
   target?: string
   buildArgs?: Record<string, string>
   context?: string
 }
+
+const DOCKER_PLATFORMS = new Map([
+  ['arm64', 'linux/arm64'],
+  ['x86_64', 'linux/amd64'],
+])
 
 const STDERR_TAIL_CHARS = 4000
 const REDACTED = '***'
@@ -64,6 +70,7 @@ export function assertValidRegistryEndpoint(endpoint: string): void {
 export function buildDockerBuildArgs({
   tag,
   dockerfile,
+  architecture,
   target,
   buildArgs,
   context = '.',
@@ -72,8 +79,12 @@ export function buildDockerBuildArgs({
   if (!dockerfile) {
     throw new Error('A Dockerfile path is required for a Docker build')
   }
+  const platform = DOCKER_PLATFORMS.get(architecture)
+  if (!platform) {
+    throw new Error(`Unsupported CPU architecture "${architecture}" for a Docker build`)
+  }
 
-  const args = ['build', '-t', tag, '-f', dockerfile]
+  const args = ['build', '-t', tag, '-f', dockerfile, '--platform', platform]
 
   if (target) {
     if (!BUILD_TARGET.test(target)) {

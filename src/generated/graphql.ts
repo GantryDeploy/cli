@@ -954,7 +954,7 @@ export type ClaimStepMutationVariables = Exact<{
 export type ClaimStepMutation = { claimStep: { success: boolean, message: string | null, step: { id: string, stepType: string, cliTask: string | null, cliInputs:
         | { __typename: 'ArtifactUploadCliInputs', stepId: string, provider: string, bucketName: string, objectKey: string, region: string, maxArtifactBytes: number, sourcePath: string, excludePatterns: Array<string> | null, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null }
         | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string, registryEndpoint: string, registryUsername: string, registryPassword: string | null }
-        | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, buildArgs: Array<{ name: string, value: string }> | null }
+        | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, architecture: string | null, buildArgs: Array<{ name: string, value: string }> | null }
         | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null }
        | null } | null } };
 
@@ -1266,7 +1266,7 @@ export type ResolveProjectQueryVariables = Exact<{
 }>;
 
 
-export type ResolveProjectQuery = { resolveProject: { ok: boolean, blueprintReference: string | null, errors: Array<{ code: string, message: string, path: string, suggestion: string | null }>, environments: Array<{ environment: string, config: Record<string, unknown>, resolvedYaml: string, provenance: Array<{ name: string, type: string, value: string, source: string }>, plan: { services: Array<{ name: string, type: string, deploymentType: string, source: string, cluster: string | null }>, routing: Array<{ domain: string, entryType: string, loadBalancer: string | null, paths: Array<{ path: string, service: string, deploymentType: string, routeHops: Array<string> }> }> } }> } };
+export type ResolveProjectQuery = { resolveProject: { ok: boolean, blueprintReference: string | null, errors: Array<{ code: string, message: string, path: string, suggestion: string | null }>, environments: Array<{ environment: string, config: Record<string, unknown>, resolvedYaml: string, provenance: Array<{ name: string, type: string, value: string, source: string }>, plan: { services: Array<{ name: string, type: string, deploymentType: string, source: string, cluster: string | null }>, routing: Array<{ domain: string, entryType: string, loadBalancer: string | null, paths: Array<{ path: string, service: string, deploymentType: string, routeHops: Array<string> }> }>, builds: Array<{ name: string, architecture: string }> } }> } };
 
 export type SubmitManifestMutationVariables = Exact<{
   input: SubmitManifestInput;

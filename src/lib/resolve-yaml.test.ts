@@ -24,7 +24,7 @@ environments:
   staging: {}
 `
 
-const PLAN = { services: [], routing: [] }
+const PLAN = { services: [], routing: [], builds: [] }
 
 function resolvedEnvironment(overrides: Record<string, unknown> = {}) {
   return {

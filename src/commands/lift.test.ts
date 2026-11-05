@@ -101,15 +101,20 @@ function deployment(overrides: Record<string, unknown> = {}) {
   return { id: 'dep_1', serviceName: 'web', status: 'RUNNING', steps: [], ...overrides }
 }
 
-function resolved(config: Record<string, unknown>): ResolveYamlResult {
+function resolved(config: Record<string, unknown>, architecture = 'arm64'): ResolveYamlResult {
   return {
     ok: true,
     config,
     sourceYaml: '',
     resolvedYaml: '',
     variableProvenance: {},
-    plan: { services: [], routing: [] },
+    plan: { services: [], routing: [], builds: plannedBuilds(config, architecture) },
   }
+}
+
+function plannedBuilds(config: Record<string, unknown>, architecture: string) {
+  const setup = config.setup as { builds?: Record<string, unknown> } | undefined
+  return Object.keys(setup?.builds ?? {}).map((name) => ({ name, architecture }))
 }
 
 describe('lift command', () => {
@@ -662,6 +667,7 @@ describe('lift command', () => {
     workingDir: null,
     dockerTarget: null,
     namedBuildName: null,
+    architecture: null,
     buildArgs: null,
   }
 
@@ -837,6 +843,39 @@ describe('lift command', () => {
     expect(mocks.printError).toHaveBeenCalledWith(
       `Build command failed with exit code 127\nCommand: make\nDirectory: ${workingDir}/.gantry`
     )
+  })
+
+  it('builds each named image for the architecture in the deployment plan', async () => {
+    mocks.resolveYaml.mockResolvedValue(
+      resolved(
+        {
+          type: 'project',
+          environments: { production: {} },
+          setup: { builds: { api: { dockerfile: 'Dockerfile' } } },
+        },
+        'x86_64'
+      )
+    )
+
+    await lift(['production'])
+
+    const args = mocks.runDocker.mock.calls[0]?.[0] as string[]
+    expect(args[args.indexOf('--platform') + 1]).toBe('linux/amd64')
+  })
+
+  it('fails the build when the deployment plan has no architecture for it', async () => {
+    const result = resolved({
+      type: 'project',
+      environments: { production: {} },
+      setup: { builds: { api: { dockerfile: 'Dockerfile' } } },
+    })
+    if (!result.ok) throw new Error('expected a resolved config')
+    mocks.resolveYaml.mockResolvedValue({ ...result, plan: { ...result.plan, builds: [] } })
+
+    await expect(lift(['production'])).rejects.toThrow(ExitError)
+
+    expect(mocks.runDocker).not.toHaveBeenCalled()
+    expect(calls('StartLiftDeployment')).toHaveLength(0)
   })
 
   it('tags images with the created version and passes build args through', async () => {

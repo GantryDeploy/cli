@@ -383,6 +383,11 @@ type BuildArg {
   value: String!
 }
 
+type BuildPlanEntryType {
+  architecture: String!
+  name: String!
+}
+
 type Cache {
   """Days of backups kept"""
   backupRetentionDays: Int!
@@ -1144,6 +1149,7 @@ enum DeploymentPhase {
 }
 
 type DeploymentPlanType {
+  builds: [BuildPlanEntryType!]!
   routing: [RoutingPlanEntryType!]!
   services: [ServicePlanEntryType!]!
 }
@@ -1391,6 +1397,8 @@ type LoadBalancerTypeInfo {
 
 """Inputs for a local-build CLI task"""
 type LocalBuildCliInputs {
+  """CPU architecture to build the image for. Set whenever dockerfile is."""
+  architecture: String
   buildArgs: [BuildArg!]
 
   """Build commands to run, in order"""

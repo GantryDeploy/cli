@@ -25,11 +25,10 @@ class ExitError extends Error {
 describe('clouds command', () => {
   let logSpy: MockInstance
 
-  async function clouds() {
+  async function clouds(args = ['list']) {
     const program = new Command()
-    program.exitOverride()
     registerCloudsCommand(program)
-    await program.parseAsync(['node', 'gantry', 'clouds'])
+    await program.parseAsync(['node', 'gantry', 'clouds', ...args])
   }
 
   beforeEach(() => {
@@ -72,5 +71,14 @@ describe('clouds command', () => {
 
     await expect(clouds()).rejects.toThrow(ExitError)
     expect(printError).toHaveBeenCalledWith('Not authenticated.')
+  })
+
+  it('shows help and queries nothing with no subcommand, like the other resource commands', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    await expect(clouds([])).rejects.toThrow(ExitError)
+
+    expect(stderr.mock.calls.join('')).toContain('Usage:')
+    expect(graphqlRequest).not.toHaveBeenCalled()
   })
 })

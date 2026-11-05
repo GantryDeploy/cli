@@ -307,7 +307,7 @@ function skipString(document: string, start: number): number {
  * retry that arrives while the first attempt is still running is retried too.
  *
  * Pass `idempotent: false` for a mutation the API does not deduplicate
- * (`runConsoleCommand`). It sends no key and retries only when the connection
+ * (`startCommandRun`). It sends no key and retries only when the connection
  * was never established.
  *
  * Never retries 4xx responses, authentication errors, or connection refused /

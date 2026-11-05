@@ -141,6 +141,12 @@ input AwsClusterSettingsInput {
   orchestrator: AwsClusterOrchestratorEnum!
 }
 
+type AwsCommandCredentials {
+  accessKeyId: String!
+  secretAccessKey: String!
+  sessionToken: String!
+}
+
 """Catalog filters that only apply to AWS"""
 input AwsDatabaseCatalogFilterInput {
   deploymentMode: AwsDatabaseDeploymentModeEnum
@@ -242,6 +248,14 @@ input AwsInstanceRequirementsInput {
   cpuManufacturers: [String!]
   memoryMib: IntRangeInput
   vcpuCount: IntRangeInput
+}
+
+type AwsLambdaCommandInvocation {
+  credentials: AwsCommandCredentials!
+  functionName: String!
+  payload: String!
+  qualifier: String!
+  region: String!
 }
 
 """Load balancer settings for an AWS cloud account"""
@@ -674,15 +688,16 @@ type ClusterTypeInfo {
   type: String!
 }
 
-type CompleteCliStepResult {
-  message: String
-  success: Boolean!
-}
-
-type ConsoleRunResult {
-  exitCode: Int!
+type CommandRunStatus {
+  exitCode: Int
   message: String
   output: String!
+  outputCursor: String
+  state: String!
+}
+
+type CompleteCliStepResult {
+  message: String
   success: Boolean!
 }
 
@@ -1491,8 +1506,8 @@ type Mutation {
     serviceUserId: String!
     team: String
   ): DatabaseMutationResult!
-  runConsoleCommand(command: [String!]!, environmentSlug: String!, projectId: String!, service: String!, team: String, variant: String = "default"): ConsoleRunResult!
   setCanary(input: ActivationInput!, team: String): ActivationResult!
+  startCommandRun(command: [String!]!, environmentSlug: String!, projectId: String!, service: String!, team: String, variant: String): StartCommandRunResult!
   startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!
   startTeardown(input: StartTeardownInput!, team: String): StartTeardownResult!
   submitManifest(input: SubmitManifestInput!, team: String): SubmitManifestResult!
@@ -1667,6 +1682,7 @@ type Query {
   clouds(team: String): [CloudAccount!]!
   clusterTypes(provider: CloudProviderEnum!): [ClusterTypeInfo!]!
   clusters(team: String): [Cluster!]!
+  commandRun(environmentSlug: String!, outputCursor: String, projectId: String!, runId: String!, service: String!, team: String): CommandRunStatus!
   database(id: String!, team: String): Database
   databaseCredentials(id: String!, team: String): DatabaseCredentialsResult!
   databaseEngineVersions(aws: AwsDatabaseCatalogFilterInput, engine: DatabaseEngineEnum, provider: CloudProviderEnum!, region: String): [DatabaseEngineVersion!]!
@@ -1864,6 +1880,13 @@ enum ServiceRuntimeEnum {
 enum ServiceTypeEnum {
   HTTP
   STATIC
+}
+
+type StartCommandRunResult {
+  aws: AwsLambdaCommandInvocation
+  message: String
+  runId: String
+  success: Boolean!
 }
 
 input StartDeploymentInput {

@@ -55,6 +55,7 @@
     "test:package": "rm -rf .pack && mkdir .pack && npm pack --pack-destination .pack && bash scripts/smoke-test-tarball.sh .pack/*.tgz"
   },
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1162.0",
     "@aws-sdk/client-s3": "^3.1159.0",
     "@inquirer/prompts": "^8.7.5",
     "archiver": "^8.0.0",
@@ -70,7 +71,9 @@
     "yaml": "^2.7.1"
   },
   "overrides": {
-    "readdir-glob": { "minimatch": "$minimatch" }
+    "readdir-glob": {
+      "minimatch": "$minimatch"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

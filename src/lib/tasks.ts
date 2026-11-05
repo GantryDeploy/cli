@@ -148,9 +148,13 @@ async function executeLocalBuild(
     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty build name is invalid and should fall back to the service name
     const tagName = namedBuildName || serviceName
     const localTag = `${projectId}-${projectSlug}-${tagName}:v${String(versionNumber)}`
+    if (!inputs.architecture) {
+      throw new Error(`The build step for ${serviceName} has no CPU architecture`)
+    }
     const dockerArgs = buildDockerBuildArgs({
       tag: localTag,
       dockerfile,
+      architecture: inputs.architecture,
       target: dockerTarget ?? undefined,
       buildArgs: inputs.buildArgs
         ? Object.fromEntries(inputs.buildArgs.map(({ name, value }) => [name, value]))

@@ -170,6 +170,7 @@ const CLAIM_STEP_MUTATION = /* GraphQL */ `
             workingDir
             dockerTarget
             namedBuildName
+            architecture
           }
           ... on ObjectUploadCliInputs {
             stepId
@@ -717,6 +718,7 @@ export function registerLiftCommand(program: Command): void {
         process.exit(1)
       }
       const rawConfig = resolveResult.config
+      const plannedBuilds = resolveResult.plan.builds
       let config: LiftConfig
       try {
         config = readLiftConfig(rawConfig)
@@ -873,9 +875,17 @@ export function registerLiftCommand(program: Command): void {
                     ? path.join(stagingDir, buildConfig.working_dir)
                     : stagingDir
 
+                  const architecture = plannedBuilds.find(
+                    (planned) => planned.name === buildName
+                  )?.architecture
+                  if (!architecture) {
+                    throw new Error(`The deployment plan has no CPU architecture for ${buildName}`)
+                  }
+
                   const dockerArgs = buildDockerBuildArgs({
                     tag: localTag,
                     dockerfile: buildConfig.dockerfile,
+                    architecture,
                     target: buildConfig.docker_target,
                     buildArgs: buildConfig.args,
                   })

@@ -103,7 +103,7 @@ describe('validate command', () => {
       sourceYaml: '',
       resolvedYaml: '',
       variableProvenance: {},
-      plan: { services: [], routing: [] },
+      plan: { services: [], routing: [], builds: [] },
     })
 
     await validate(['-e', 'staging', '-f', 'other.yml'])

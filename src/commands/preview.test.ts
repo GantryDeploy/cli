@@ -78,6 +78,7 @@ describe('preview command', () => {
           { name: 'web', type: 'http', deploymentType: 'lambda', source: 'build', cluster: null },
           { name: 'api', type: 'http', deploymentType: 'ecs', source: 'build', cluster: 'main' },
         ],
+        builds: [],
         routing: [
           {
             domain: 'example.com',
@@ -109,7 +110,7 @@ describe('preview command', () => {
   })
 
   it('says so when the environment has no routing', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [] }))
+    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [], builds: [] }))
 
     await preview(['staging'])
 
@@ -139,7 +140,7 @@ describe('preview command', () => {
   })
 
   it('reads the config from --file and passes --var through', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [] }))
+    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [], builds: [] }))
 
     await preview(['production', '-f', 'alt.yml', '--var', 'a=b'])
 
@@ -154,6 +155,7 @@ describe('preview command', () => {
     vi.mocked(resolveYaml).mockResolvedValue(
       withPlan({
         services: [],
+        builds: [],
         routing: [
           {
             domain: 'shop.example.com',
@@ -190,7 +192,7 @@ describe('preview command', () => {
   })
 
   it('defaults to the current directory', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [] }))
+    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [], builds: [] }))
     vi.spyOn(process, 'cwd').mockReturnValue(workingDir)
     const program = new Command()
     program.exitOverride()

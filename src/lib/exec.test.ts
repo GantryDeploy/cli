@@ -138,6 +138,7 @@ describe('buildDockerBuildArgs', () => {
       buildDockerBuildArgs({
         tag: 'p9ue62-shop-api:v2',
         dockerfile: 'docker/Dockerfile',
+        architecture: 'x86_64',
         target: 'runtime',
         buildArgs: { NODE_ENV: 'production' },
       })
@@ -147,6 +148,8 @@ describe('buildDockerBuildArgs', () => {
       'p9ue62-shop-api:v2',
       '-f',
       'docker/Dockerfile',
+      '--platform',
+      'linux/amd64',
       '--target',
       'runtime',
       '--build-arg',
@@ -157,15 +160,30 @@ describe('buildDockerBuildArgs', () => {
 
   it('omits the optional flags when not provided', () => {
     expect(
-      buildDockerBuildArgs({ tag: 'app:v1', dockerfile: 'Dockerfile', context: 'ctx' })
-    ).toEqual(['build', '-t', 'app:v1', '-f', 'Dockerfile', 'ctx'])
+      buildDockerBuildArgs({
+        tag: 'app:v1',
+        architecture: 'arm64',
+        dockerfile: 'Dockerfile',
+        context: 'ctx',
+      })
+    ).toEqual(['build', '-t', 'app:v1', '-f', 'Dockerfile', '--platform', 'linux/arm64', 'ctx'])
   })
+
+  it.each(['riscv64', '', 'constructor'])(
+    'rejects the unsupported architecture %j',
+    (architecture) => {
+      expect(() =>
+        buildDockerBuildArgs({ tag: 'app:v1', architecture, dockerfile: 'Dockerfile' })
+      ).toThrow(/Unsupported CPU architecture/)
+    }
+  )
 
   it.each(['$(touch x)', '`touch x`', 'a; rm -rf /', 'has spaces in it', 'quo\'te"s'])(
     'keeps build arg value %j as a single literal argv element',
     (value) => {
       const args = buildDockerBuildArgs({
         tag: 'app:v1',
+        architecture: 'arm64',
         dockerfile: 'Dockerfile',
         buildArgs: { VALUE: value },
       })
@@ -175,32 +193,46 @@ describe('buildDockerBuildArgs', () => {
   )
 
   it('keeps a Dockerfile path with spaces as one element', () => {
-    const args = buildDockerBuildArgs({ tag: 'app:v1', dockerfile: 'my dir/Dockerfile' })
+    const args = buildDockerBuildArgs({
+      tag: 'app:v1',
+      architecture: 'arm64',
+      dockerfile: 'my dir/Dockerfile',
+    })
     expect(args[args.indexOf('-f') + 1]).toBe('my dir/Dockerfile')
   })
 
   it('rejects an invalid build arg key', () => {
     expect(() =>
-      buildDockerBuildArgs({ tag: 'app:v1', dockerfile: 'Dockerfile', buildArgs: { 'A;B': 'x' } })
+      buildDockerBuildArgs({
+        tag: 'app:v1',
+        architecture: 'arm64',
+        dockerfile: 'Dockerfile',
+        buildArgs: { 'A;B': 'x' },
+      })
     ).toThrow(/Invalid Docker build arg name "A;B"/)
   })
 
   it('rejects an invalid tag', () => {
-    expect(() => buildDockerBuildArgs({ tag: 'app:v1 && id', dockerfile: 'Dockerfile' })).toThrow(
-      /not a valid Docker image reference/
-    )
+    expect(() =>
+      buildDockerBuildArgs({ tag: 'app:v1 && id', architecture: 'arm64', dockerfile: 'Dockerfile' })
+    ).toThrow(/not a valid Docker image reference/)
   })
 
   it('rejects an invalid target', () => {
     expect(() =>
-      buildDockerBuildArgs({ tag: 'app:v1', dockerfile: 'Dockerfile', target: '--output=/' })
+      buildDockerBuildArgs({
+        tag: 'app:v1',
+        architecture: 'arm64',
+        dockerfile: 'Dockerfile',
+        target: '--output=/',
+      })
     ).toThrow(/Invalid Docker build target/)
   })
 
   it('requires a Dockerfile', () => {
-    expect(() => buildDockerBuildArgs({ tag: 'app:v1', dockerfile: '' })).toThrow(
-      /Dockerfile path is required/
-    )
+    expect(() =>
+      buildDockerBuildArgs({ tag: 'app:v1', architecture: 'arm64', dockerfile: '' })
+    ).toThrow(/Dockerfile path is required/)
   })
 })
 

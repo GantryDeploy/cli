@@ -48,6 +48,10 @@ const RESOLVE_PROJECT_QUERY = /* GraphQL */ `
               routeHops
             }
           }
+          builds {
+            name
+            architecture
+          }
         }
       }
     }

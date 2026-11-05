@@ -142,6 +142,7 @@ const localBuild = (overrides: Partial<LocalBuildInputs> = {}): LocalBuildInputs
   workingDir: null,
   dockerTarget: null,
   namedBuildName: null,
+  architecture: null,
   buildArgs: null,
   ...overrides,
 })
@@ -285,7 +286,29 @@ describe('executeCliTask', () => {
 
   describe('local-build', () => {
     const dockerBuild = (overrides: Partial<LocalBuildInputs> = {}) =>
-      localBuild({ dockerfile: 'Dockerfile', ...overrides })
+      localBuild({ dockerfile: 'Dockerfile', architecture: 'arm64', ...overrides })
+
+    it('builds for the architecture in the step inputs', async () => {
+      await executeCliTask(dockerBuild({ architecture: 'x86_64' }), context())
+
+      expect(spawnCalls[0]?.args).toEqual([
+        'build',
+        '-t',
+        'p9ue62-shop-api:v3',
+        '-f',
+        'Dockerfile',
+        '--platform',
+        'linux/amd64',
+        '.',
+      ])
+    })
+
+    it('refuses a Docker build with no architecture', async () => {
+      await expect(executeCliTask(dockerBuild({ architecture: null }), context())).rejects.toThrow(
+        'The build step for api has no CPU architecture'
+      )
+      expect(spawnCalls).toHaveLength(0)
+    })
 
     it('passes hostile build arg values through as single literal argv elements', async () => {
       const buildArgs = [
@@ -309,6 +332,8 @@ describe('executeCliTask', () => {
           'p9ue62-shop-api:v3',
           '-f',
           'Dockerfile',
+          '--platform',
+          'linux/arm64',
           '--target',
           'runtime',
           '--build-arg',
@@ -969,7 +994,12 @@ describe('local-build without docker', () => {
     ['the service name when the named build name is empty', '', 'p9ue62-shop-web:v3'],
   ])('tags the image with the project prefix and %s', async (_label, namedBuildName, tag) => {
     const result = await executeCliTask(
-      localBuild({ serviceName: 'web', dockerfile: 'Dockerfile', namedBuildName }),
+      localBuild({
+        serviceName: 'web',
+        dockerfile: 'Dockerfile',
+        architecture: 'arm64',
+        namedBuildName,
+      }),
       context()
     )
 

@@ -7,7 +7,6 @@ import { registerBastionsCommand } from './commands/bastions'
 import { registerCachesCommand } from './commands/caches'
 import { registerCloudsCommand } from './commands/clouds'
 import { registerClustersCommand } from './commands/clusters'
-import { registerConsoleCommand } from './commands/console'
 import { registerDatabasesCommand } from './commands/databases'
 import { registerDeploymentsCommand } from './commands/deployments'
 import { registerDomainsCommand } from './commands/domains'
@@ -23,6 +22,7 @@ import { registerPromoteCommand } from './commands/promote'
 import { registerRegionsCommand } from './commands/regions'
 import { registerRerouteCommand } from './commands/reroute'
 import { registerResolveCommand } from './commands/resolve'
+import { registerRunCommand } from './commands/run'
 import { registerSecretsCommand } from './commands/secrets'
 import { registerTeardownCommand } from './commands/teardown'
 import { registerValidateCommand } from './commands/validate'
@@ -53,7 +53,7 @@ program
     '-T, --team <teamId>',
     'Team to act on, using a team ID from `gantry whoami`, for a personal token that covers more than one (also GANTRY_TEAM)'
   )
-  // `console` needs passThroughOptions() to forward a target command's own flags. Global
+  // `run` needs passThroughOptions() to forward a target command's own flags. Global
   // options always come before the subcommand, so other commands are unaffected.
   .enablePositionalOptions()
 
@@ -66,7 +66,7 @@ registerNetworksCommand(program)
 registerBastionsCommand(program)
 registerCachesCommand(program)
 registerClustersCommand(program)
-registerConsoleCommand(program)
+registerRunCommand(program)
 registerDatabasesCommand(program)
 registerFilesystemsCommand(program)
 registerLiftCommand(program)

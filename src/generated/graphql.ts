@@ -726,17 +726,6 @@ export type CreateClusterMutationVariables = Exact<{
 
 export type CreateClusterMutation = { createCluster: { success: boolean, message: string | null, deploymentId: string | null, cluster: { id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string } | null } };
 
-export type RunConsoleCommandMutationVariables = Exact<{
-  projectId: string;
-  environmentSlug: string;
-  service: string;
-  command: Array<string> | string;
-  variant?: string | null | undefined;
-}>;
-
-
-export type RunConsoleCommandMutation = { runConsoleCommand: { success: boolean, exitCode: number, output: string, message: string | null } };
-
 export type GetDatabasesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1104,6 +1093,28 @@ export type GetRerouteDeploymentQueryVariables = Exact<{
 
 
 export type GetRerouteDeploymentQuery = { deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, environmentName: string | null, serviceName: string | null } | null };
+
+export type StartCommandRunMutationVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+  command: Array<string> | string;
+  variant?: string | null | undefined;
+}>;
+
+
+export type StartCommandRunMutation = { startCommandRun: { success: boolean, message: string | null, runId: string | null, aws: { region: string, functionName: string, qualifier: string, payload: string, credentials: { accessKeyId: string, secretAccessKey: string, sessionToken: string } } | null } };
+
+export type CommandRunQueryVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+  runId: string;
+  outputCursor?: string | null | undefined;
+}>;
+
+
+export type CommandRunQuery = { commandRun: { state: string, exitCode: number | null, output: string, outputCursor: string | null, message: string | null } };
 
 export type GetSecretsQueryVariables = Exact<{
   cloudAccountId?: string | null | undefined;

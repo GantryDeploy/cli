@@ -436,8 +436,7 @@ describe('client', () => {
     })
 
     describe('mutations marked idempotent: false (no blind retries)', () => {
-      const MUTATION =
-        'mutation RunConsoleCommand { runConsoleCommand(command: "migrate") { output } }'
+      const MUTATION = 'mutation StartCommandRun { startCommandRun(command: "migrate") { output } }'
       const unkeyed = { idempotent: false } as const
 
       function undiciError(code: string, message: string): TypeError {
@@ -447,7 +446,7 @@ describe('client', () => {
 
       it('sends no idempotency key', async () => {
         mockFetch.mockResolvedValueOnce(
-          jsonResponse({ data: { runConsoleCommand: { output: 'ok' } } })
+          jsonResponse({ data: { startCommandRun: { output: 'ok' } } })
         )
 
         await runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))
@@ -492,11 +491,11 @@ describe('client', () => {
       ])('retries %s, where the request never left the machine', async (code, message) => {
         mockFetch
           .mockRejectedValueOnce(undiciError(code, message))
-          .mockResolvedValueOnce(jsonResponse({ data: { runConsoleCommand: { output: 'ok' } } }))
+          .mockResolvedValueOnce(jsonResponse({ data: { startCommandRun: { output: 'ok' } } }))
 
         const result = await runWithTimers(graphqlRequest(MUTATION, undefined, unkeyed))
 
-        expect(result).toEqual({ runConsoleCommand: { output: 'ok' } })
+        expect(result).toEqual({ startCommandRun: { output: 'ok' } })
         expect(mockFetch).toHaveBeenCalledTimes(2)
       })
 

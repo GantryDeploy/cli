@@ -485,6 +485,24 @@ describe('lift command', () => {
     expect(mocks.printError).toHaveBeenCalledWith('Routing failed - certificate pending')
   })
 
+  it('exits non-zero when post-deploy commands fail, saying the version is live', async () => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_r',
+        status: 'FAILED',
+        lastMessage: 'The post-deploy command exited with code 2.',
+        steps: [{ id: 'st_9', stepType: 'post-deploy', status: 'FAILED' }],
+      },
+    })
+    handlers.ReleaseOutput = () => ({ releaseOutput: { lines: [], cursor: null } })
+
+    await expect(lift(['production'])).rejects.toThrow(ExitError)
+
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Post-deploy commands failed, and the new version is live - The post-deploy command exited with code 2.'
+    )
+  })
+
   it('stops waiting on routing when its deployment disappears', async () => {
     handlers.GetRoutingDeployment = () => ({ deployment: null })
 

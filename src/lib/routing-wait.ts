@@ -15,6 +15,7 @@ import { isTerminalStatus } from './deployment-status'
 import { buildLiveUrlLines } from './live-urls'
 import type { VersionRouteUrl } from './live-urls'
 import { printHeading } from './output'
+import { followReleaseOutput } from './release-output'
 import { sanitizeTerminal } from './sanitize'
 
 const ROUTING_DEPLOYMENT_QUERY = /* GraphQL */ `
@@ -23,6 +24,10 @@ const ROUTING_DEPLOYMENT_QUERY = /* GraphQL */ `
       id
       status
       lastMessage
+      steps {
+        stepType
+        status
+      }
     }
   }
 `
@@ -51,6 +56,9 @@ const VERSION_DNS_RECORDS_QUERY = /* GraphQL */ `
     }
   }
 `
+
+/** Bounds the final read of post-deploy output, at 1000 log rows a page. */
+const MAX_DRAIN_PAGES = 50
 
 // Measured from when every service finishes, not from the start of the deploy.
 const ROUTING_DISCOVERY_TIMEOUT_MS = 2 * 60 * 1000
@@ -110,15 +118,16 @@ async function liveRoutes(versionId: string): Promise<RoutingResult> {
 }
 
 /**
- * Follows the version's routing deployment until it settles, and returns the live URLs and DNS
- * records once it completes.
+ * Follows the version's routing deployment until it settles, passing each post-deploy command line
+ * to `writeOutput`, and returns the live URLs and DNS records once it completes.
  *
- * @throws when routing fails.
+ * @throws when routing or its post-deploy commands fail.
  */
 export async function waitForRouting(
   versionId: string,
   isCancelling: () => boolean,
-  setTitle: (title: string) => void
+  setTitle: (title: string) => void,
+  writeOutput: (line: string) => void
 ): Promise<RoutingResult> {
   const routingDeploymentId = await findRoutingDeployment(versionId, isCancelling)
   if (isCancelling()) {
@@ -131,6 +140,10 @@ export async function waitForRouting(
   }
 
   setTitle('Configure routing: Running')
+
+  const followPostDeploy = followReleaseOutput(versionId, (deploymentId, line) => {
+    if (deploymentId === routingDeploymentId) writeOutput(sanitizeTerminal(line))
+  })
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
   while (true) {
@@ -159,13 +172,31 @@ export async function waitForRouting(
       return {}
     }
 
+    // Once routing settles, read every remaining page before printing the result.
+    const pages = isTerminalStatus(deployment.status) ? MAX_DRAIN_PAGES : 1
+    try {
+      for (let page = 0; page < pages; page++) {
+        if (await followPostDeploy([deployment])) break
+      }
+    } catch {
+      // The output stays stored; the next poll reads from the same cursor.
+    }
+
     const message = deployment.lastMessage ? ` - ${sanitizeTerminal(deployment.lastMessage)}` : ''
     setTitle(sanitizeTerminal(`Configure routing: ${deployment.status.toUpperCase()}${message}`))
 
     if (!isTerminalStatus(deployment.status)) continue
 
     if (deployment.status === 'FAILED') {
-      throw new Error(`Routing failed${message}`)
+      const postDeployFailed = (deployment.steps ?? []).some(
+        (step) => step.stepType === 'post-deploy' && step.status === 'FAILED'
+      )
+      // The version went live before its post-deploy commands ran.
+      throw new Error(
+        postDeployFailed
+          ? `Post-deploy commands failed, and the new version is live${message}`
+          : `Routing failed${message}`
+      )
     }
     if (deployment.status !== 'COMPLETE') {
       setTitle(sanitizeTerminal(`Configure routing: ${deployment.status.toUpperCase()}`))

@@ -515,6 +515,8 @@ export function registerLiftCommand(program: Command): void {
 
             {
               title: 'Configure routing',
+              // Keeps every post-deploy command line on screen beneath the task.
+              rendererOptions: { outputBar: Infinity, persistentOutput: true },
               skip: (ctx) => {
                 if (!ctx.versionId) return true
                 if (ctx.failedServices && ctx.failedServices.length > 0) {
@@ -530,6 +532,9 @@ export function registerLiftCommand(program: Command): void {
                   () => cancelling,
                   (title) => {
                     task.title = title
+                  },
+                  (line) => {
+                    task.output = line
                   }
                 )
                 ctx.routeUrls = routing.routeUrls

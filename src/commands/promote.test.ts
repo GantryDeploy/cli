@@ -250,6 +250,30 @@ describe('promote command', () => {
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
+  it('exits non-zero when post-deploy commands fail, saying the version is live', async () => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_routing',
+        status: 'FAILED',
+        lastMessage: 'The post-deploy command exited with code 2.',
+        steps: [{ stepType: 'post-deploy', status: 'FAILED' }],
+      },
+    })
+    handlers.ReleaseOutput = () => ({
+      releaseOutput: {
+        lines: [{ deploymentId: 'dep_routing', message: 'Cache warm failed: 502 from origin' }],
+        cursor: 'c1',
+      },
+    })
+
+    await expect(run(['production', '--from', 'staging'])).rejects.toThrow('process.exit(1)')
+
+    expect(errors()).toContain(
+      'Post-deploy commands failed, and the new version is live - The post-deploy command exited with code 2.'
+    )
+    expect(calls('ReleaseOutput')).toContainEqual({ versionId: 'w8fs2k', after: undefined })
+  })
+
   it('fails when routing fails after every service deployed', async () => {
     handlers.GetRoutingDeployment = () => ({
       deployment: {

@@ -249,6 +249,8 @@ export function registerPromoteCommand(program: Command): void {
             },
             {
               title: 'Configure routing',
+              // Keeps every post-deploy command line on screen beneath the task.
+              rendererOptions: { outputBar: Infinity, persistentOutput: true },
               skip: (ctx) => {
                 if (!ctx.versionId) return true
                 const failed = ctx.failedServices?.length ?? 0
@@ -263,6 +265,9 @@ export function registerPromoteCommand(program: Command): void {
                   () => false,
                   (title) => {
                     task.title = title
+                  },
+                  (line) => {
+                    task.output = line
                   }
                 )
               },

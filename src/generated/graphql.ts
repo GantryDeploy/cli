@@ -1280,7 +1280,7 @@ export type GetRoutingDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetRoutingDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null } | null };
+export type GetRoutingDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, steps: Array<{ stepType: string, status: DeploymentStepStatus }> | null } | null };
 
 export type VersionRouteUrlsQueryVariables = Exact<{
   versionId: string;

@@ -1099,6 +1099,17 @@ export type DeleteSecretMutationVariables = Exact<{
 
 export type DeleteSecretMutation = { deleteSecret: { success: boolean, message: string | null } };
 
+export type StartShellSessionMutationVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+  instance?: string | null | undefined;
+  command?: string | null | undefined;
+}>;
+
+
+export type StartShellSessionMutation = { startShellSession: { success: boolean, message: string | null, instanceId: string | null, aws: { region: string, sessionId: string, streamUrl: string, tokenValue: string, target: string } | null } };
+
 export type TeardownPreviewQueryVariables = Exact<{
   projectId: string;
   environmentSlug: string;

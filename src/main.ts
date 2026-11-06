@@ -24,6 +24,7 @@ import { registerRerouteCommand } from './commands/reroute'
 import { registerResolveCommand } from './commands/resolve'
 import { registerRunCommand } from './commands/run'
 import { registerSecretsCommand } from './commands/secrets'
+import { registerShellCommand } from './commands/shell'
 import { registerTeardownCommand } from './commands/teardown'
 import { registerValidateCommand } from './commands/validate'
 import { registerVersionsCommand } from './commands/versions'
@@ -67,6 +68,7 @@ registerBastionsCommand(program)
 registerCachesCommand(program)
 registerClustersCommand(program)
 registerRunCommand(program)
+registerShellCommand(program)
 registerDatabasesCommand(program)
 registerFilesystemsCommand(program)
 registerLiftCommand(program)

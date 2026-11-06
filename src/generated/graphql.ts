@@ -1260,6 +1260,14 @@ export type GetCloudRegionChoicesQueryVariables = Exact<{
 
 export type GetCloudRegionChoicesQuery = { cloudRegions: Array<{ code: string, name: string }> };
 
+export type ReleaseOutputQueryVariables = Exact<{
+  versionId: string;
+  after?: string | null | undefined;
+}>;
+
+
+export type ReleaseOutputQuery = { releaseOutput: { cursor: string | null, lines: Array<{ message: string, deploymentId: string }> } };
+
 export type ResolveProjectQueryVariables = Exact<{
   input: ResolveProjectInput;
 }>;

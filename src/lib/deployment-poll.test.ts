@@ -37,7 +37,7 @@ describe('serviceDeploymentSubtasks', () => {
     const [api] = subtasksFor(['dep_api'])
 
     await vi.advanceTimersByTimeAsync(10_000)
-    const subtask = { title: '' }
+    const subtask = { title: '', output: '' }
     await api.task({}, subtask)
 
     expect(graphqlRequest).toHaveBeenCalledTimes(1)
@@ -60,7 +60,7 @@ describe('serviceDeploymentSubtasks', () => {
 
     await vi.advanceTimersByTimeAsync(10_000)
 
-    await expect(api.task({}, { title: '' })).rejects.toThrow(
+    await expect(api.task({}, { title: '', output: '' })).rejects.toThrow(
       'api: Deployment failed - There was an error while deploying the service.'
     )
     expect(onFailure).toHaveBeenCalledWith(
@@ -71,5 +71,33 @@ describe('serviceDeploymentSubtasks', () => {
         message: 'api: Deployment failed - There was an error while deploying the service.',
       }
     )
+  })
+
+  it("prints a release command's output beneath its service", async () => {
+    const releasing = {
+      id: 'dep_api',
+      serviceName: 'api',
+      status: 'RUNNING',
+      steps: [{ id: 'stp_r4n8wc', stepType: 'release', status: 'PROCESSING', phase: 'DEPLOYING' }],
+    }
+    graphqlRequest.mockImplementation((query: string) =>
+      Promise.resolve(
+        query.includes('ReleaseOutput(')
+          ? {
+              releaseOutput: {
+                lines: [{ deploymentId: 'dep_api', message: 'Migrated: 2026_11_12_add_orders' }],
+                cursor: 'c1',
+              },
+            }
+          : { deploymentsByVersion: [releasing] }
+      )
+    )
+    const [api] = subtasksFor(['dep_api'])
+    const subtask = { title: '', output: '' }
+    void api.task({}, subtask)
+
+    await vi.advanceTimersByTimeAsync(2_500)
+
+    expect(subtask.output).toBe('Migrated: 2026_11_12_add_orders')
   })
 })

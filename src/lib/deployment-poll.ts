@@ -12,6 +12,7 @@ import type {
 
 import { formatApiError, GantryApiError, graphqlRequest } from './client'
 import { isTerminalStatus } from './deployment-status'
+import { followReleaseOutput } from './release-output'
 import { redact, sanitizeTerminal } from './sanitize'
 import { executeCliTask } from './tasks'
 import type { TaskContext } from './tasks'
@@ -259,11 +260,15 @@ async function pollAllDeployments(
   versionId: string,
   taskContext: TaskContext,
   titleUpdaters: Map<string, (title: string) => void>,
+  outputWriters: Map<string, (line: string) => void>,
   resolvers: Map<string, () => void>,
   rejecters: Map<string, (error: Error) => void>,
   isCancelling: () => boolean
 ): Promise<void> {
   const MAX_CONSECUTIVE_NETWORK_ERRORS = 10
+  const followRelease = followReleaseOutput(versionId, (deploymentId, line) => {
+    outputWriters.get(deploymentId)?.(line)
+  })
   let lastActivityTime: number
   let consecutiveNetworkErrors = 0
   const completedDeployments = new Set<string>()
@@ -293,6 +298,13 @@ async function pollAllDeployments(
 
       consecutiveNetworkErrors = 0
       lastActivityTime = Date.now()
+
+      // Read before judging statuses, so a release's last lines print before its service settles.
+      try {
+        await followRelease(result.deploymentsByVersion)
+      } catch {
+        // The output stays stored; the next poll reads from the same cursor.
+      }
 
       for (const deployment of result.deploymentsByVersion) {
         const id = deployment.id
@@ -452,9 +464,14 @@ export function serviceDeploymentSubtasks<Ctx>(params: {
   taskContext: TaskContext
   isCancelling: () => boolean
   onFailure: (ctx: Ctx, failure: ServiceFailure) => void
-}): { title: string; task: (ctx: Ctx, subtask: { title: string }) => Promise<void> }[] {
+}): {
+  title: string
+  rendererOptions: { outputBar: number; persistentOutput: boolean }
+  task: (ctx: Ctx, subtask: { title: string; output: string }) => Promise<void>
+}[] {
   const { versionId, deploymentIds, names, taskContext, isCancelling, onFailure } = params
   const titleUpdaters = new Map<string, (title: string) => void>()
+  const outputWriters = new Map<string, (line: string) => void>()
   const resolvers = new Map<string, () => void>()
   const rejecters = new Map<string, (error: Error) => void>()
   // Created up front: the poller can settle a service before listr starts its subtask.
@@ -471,9 +488,14 @@ export function serviceDeploymentSubtasks<Ctx>(params: {
 
   const subtasks = deploymentIds.map((id) => ({
     title: `${names.get(id) ?? id}: Waiting...`,
-    task: async (ctx: Ctx, subtask: { title: string }) => {
+    // Keeps every release command line on screen, beneath its service.
+    rendererOptions: { outputBar: Infinity, persistentOutput: true },
+    task: async (ctx: Ctx, subtask: { title: string; output: string }) => {
       titleUpdaters.set(id, (title: string) => {
         subtask.title = sanitizeTerminal(title)
+      })
+      outputWriters.set(id, (line: string) => {
+        subtask.output = sanitizeTerminal(line)
       })
 
       try {
@@ -490,7 +512,15 @@ export function serviceDeploymentSubtasks<Ctx>(params: {
   }))
 
   // Not awaited: the poller settles each service's outcome.
-  void pollAllDeployments(versionId, taskContext, titleUpdaters, resolvers, rejecters, isCancelling)
+  void pollAllDeployments(
+    versionId,
+    taskContext,
+    titleUpdaters,
+    outputWriters,
+    resolvers,
+    rejecters,
+    isCancelling
+  )
 
   return subtasks
 }

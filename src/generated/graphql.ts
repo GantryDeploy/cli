@@ -1099,7 +1099,7 @@ export type StartCommandRunMutationVariables = Exact<{
   environmentSlug: string;
   service: string;
   command: Array<string> | string;
-  variant?: string | null | undefined;
+  function?: string | null | undefined;
 }>;
 
 

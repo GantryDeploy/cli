@@ -285,6 +285,14 @@ input AwsNetworkSettingsInput {
   natGatewayOption: AwsNatGatewayOptionEnum
 }
 
+type AwsShellSession {
+  region: String!
+  sessionId: String!
+  streamUrl: String!
+  target: String!
+  tokenValue: String!
+}
+
 """Short-lived AWS credentials scoped to writing one artifact"""
 type AwsUploadCredentials {
   accessKeyId: String!
@@ -1507,8 +1515,9 @@ type Mutation {
     team: String
   ): DatabaseMutationResult!
   setCanary(input: ActivationInput!, team: String): ActivationResult!
-  startCommandRun(command: [String!]!, environmentSlug: String!, projectId: String!, service: String!, team: String, variant: String): StartCommandRunResult!
+  startCommandRun(command: [String!]!, environmentSlug: String!, function: String, projectId: String!, service: String!, team: String): StartCommandRunResult!
   startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!
+  startShellSession(command: String, environmentSlug: String!, instance: String, projectId: String!, service: String!, team: String): StartShellSessionResult!
   startTeardown(input: StartTeardownInput!, team: String): StartTeardownResult!
   submitManifest(input: SubmitManifestInput!, team: String): SubmitManifestResult!
   triggerCertificateValidation(id: String!, team: String): CertificateMutationResult!
@@ -1706,10 +1715,11 @@ type Query {
   networks(team: String): [Network!]!
   project(id: String, slug: String, team: String): Project
   projects(team: String): [Project!]!
+  releaseOutput(after: String, team: String, versionId: String!): ReleaseOutput!
   resolveProject(input: ResolveProjectInput!): ResolveProjectResult!
   secret(id: String!, team: String): Secret
   secrets(cloudAccountId: String, team: String): [Secret!]!
-  serviceLogs(cursor: String, environmentSlug: String!, grep: String, limit: Int, projectId: String!, service: String!, since: String = "1h", team: String, variant: String): LogPage!
+  serviceLogs(cursor: String, environmentSlug: String!, function: String, grep: String, limit: Int, projectId: String!, service: String!, since: String = "1h", team: String): LogPage!
   servicesByProject(projectId: String!, team: String): [Service!]!
   teardownPreview(environmentSlug: String!, projectId: String!, team: String): TeardownPreviewResult!
   versionDnsRecords(team: String, versionId: String!): [VersionDnsRecord!]!
@@ -1735,6 +1745,24 @@ type RegionalCertificate {
   region: String!
   status: CertificateStatusEnum!
   validationAttempts: Float!
+}
+
+"""
+A page of a version's release and post-deploy command output, oldest first
+"""
+type ReleaseOutput {
+  """Pass back as `after` to read only newer lines"""
+  cursor: String
+  lines: [ReleaseOutputLine!]!
+}
+
+type ReleaseOutputLine {
+  deploymentId: String!
+
+  """One line the version's release or post-deploy commands printed"""
+  message: String!
+  stepId: String
+  timestamp: String!
 }
 
 type ResolutionErrorType {
@@ -1919,6 +1947,13 @@ type StartDeploymentResult {
 
   """Version ID for this deployment"""
   versionId: String
+}
+
+type StartShellSessionResult {
+  aws: AwsShellSession
+  instanceId: String
+  message: String
+  success: Boolean!
 }
 
 input StartTeardownInput {

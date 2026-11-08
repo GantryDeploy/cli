@@ -22,14 +22,14 @@ const START_COMMAND_RUN = /* GraphQL */ `
     $environmentSlug: String!
     $service: String!
     $command: [String!]!
-    $variant: String
+    $function: String
   ) {
     startCommandRun(
       projectId: $projectId
       environmentSlug: $environmentSlug
       service: $service
       command: $command
-      variant: $variant
+      function: $function
     ) {
       success
       message
@@ -95,7 +95,7 @@ interface RunTarget {
 
 interface RunOptions {
   env?: string
-  variant?: string
+  function?: string
   cwd?: string
 }
 
@@ -214,7 +214,7 @@ export function registerRunCommand(program: Command): void {
     .argument('<service>', 'Service name (e.g. "web")')
     .argument('[command...]', 'Command to run, after "--"')
     .option('--env <environment>', 'Environment name', 'dev')
-    .option('--variant <variant>', "Function to target (default: the service's console function)")
+    .option('--function <name>', "Function to target (default: the service's console function)")
     .option('--cwd <path>', 'Working directory containing gantry.yml')
     .addHelpText(
       'after',
@@ -258,7 +258,7 @@ export function registerRunCommand(program: Command): void {
           StartCommandRunMutationVariables
         >(
           START_COMMAND_RUN,
-          { ...target, command: remoteCommand, variant: options.variant },
+          { ...target, command: remoteCommand, function: options.function },
           // The response can hold short-lived credentials, which the API must not store for
           // replay, and a replay could start the command twice.
           { idempotent: false }

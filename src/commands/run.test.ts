@@ -158,11 +158,21 @@ describe('run command', () => {
       })
     })
 
-    it('targets the requested environment, variant and working directory', async () => {
+    it('targets the requested environment, function and working directory', async () => {
       startsLambda()
       mocks.lambdaSend.mockResolvedValueOnce(lambdaResponse({ exitCode: 0, output: '' }))
 
-      await run('--env', 'Production', '--variant', 'tasks', '--cwd', '/srv/app', 'web', '--', 'ls')
+      await run(
+        '--env',
+        'Production',
+        '--function',
+        'tasks',
+        '--cwd',
+        '/srv/app',
+        'web',
+        '--',
+        'ls'
+      )
 
       expect(mocks.loadProjectIdentity).toHaveBeenCalledWith(path.resolve('/srv/app'))
       expect(mocks.graphqlRequest.mock.calls[0]?.[1]).toEqual({
@@ -170,17 +180,17 @@ describe('run command', () => {
         environmentSlug: 'production',
         service: 'web',
         command: ['ls'],
-        variant: 'tasks',
+        function: 'tasks',
       })
     })
 
-    it('sends no variant by default, so the API picks the right one for the service', async () => {
+    it('sends no function by default, so the API picks the right one for the service', async () => {
       startsLambda()
       mocks.lambdaSend.mockResolvedValueOnce(lambdaResponse({ exitCode: 0, output: '' }))
 
       await run('web', '--', 'ls')
 
-      expect(mocks.graphqlRequest.mock.calls[0]?.[1]).toMatchObject({ variant: undefined })
+      expect(mocks.graphqlRequest.mock.calls[0]?.[1]).toMatchObject({ function: undefined })
     })
 
     it('forwards options after the service to the remote command', async () => {

@@ -1,9 +1,15 @@
 import { spawn } from 'child_process'
 import * as crypto from 'crypto'
 import * as fs from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import {
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
 import { ZipArchive } from 'archiver'
 import ignore from 'ignore'
 import { minimatch } from 'minimatch'
@@ -49,7 +55,8 @@ type PresignedUpload = NonNullable<
 >['store'][number]
 
 export interface TaskContext {
-  stagingDir: string
+  /** The staged project files. A promote has none: it only copies builds that already exist. */
+  stagingDir?: string
   cwd: string
   force?: boolean
   delete?: boolean
@@ -60,19 +67,29 @@ export interface TaskResult {
   fileResults?: FileUploadResult[]
 }
 
+function requireStagingDir(context: TaskContext): string {
+  if (context.stagingDir === undefined) {
+    throw new Error("This step needs the project files, and a promote doesn't stage them")
+  }
+  return context.stagingDir
+}
+
 export async function executeCliTask(inputs: CliInputs, context: TaskContext): Promise<TaskResult> {
   switch (inputs.__typename) {
     case 'LocalBuildCliInputs':
-      return { outputs: { localBuild: await executeLocalBuild(inputs, context.stagingDir) } }
+      return {
+        outputs: { localBuild: await executeLocalBuild(inputs, requireStagingDir(context)) },
+      }
     case 'ObjectUploadCliInputs': {
       const { fileResults, outputs } = await executeObjectUpload(inputs, context)
       return { outputs: { objectUpload: outputs }, fileResults }
     }
     case 'ContainerPushCliInputs':
+      if (!inputs.source) requireStagingDir(context)
       return { outputs: { containerPush: await executeContainerPush(inputs, context.cwd) } }
     case 'ArtifactUploadCliInputs':
       return {
-        outputs: { artifactUpload: await executeArtifactUpload(inputs, context.stagingDir) },
+        outputs: { artifactUpload: await executeArtifactUpload(inputs, context) },
       }
     default: {
       const unhandled: never = inputs
@@ -174,14 +191,88 @@ interface FileUploadResult {
   success: boolean
 }
 
+interface ObjectUploadResult {
+  outputs: ObjectUploadCliOutputsInput
+  fileResults: FileUploadResult[]
+}
+
+/** Uploads the staged site files, or a build's files downloaded from another cloud account. */
+async function executeObjectUpload(
+  inputs: ObjectUploadInputs,
+  context: TaskContext
+): Promise<ObjectUploadResult> {
+  if (!inputs.source) return uploadObjects(inputs, requireStagingDir(context), context)
+
+  const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-promote-'))
+  try {
+    await downloadFolder(inputs.source, downloadDir)
+    return await uploadObjects({ ...inputs, sourcePath: '.' }, downloadDir, context)
+  } finally {
+    fs.rmSync(downloadDir, { recursive: true, force: true })
+  }
+}
+
+type ObjectUploadSource = NonNullable<ObjectUploadInputs['source']>
+type SourceCredentials = ObjectUploadSource['aws']
+
+function requireSourceCredentials(credentials: SourceCredentials): NonNullable<SourceCredentials> {
+  if (!credentials) {
+    throw new Error("This cloud doesn't support copying builds between cloud accounts yet.")
+  }
+  return credentials
+}
+
+async function readObject(client: S3Client, bucket: string, key: string): Promise<Buffer> {
+  const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+  if (!result.Body) {
+    throw new Error(`${bucket}/${key} has no content`)
+  }
+  return Buffer.from(await result.Body.transformToByteArray())
+}
+
+async function downloadFolder(source: ObjectUploadSource, dir: string): Promise<void> {
+  const client = new S3Client({
+    region: source.region,
+    credentials: requireSourceCredentials(source.aws),
+  })
+  const prefix = `${source.keyPrefix}/`
+  let downloaded = 0
+  let continuationToken: string | undefined
+  do {
+    const page = await client.send(
+      new ListObjectsV2Command({
+        Bucket: source.bucketName,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    )
+    for (const object of page.Contents ?? []) {
+      if (!object.Key || object.Key.endsWith('/')) continue
+      const target = path.resolve(dir, object.Key.slice(prefix.length))
+      if (!isWithin(target, dir)) {
+        throw new Error(`${object.Key} resolves outside the download folder`)
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, await readObject(client, source.bucketName, object.Key))
+      downloaded += 1
+    }
+    continuationToken = page.NextContinuationToken
+  } while (continuationToken)
+
+  if (downloaded === 0) {
+    throw new Error(`No files under ${source.bucketName}/${prefix} to copy`)
+  }
+}
+
 /**
  * Upload URLs arrive asynchronously after the manifest is submitted, so this polls
  * the step until it reaches `AWAITING_CLI` with `uploadUrls` set.
  */
-async function executeObjectUpload(
+async function uploadObjects(
   inputs: ObjectUploadInputs,
+  baseDir: string,
   context: TaskContext
-): Promise<{ outputs: ObjectUploadCliOutputsInput; fileResults: FileUploadResult[] }> {
+): Promise<ObjectUploadResult> {
   const { stepId, includePatterns, excludePatterns } = inputs
   const sourcePath = inputs.sourcePath || '.'
   const force = context.force ?? false
@@ -191,10 +282,7 @@ async function executeObjectUpload(
     throw new Error('stepId is required for object-upload task')
   }
 
-  const { rootReal, sourceDir: absoluteSourcePath } = resolveSourceDir(
-    context.stagingDir,
-    sourcePath
-  )
+  const { rootReal, sourceDir: absoluteSourcePath } = resolveSourceDir(baseDir, sourcePath)
 
   let manifest = scanFilesWithHashes(absoluteSourcePath, rootReal)
 
@@ -410,35 +498,36 @@ async function uploadFilesInParallelWithResults(
   return { count, size, fileResults }
 }
 
-/** Retags the image the local-build step produced (e.g. `p9ue62-my-api-api-docker:v3`) and pushes it to the container registry. */
+/**
+ * Retags the image the local-build step produced (e.g. `p9ue62-my-api-api-docker:v3`), or a
+ * build's image pulled from another region or cloud account, and pushes it to the registry.
+ */
 async function executeContainerPush(
   inputs: ContainerPushInputs,
   cwd: string
 ): Promise<ContainerPushCliOutputsInput> {
-  const { imageUri, localImageTag, registryEndpoint, registryUsername, registryPassword } = inputs
+  const { imageUri, source } = inputs
 
   if (!imageUri) {
     throw new Error('imageUri is required for container-push task')
   }
-
-  if (!localImageTag) {
-    throw new Error('localImageTag is required for container-push task')
-  }
-
-  assertValidImageReference(localImageTag, 'local image tag')
   assertValidImageReference(imageUri, 'image URI')
 
-  if (!registryPassword) {
-    throw new Error('Registry credentials are required for container-push task')
+  let localImageTag: string
+  if (source) {
+    assertValidImageReference(source.imageUri, 'source image')
+    await registryLogin(source, cwd)
+    await runDocker(['pull', source.imageUri], { cwd })
+    localImageTag = source.imageUri
+  } else {
+    if (!inputs.localImageTag) {
+      throw new Error('localImageTag is required for container-push task')
+    }
+    assertValidImageReference(inputs.localImageTag, 'local image tag')
+    localImageTag = inputs.localImageTag
   }
 
-  assertValidRegistryEndpoint(registryEndpoint)
-
-  await runDocker(
-    ['login', `--username=${registryUsername}`, '--password-stdin', registryEndpoint],
-    { cwd, input: registryPassword }
-  )
-
+  await registryLogin(inputs, cwd)
   await runDocker(['tag', localImageTag, imageUri], { cwd })
   await runDocker(['push', imageUri], { cwd })
 
@@ -447,6 +536,25 @@ async function executeContainerPush(
     localImageTag,
     success: true,
   }
+}
+
+async function registryLogin(
+  registry: Pick<ContainerPushInputs, 'registryEndpoint' | 'registryUsername' | 'registryPassword'>,
+  cwd: string
+): Promise<void> {
+  if (!registry.registryPassword) {
+    throw new Error('Registry credentials are required for container-push task')
+  }
+  assertValidRegistryEndpoint(registry.registryEndpoint)
+  await runDocker(
+    [
+      'login',
+      `--username=${registry.registryUsername}`,
+      '--password-stdin',
+      registry.registryEndpoint,
+    ],
+    { cwd, input: registry.registryPassword }
+  )
 }
 
 export function assertArtifactFits(
@@ -489,17 +597,29 @@ const ARTIFACT_UPLOADERS: Partial<Record<string, ArtifactUploader>> = {
 
 async function executeArtifactUpload(
   inputs: ArtifactUploadInputs,
-  stagingDir: string
+  context: TaskContext
 ): Promise<ArtifactUploadCliOutputsInput> {
   const upload = ARTIFACT_UPLOADERS[inputs.provider]
   if (!upload) {
     throw new Error("This cloud doesn't support artifact uploads yet.")
   }
 
-  const { sourceDir: absoluteSourcePath } = resolveSourceDir(stagingDir, inputs.sourcePath || '.')
-  const artifact = await createZipArchive(absoluteSourcePath, inputs.excludePatterns)
-
-  assertArtifactFits(artifact.length, inputs.maxArtifactBytes, absoluteSourcePath)
+  let artifact: Buffer
+  if (inputs.source) {
+    const { source } = inputs
+    const client = new S3Client({
+      region: source.region,
+      credentials: requireSourceCredentials(source.aws),
+    })
+    artifact = await readObject(client, source.bucketName, source.objectKey)
+  } else {
+    const { sourceDir: absoluteSourcePath } = resolveSourceDir(
+      requireStagingDir(context),
+      inputs.packageSourcePath ?? '.'
+    )
+    artifact = await createZipArchive(absoluteSourcePath, inputs.excludePatterns)
+    assertArtifactFits(artifact.length, inputs.maxArtifactBytes, absoluteSourcePath)
+  }
 
   await upload(inputs, artifact)
 

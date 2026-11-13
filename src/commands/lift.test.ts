@@ -63,7 +63,8 @@ vi.mock(import('../lib/output'), async (importOriginal) => ({
 }))
 
 const { GantryApiError } = await import('../lib/client')
-const { envBlockedTitle, getPhaseDisplay, registerLiftCommand } = await import('./lift')
+const { envBlockedTitle, registerLiftCommand } = await import('./lift')
+const { getPhaseDisplay } = await import('../lib/deployment-poll')
 
 class ExitError extends Error {
   constructor(readonly code: number | undefined) {
@@ -79,6 +80,7 @@ const OBJECT_INPUTS: ObjectUploadInputs = {
   sourcePath: 'dist',
   includePatterns: null,
   excludePatterns: null,
+  source: null,
 }
 
 const OBJECT_RESULT: TaskResult = {
@@ -679,6 +681,7 @@ describe('lift command', () => {
     registryEndpoint: 'https://123.dkr.ecr.us-east-1.amazonaws.com',
     registryUsername: 'AWS',
     registryPassword: 'dG9rZW4=',
+    source: null,
   }
 
   const ARTIFACT_UPLOAD_INPUTS: ArtifactUploadInputs = {
@@ -690,8 +693,9 @@ describe('lift command', () => {
     region: 'us-east-1',
     maxArtifactBytes: 52428800,
     aws: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
-    sourcePath: 'dist',
+    packageSourcePath: 'dist',
     excludePatterns: null,
+    source: null,
   }
 
   it.each<[string, CliInputs]>([
@@ -761,7 +765,7 @@ describe('lift command', () => {
       outputs: {
         containerPush: {
           imageUri: CONTAINER_PUSH_INPUTS.imageUri,
-          localImageTag: CONTAINER_PUSH_INPUTS.localImageTag,
+          localImageTag: 'p9ue62-shop-web:v3',
           success: true,
         },
       },

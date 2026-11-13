@@ -4,10 +4,9 @@ import type { Command } from 'commander'
 import { Listr } from 'listr2'
 
 import type {
-  GetPromotedDeploymentQuery,
-  GetPromotedDeploymentQueryVariables,
   GetPromoteTargetEnvironmentsQuery,
   GetPromoteTargetEnvironmentsQueryVariables,
+  PromoteVersionInput,
   PromoteVersionMutation,
   PromoteVersionMutationVariables,
   StartPromotedDeploymentMutation,
@@ -15,7 +14,8 @@ import type {
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
-import { isTerminalStatus } from '../lib/deployment-status'
+import { serviceDeploymentNames, serviceDeploymentSubtasks } from '../lib/deployment-poll'
+import type { ServiceFailure } from '../lib/deployment-poll'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
 import { printError } from '../lib/output'
 import { loadProjectIdentity } from '../lib/project-identity'
@@ -53,31 +53,6 @@ const START_DEPLOYMENT_MUTATION = /* GraphQL */ `
       message
       deploymentIds
       versionId
-      deployment {
-        id
-        status
-        lastMessage
-        startedAt
-        projectName
-        serviceName
-        environmentName
-      }
-    }
-  }
-`
-
-const DEPLOYMENT_QUERY = /* GraphQL */ `
-  query GetPromotedDeployment($id: String!) {
-    deployment(id: $id) {
-      id
-      status
-      lastMessage
-      startedAt
-      updatedAt
-      completedAt
-      projectName
-      serviceName
-      environmentName
     }
   }
 `
@@ -92,37 +67,64 @@ const PROJECT_ENVIRONMENTS_QUERY = /* GraphQL */ `
   }
 `
 
-const POLL_INTERVAL_MS = 3000
-const DEPLOY_TIMEOUT_MS = 15 * 60 * 1000
+// GraphQL Int is 32-bit, so nine digits always fit.
+const BUILD_NUMBER = /^v([1-9]\d{0,8})$/
+
+type ProjectEnvironment = GetPromoteTargetEnvironmentsQuery['environments'][number]
 
 interface PromoteOptions {
   cwd?: string
   from?: string
-  version?: string
   verbose?: boolean
+}
+
+interface PromoteContext {
+  newVersionId?: string
+  yamlSnapshot?: string
+  targetEnvSlug?: string
+  versionId?: string
+  deploymentIds?: string[]
+  failedServices?: ServiceFailure[]
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-interface PromoteContext {
-  newVersionId?: string
-  newVersionNumber?: number
-  yamlSnapshot?: string
-  targetEnvSlug?: string
-  deploymentIds?: string[]
+function findEnvironment(
+  environments: ProjectEnvironment[],
+  name: string
+): ProjectEnvironment | undefined {
+  const slug = name.toLowerCase()
+  return environments.find((environment) => environment.slug === slug)
+}
+
+/**
+ * `--from` names an environment, whose live build is promoted, or a build as `v<number>`. An
+ * environment slug wins, so an environment called `v2` stays reachable.
+ */
+export function promoteSource(
+  from: string,
+  environments: ProjectEnvironment[]
+): Pick<PromoteVersionInput, 'sourceEnvironmentId' | 'buildNumber'> {
+  const environment = findEnvironment(environments, from)
+  if (environment) return { sourceEnvironmentId: environment.id }
+
+  const build = BUILD_NUMBER.exec(from)
+  if (build) return { buildNumber: Number(build[1]) }
+
+  throw new Error(`Environment '${from}' not found for this project.`)
 }
 
 export function registerPromoteCommand(program: Command): void {
   program
     .command('promote <targetEnvironment>')
-    .description('Promote a version from one environment to another')
-    .option('-C, --cwd <directory>', 'Change working directory')
+    .description('Deploy a build that already exists to another environment')
     .option(
-      '-f, --from <sourceVersionId>',
-      'Source version ID to promote (defaults to live version)'
+      '-f, --from <source>',
+      'Environment whose live build is promoted, or a build number such as v12'
     )
+    .option('-C, --cwd <directory>', 'Change working directory')
     .option('-v, --verbose', 'Emit a log line per state change (useful for debugging and CI logs)')
     .action(async (targetEnvironment: string, options: PromoteOptions, command: Command) => {
       const cwd = globalCwd(command) ?? options.cwd
@@ -132,42 +134,40 @@ export function registerPromoteCommand(program: Command): void {
       // fetchable.
       const localConfig = loadProjectIdentity(workingDir)
 
-      if (!options.from) {
+      const { from } = options
+      if (!from) {
         printError(
-          'A source version ID is required. Use --from <versionId> to specify which version to promote.'
+          'A source is required. Use --from <environment> or --from v<number> to choose the build.'
         )
         process.exit(1)
       }
-      const sourceVersionId = options.from
 
+      let finalCtx: PromoteContext
       try {
         const tasks = new Listr<PromoteContext, CliRenderer>(
           [
             {
-              title: 'Promote version',
+              title: 'Promote build',
               task: async (ctx, task) => {
-                const envResult = await graphqlRequest<
+                const { environments } = await graphqlRequest<
                   GetPromoteTargetEnvironmentsQuery,
                   GetPromoteTargetEnvironmentsQueryVariables
                 >(PROJECT_ENVIRONMENTS_QUERY, { projectId: localConfig.id })
 
-                const targetSlug = targetEnvironment.toLowerCase()
-                const targetEnv = envResult.environments.find((e) => e.slug === targetSlug)
+                const targetEnv = findEnvironment(environments, targetEnvironment)
                 if (!targetEnv) {
                   throw new Error(`Environment '${targetEnvironment}' not found for this project.`)
                 }
 
-                const result = await graphqlRequest<
+                const { promoteVersion } = await graphqlRequest<
                   PromoteVersionMutation,
                   PromoteVersionMutationVariables
                 >(PROMOTE_VERSION_MUTATION, {
                   input: {
-                    sourceVersionId,
+                    ...promoteSource(from, environments),
                     targetEnvironmentId: targetEnv.id,
                   },
                 })
-
-                const { promoteVersion } = result
 
                 if (!promoteVersion.success || !promoteVersion.newVersionId) {
                   throw new Error(
@@ -176,11 +176,10 @@ export function registerPromoteCommand(program: Command): void {
                 }
 
                 ctx.newVersionId = promoteVersion.newVersionId
-                ctx.newVersionNumber = promoteVersion.newVersionNumber ?? undefined
                 ctx.yamlSnapshot = promoteVersion.yamlSnapshot ?? undefined
                 ctx.targetEnvSlug = targetEnv.slug
                 task.title = sanitizeTerminal(
-                  `Promote version (v${String(promoteVersion.newVersionNumber)} → ${targetEnv.name})`
+                  `Promote build (v${String(promoteVersion.newVersionNumber)} → ${targetEnv.name})`
                 )
               },
             },
@@ -200,7 +199,7 @@ export function registerPromoteCommand(program: Command): void {
                   throw new Error('Version snapshot is invalid')
                 }
 
-                const result = await graphqlRequest<
+                const { startDeployment } = await graphqlRequest<
                   StartPromotedDeploymentMutation,
                   StartPromotedDeploymentMutationVariables
                 >(START_DEPLOYMENT_MUTATION, {
@@ -209,8 +208,6 @@ export function registerPromoteCommand(program: Command): void {
                   versionId: ctx.newVersionId,
                 })
 
-                const { startDeployment } = result
-
                 if (!startDeployment.success || !startDeployment.deploymentIds?.length) {
                   throw new Error(
                     sanitizeTerminal(startDeployment.message ?? 'Failed to start deployment')
@@ -218,66 +215,33 @@ export function registerPromoteCommand(program: Command): void {
                 }
 
                 ctx.deploymentIds = startDeployment.deploymentIds
+                ctx.versionId = startDeployment.versionId ?? ctx.newVersionId
                 task.title = `Start deployment (${String(startDeployment.deploymentIds.length)} service(s))`
               },
             },
             {
-              title: 'Wait for deployment',
+              title: 'Deploy services',
               skip: (ctx) => !ctx.deploymentIds?.length,
               task: async (ctx, task) => {
-                const startTime = Date.now()
-                const { deploymentIds } = ctx
-                if (!deploymentIds) {
+                const { versionId, deploymentIds } = ctx
+                if (!versionId || !deploymentIds) {
                   throw new Error('No deployments to monitor')
                 }
 
-                // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional polling loop; exits via return or throw
-                while (true) {
-                  await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+                const subtasks = serviceDeploymentSubtasks<PromoteContext>({
+                  versionId,
+                  deploymentIds,
+                  names: await serviceDeploymentNames(versionId),
+                  taskContext: { cwd: workingDir },
+                  isCancelling: () => false,
+                  onFailure: (subCtx, failure) => {
+                    subCtx.failedServices = subCtx.failedServices ?? []
+                    subCtx.failedServices.push(failure)
+                  },
+                })
 
-                  if (Date.now() - startTime > DEPLOY_TIMEOUT_MS) {
-                    throw new Error('Deployment timed out after 15 minutes')
-                  }
-
-                  let allComplete = true
-                  let anyFailed = false
-                  const statusMessages: string[] = []
-
-                  for (const deploymentId of deploymentIds) {
-                    try {
-                      const result = await graphqlRequest<
-                        GetPromotedDeploymentQuery,
-                        GetPromotedDeploymentQueryVariables
-                      >(DEPLOYMENT_QUERY, { id: deploymentId })
-
-                      const deployment = result.deployment
-                      if (!deployment) continue
-
-                      const statusMsg = `${deployment.serviceName ?? 'service'}: ${deployment.status}`
-                      statusMessages.push(statusMsg)
-
-                      if (!isTerminalStatus(deployment.status)) {
-                        allComplete = false
-                      } else if (deployment.status === 'FAILED') {
-                        anyFailed = true
-                      }
-                    } catch {
-                      allComplete = false
-                    }
-                  }
-
-                  task.title = sanitizeTerminal(
-                    `Wait for deployment (${statusMessages.join(', ')})`
-                  )
-
-                  if (allComplete) {
-                    if (anyFailed) {
-                      throw new Error('One or more service deployments failed')
-                    }
-                    task.title = 'Deployment complete'
-                    return
-                  }
-                }
+                // exitOnError: false lets every service finish when a sibling fails.
+                return task.newListr(subtasks, { concurrent: true, exitOnError: false })
               },
             },
           ],
@@ -291,9 +255,16 @@ export function registerPromoteCommand(program: Command): void {
           }
         )
 
-        await tasks.run()
+        finalCtx = await tasks.run()
       } catch (error) {
         printError(formatApiError(error))
+        process.exit(1)
+      }
+
+      if (finalCtx.failedServices?.length) {
+        for (const failure of finalCtx.failedServices) {
+          printError(failure.message)
+        }
         process.exit(1)
       }
     })

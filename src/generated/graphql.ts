@@ -538,9 +538,14 @@ export type ObjectUploadCliOutputsInput = {
   uploadedFiles: number;
 };
 
+/** Set exactly one source: sourceEnvironmentId, buildNumber, or sourceVersionId for older CLIs. */
 export type PromoteVersionInput = {
-  /** Source version ID to promote from */
-  sourceVersionId: string;
+  /** Project-wide build number to promote */
+  buildNumber?: number | null | undefined;
+  /** Environment whose live version is promoted */
+  sourceEnvironmentId?: string | null | undefined;
+  /** Deployed version ID to promote from */
+  sourceVersionId?: string | null | undefined;
   /** Target environment ID to promote to */
   targetEnvironmentId: string;
 };
@@ -935,42 +940,6 @@ export type CancelLiftDeploymentMutationVariables = Exact<{
 
 export type CancelLiftDeploymentMutation = { cancelDeployment: { success: boolean, message: string | null, deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, updatedAt: string } | null } };
 
-export type ClaimStepMutationVariables = Exact<{
-  stepId: string;
-}>;
-
-
-export type ClaimStepMutation = { claimStep: { success: boolean, message: string | null, step: { id: string, stepType: string, cliTask: string | null, cliInputs:
-        | { __typename: 'ArtifactUploadCliInputs', stepId: string, provider: string, bucketName: string, objectKey: string, region: string, maxArtifactBytes: number, sourcePath: string, excludePatterns: Array<string> | null, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null }
-        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string, registryEndpoint: string, registryUsername: string, registryPassword: string | null }
-        | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, architecture: string | null, buildArgs: Array<{ name: string, value: string }> | null }
-        | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null }
-       | null } | null } };
-
-export type CompleteCliStepMutationVariables = Exact<{
-  stepId: string;
-  outputs: CliTaskOutputsInput;
-  fileResults?: Array<FileUploadResultInput> | FileUploadResultInput | null | undefined;
-}>;
-
-
-export type CompleteCliStepMutation = { completeCliStep: { success: boolean, message: string | null } };
-
-export type FailCliStepMutationVariables = Exact<{
-  stepId: string;
-  error: string;
-}>;
-
-
-export type FailCliStepMutation = { failCliStep: { success: boolean, message: string | null } };
-
-export type DeploymentsByVersionQueryVariables = Exact<{
-  versionId: string;
-}>;
-
-
-export type DeploymentsByVersionQuery = { deploymentsByVersion: Array<{ id: string, status: DeploymentStatus, scope: string | null, deploymentType: string | null, lastMessage: string | null, serviceName: string | null, steps: Array<{ id: string, stepType: string, status: DeploymentStepStatus, phase: DeploymentPhase, executor: StepExecutor, cliTask: string | null, cliStatus: CliStatus | null, sequence: number }> | null }> };
-
 export type VersionRouteUrlsQueryVariables = Exact<{
   versionId: string;
 }>;
@@ -1063,14 +1032,7 @@ export type StartPromotedDeploymentMutationVariables = Exact<{
 }>;
 
 
-export type StartPromotedDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null, deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, startedAt: string, projectName: string | null, serviceName: string | null, environmentName: string | null } | null } };
-
-export type GetPromotedDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetPromotedDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, serviceName: string | null, environmentName: string | null } | null };
+export type StartPromotedDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null } };
 
 export type GetPromoteTargetEnvironmentsQueryVariables = Exact<{
   projectId: string;
@@ -1230,6 +1192,42 @@ export type GetBastionNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type GetBastionNetworksQuery = { networks: Array<{ id: string, name: string, slug: string, region: string, cloudAccountId: string, stackStatus: string | null }> };
+
+export type ClaimStepMutationVariables = Exact<{
+  stepId: string;
+}>;
+
+
+export type ClaimStepMutation = { claimStep: { success: boolean, message: string | null, step: { id: string, stepType: string, cliTask: string | null, cliInputs:
+        | { __typename: 'ArtifactUploadCliInputs', stepId: string, provider: string, bucketName: string, objectKey: string, region: string, maxArtifactBytes: number, excludePatterns: Array<string> | null, packageSourcePath: string | null, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null, source: { bucketName: string, objectKey: string, region: string, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null } | null }
+        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string | null, registryEndpoint: string, registryUsername: string, registryPassword: string | null, source: { imageUri: string, registryEndpoint: string, registryUsername: string, registryPassword: string | null } | null }
+        | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, architecture: string | null, buildArgs: Array<{ name: string, value: string }> | null }
+        | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null, source: { bucketName: string, region: string, keyPrefix: string, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null } | null }
+       | null } | null } };
+
+export type CompleteCliStepMutationVariables = Exact<{
+  stepId: string;
+  outputs: CliTaskOutputsInput;
+  fileResults?: Array<FileUploadResultInput> | FileUploadResultInput | null | undefined;
+}>;
+
+
+export type CompleteCliStepMutation = { completeCliStep: { success: boolean, message: string | null } };
+
+export type FailCliStepMutationVariables = Exact<{
+  stepId: string;
+  error: string;
+}>;
+
+
+export type FailCliStepMutation = { failCliStep: { success: boolean, message: string | null } };
+
+export type DeploymentsByVersionQueryVariables = Exact<{
+  versionId: string;
+}>;
+
+
+export type DeploymentsByVersionQuery = { deploymentsByVersion: Array<{ id: string, status: DeploymentStatus, scope: string | null, deploymentType: string | null, lastMessage: string | null, serviceName: string | null, steps: Array<{ id: string, stepType: string, status: DeploymentStepStatus, phase: DeploymentPhase, executor: StepExecutor, cliTask: string | null, cliStatus: CliStatus | null, sequence: number }> | null }> };
 
 export type GetCloudChoicesQueryVariables = Exact<{ [key: string]: never; }>;
 

@@ -52,7 +52,27 @@ vi.mock('@aws-sdk/client-s3', () => ({
       readonly input: { Bucket: string; Key: string; Body: Buffer; ContentType: string }
     ) {}
   },
+  GetObjectCommand: class {
+    constructor(readonly input: { Bucket: string; Key: string }) {}
+  },
+  ListObjectsV2Command: class {
+    constructor(readonly input: { Bucket: string; Prefix: string; ContinuationToken?: string }) {}
+  },
 }))
+
+const s3Object = (content: string) => ({
+  Body: { transformToByteArray: () => Promise.resolve(new TextEncoder().encode(content)) },
+})
+
+const sourceCredentials = {
+  accessKeyId: 'ASIASOURCEREAD',
+  secretAccessKey: 'source-secret',
+  sessionToken: 'source-token',
+}
+
+interface S3Command {
+  input: Record<string, unknown>
+}
 
 const mockSpawn = vi.mocked(spawn)
 const mockGraphqlRequest = vi.mocked(graphqlRequest)
@@ -153,6 +173,7 @@ const objectUpload = (overrides: Partial<ObjectUploadInputs> = {}): ObjectUpload
   sourcePath: 'dist',
   includePatterns: null,
   excludePatterns: null,
+  source: null,
   ...overrides,
 })
 
@@ -164,6 +185,7 @@ const containerPush = (overrides: Partial<ContainerPushInputs> = {}): ContainerP
   registryEndpoint: 'https://123456789.dkr.ecr.us-east-1.amazonaws.com',
   registryUsername: 'AWS',
   registryPassword: 'test-password',
+  source: null,
   ...overrides,
 })
 
@@ -175,8 +197,9 @@ const artifactUpload = (overrides: Partial<ArtifactUploadInputs> = {}): Artifact
   objectKey: 'svc/v3.zip',
   region: 'us-east-1',
   maxArtifactBytes: 50 * 1024 * 1024,
-  sourcePath: '.',
+  packageSourcePath: '.',
   excludePatterns: null,
+  source: null,
   aws: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
   ...overrides,
 })
@@ -586,7 +609,7 @@ describe('executeCliTask', () => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-artifact-'))
       try {
         await expect(
-          executeCliTask(artifactUpload({ sourcePath: '..' }), context({ stagingDir: root }))
+          executeCliTask(artifactUpload({ packageSourcePath: '..' }), context({ stagingDir: root }))
         ).rejects.toThrow('source_dir ".." resolves outside the project directory')
       } finally {
         fs.rmSync(root, { recursive: true, force: true })
@@ -1204,6 +1227,94 @@ describe('object-upload task flow', () => {
 
     await expect(upload()).rejects.toThrow('Failed to upload 1 files:\nsocket hang up')
   })
+
+  describe('copying a build from another cloud account', () => {
+    const source = {
+      bucketName: 'shop-site-staging-k3x9qa',
+      region: 'us-east-1',
+      keyPrefix: 'Qm4tX9',
+      aws: sourceCredentials,
+    }
+    const objects: Record<string, string> = {
+      'Qm4tX9/index.html': '<html>staging build</html>',
+      'Qm4tX9/assets/app.js': 'console.log(12)',
+    }
+
+    beforeEach(() => {
+      s3.clientConfigs.length = 0
+      s3.send.mockReset().mockImplementation((command: S3Command) => {
+        if ('Prefix' in command.input) {
+          return Promise.resolve(
+            command.input.ContinuationToken
+              ? { Contents: [{ Key: 'Qm4tX9/assets/app.js' }] }
+              : { Contents: [{ Key: 'Qm4tX9/index.html' }], NextContinuationToken: 'page-2' }
+          )
+        }
+        return Promise.resolve(s3Object(objects[String(command.input.Key)]))
+      })
+    })
+
+    it('downloads every page of the folder with the source credentials and uploads it here', async () => {
+      stepResponses(awaitingCli([presigned('index.html'), presigned('assets/app.js')]))
+
+      const result = await executeCliTask(objectUpload({ sourcePath: '.', source }), {
+        cwd: '/srv/shop',
+      })
+
+      expect(s3.clientConfigs).toEqual([{ region: 'us-east-1', credentials: sourceCredentials }])
+      expect(
+        submittedManifest()
+          .files.map((file) => file.path)
+          .sort()
+      ).toEqual(['assets/app.js', 'index.html'])
+      expect(result.outputs.objectUpload).toEqual({
+        uploadedFiles: 2,
+        totalSize: '<html>staging build</html>'.length + 'console.log(12)'.length,
+        success: true,
+      })
+    })
+
+    it('removes the downloaded files once the upload finishes', async () => {
+      stepResponses(awaitingCli([presigned('index.html'), presigned('assets/app.js')]))
+      const before = fs
+        .readdirSync(os.tmpdir())
+        .filter((name) => name.startsWith('gantry-promote-'))
+
+      await executeCliTask(objectUpload({ sourcePath: '.', source }), { cwd: '/srv/shop' })
+
+      const after = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('gantry-promote-'))
+      expect(after).toEqual(before)
+    })
+
+    it('refuses an object key that climbs out of the folder', async () => {
+      s3.send.mockImplementation((command: S3Command) =>
+        Promise.resolve(
+          'Prefix' in command.input
+            ? { Contents: [{ Key: 'Qm4tX9/../../.ssh/authorized_keys' }] }
+            : s3Object('ssh-ed25519 AAAA')
+        )
+      )
+
+      await expect(
+        executeCliTask(objectUpload({ sourcePath: '.', source }), { cwd: '/srv/shop' })
+      ).rejects.toThrow('Qm4tX9/../../.ssh/authorized_keys resolves outside the download folder')
+      expect(mockGraphqlRequest).not.toHaveBeenCalled()
+    })
+
+    it('fails when the folder holds no files', async () => {
+      s3.send.mockResolvedValue({ Contents: [] })
+
+      await expect(
+        executeCliTask(objectUpload({ sourcePath: '.', source }), { cwd: '/srv/shop' })
+      ).rejects.toThrow('No files under shop-site-staging-k3x9qa/Qm4tX9/ to copy')
+    })
+
+    it('needs the project files when there is nothing to copy', async () => {
+      await expect(executeCliTask(objectUpload(), { cwd: '/srv/shop' })).rejects.toThrow(
+        "This step needs the project files, and a promote doesn't stage them"
+      )
+    })
+  })
 })
 
 describe('artifact-upload task flow', () => {
@@ -1224,7 +1335,7 @@ describe('artifact-upload task flow', () => {
 
   it('zips the source directory without excluded files and puts it with the session credentials', async () => {
     const result = await executeCliTask(
-      artifactUpload({ sourcePath: 'build', excludePatterns: ['static/**'] }),
+      artifactUpload({ packageSourcePath: 'build', excludePatterns: ['static/**'] }),
       context({ stagingDir: root })
     )
 
@@ -1260,7 +1371,7 @@ describe('artifact-upload task flow', () => {
 
   it('zips the whole staging directory when the source path is empty', async () => {
     await executeCliTask(
-      artifactUpload({ sourcePath: '' }),
+      artifactUpload({ packageSourcePath: '' }),
       context({ stagingDir: path.join(root, 'build') })
     )
 
@@ -1271,7 +1382,7 @@ describe('artifact-upload task flow', () => {
   it('refuses an artifact larger than the limit the server sends', async () => {
     await expect(
       executeCliTask(
-        artifactUpload({ sourcePath: 'build', maxArtifactBytes: 10 }),
+        artifactUpload({ packageSourcePath: 'build', maxArtifactBytes: 10 }),
         context({ stagingDir: root })
       )
     ).rejects.toThrow(/exceeds the 0 MB limit/)
@@ -1290,6 +1401,120 @@ describe('artifact-upload task flow', () => {
       executeCliTask(artifactUpload({ aws: null }), context({ stagingDir: root }))
     ).rejects.toThrow('AWS credentials are required to upload the deployment artifact')
     expect(s3.send).not.toHaveBeenCalled()
+  })
+
+  describe('copying a build from another cloud account', () => {
+    const source = {
+      bucketName: 'shop-api-artifacts-use1-k3x9qa',
+      objectKey: 'api/v12/artifact.zip',
+      region: 'us-east-1',
+      aws: sourceCredentials,
+    }
+
+    it('downloads the zip with the source credentials and puts it unchanged with the target ones', async () => {
+      s3.send.mockResolvedValueOnce(s3Object('PK zip built for staging')).mockResolvedValueOnce({})
+
+      const result = await executeCliTask(
+        artifactUpload({ packageSourcePath: null, objectKey: 'api/v12/artifact.zip', source }),
+        { cwd: '/srv/shop' }
+      )
+
+      expect(s3.clientConfigs).toEqual([
+        { region: 'us-east-1', credentials: sourceCredentials },
+        {
+          region: 'us-east-1',
+          credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+        },
+      ])
+      const [[download], [put]] = s3.send.mock.calls as [[S3Command], [S3Command]]
+      expect(download.input).toEqual({
+        Bucket: 'shop-api-artifacts-use1-k3x9qa',
+        Key: 'api/v12/artifact.zip',
+      })
+      expect(put.input).toMatchObject({ Bucket: 'artifacts', Key: 'api/v12/artifact.zip' })
+      expect(String(put.input.Body)).toBe('PK zip built for staging')
+      expect(result.outputs.artifactUpload?.zipSize).toBe('PK zip built for staging'.length)
+    })
+
+    it('refuses a source in a cloud the CLI cannot copy from yet', async () => {
+      await expect(
+        executeCliTask(
+          artifactUpload({ packageSourcePath: null, source: { ...source, aws: null } }),
+          {
+            cwd: '/srv/shop',
+          }
+        )
+      ).rejects.toThrow("This cloud doesn't support copying builds between cloud accounts yet.")
+      expect(s3.send).not.toHaveBeenCalled()
+    })
+
+    it('needs the project files when there is nothing to copy', async () => {
+      await expect(executeCliTask(artifactUpload(), { cwd: '/srv/shop' })).rejects.toThrow(
+        "This step needs the project files, and a promote doesn't stage them"
+      )
+    })
+  })
+})
+
+describe('container-push from a build in another region or cloud account', () => {
+  const source = {
+    imageUri:
+      '210987654321.dkr.ecr.eu-west-1.amazonaws.com/shop-web-q7m2pd@sha256:4f1c9e0b7a2d3e8f9c1b6a5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f',
+    registryEndpoint: 'https://210987654321.dkr.ecr.eu-west-1.amazonaws.com',
+    registryUsername: 'AWS',
+    registryPassword: 'source-pull-password',
+  }
+  const target = {
+    imageUri: '123456789012.dkr.ecr.us-east-1.amazonaws.com/shop-web-k3x9qa:v12',
+    registryEndpoint: 'https://123456789012.dkr.ecr.us-east-1.amazonaws.com',
+    registryUsername: 'AWS',
+    registryPassword: 'target-push-password',
+  }
+
+  it('pulls the image by digest from the source registry and pushes it under the build tag', async () => {
+    const result = await executeCliTask(containerPush({ ...target, localImageTag: null, source }), {
+      cwd: '/srv/shop',
+    })
+
+    expect(spawnCalls.map((call) => [call.args, call.stdin])).toEqual([
+      [
+        ['login', '--username=AWS', '--password-stdin', source.registryEndpoint],
+        'source-pull-password',
+      ],
+      [['pull', source.imageUri], ''],
+      [
+        ['login', '--username=AWS', '--password-stdin', target.registryEndpoint],
+        'target-push-password',
+      ],
+      [['tag', source.imageUri, target.imageUri], ''],
+      [['push', target.imageUri], ''],
+    ])
+    expect(result.outputs.containerPush).toEqual({
+      imageUri: target.imageUri,
+      localImageTag: source.imageUri,
+      success: true,
+    })
+  })
+
+  it('pulls nothing without a source registry password', async () => {
+    await expect(
+      executeCliTask(
+        containerPush({
+          ...target,
+          localImageTag: null,
+          source: { ...source, registryPassword: null },
+        }),
+        { cwd: '/srv/shop' }
+      )
+    ).rejects.toThrow('Registry credentials are required for container-push task')
+    expect(spawnCalls).toEqual([])
+  })
+
+  it('pushes no local image during a promote', async () => {
+    await expect(executeCliTask(containerPush(target), { cwd: '/srv/shop' })).rejects.toThrow(
+      "This step needs the project files, and a promote doesn't stage them"
+    )
+    expect(spawnCalls).toEqual([])
   })
 })
 

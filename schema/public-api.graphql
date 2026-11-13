@@ -1297,6 +1297,68 @@ type DomainMutationResult {
   success: Boolean!
 }
 
+type EnvVar {
+  key: String!
+  updatedAt: String!
+  value: String!
+}
+
+input EnvVarInput {
+  key: String!
+  value: String!
+}
+
+"""Where a stored env var applies. Narrower scopes win over broader ones."""
+enum EnvVarScopeEnum {
+  CLOUD_ACCOUNT
+  ENVIRONMENT
+  NETWORK
+  PROJECT
+  TEAM
+}
+
+"""Where a value in a service env came from, lowest precedence first."""
+enum EnvVarSourceEnum {
+  BINDING
+  CLOUD_ACCOUNT
+  ENVIRONMENT
+  ENVIRONMENT_YAML
+  NETWORK
+  PROJECT
+  SECRET
+  SERVICE_OVERRIDE
+  SERVICE_YAML
+  TEAM
+}
+
+input EnvVarTargetInput {
+  """Required for CLOUD_ACCOUNT"""
+  cloudAccountId: String
+
+  """Required for ENVIRONMENT"""
+  environmentSlug: String
+
+  """Required for NETWORK"""
+  networkId: String
+
+  """Required for PROJECT and ENVIRONMENT"""
+  projectId: String
+  scope: EnvVarScopeEnum!
+
+  """
+  ENVIRONMENT only: a service name, for an override that applies to that service only
+  """
+  service: String
+}
+
+type EnvVarsMutationResult {
+  created: [String!]!
+  message: String
+  removed: [String!]!
+  success: Boolean!
+  updated: [String!]!
+}
+
 type Environment {
   cloudAccountId: String!
   color: String
@@ -1545,6 +1607,7 @@ type Mutation {
   promoteCanary(input: ActivationInput!, team: String): ActivationResult!
   promoteVersion(input: PromoteVersionInput!, team: String): PromoteVersionResult!
   redeployVersion(input: RedeployVersionInput!, team: String): RedeployVersionResult!
+  replaceEnvVars(input: SetEnvVarsInput!, team: String): EnvVarsMutationResult!
   rollbackDeployment(input: ActivationInput!, team: String): ActivationResult!
 
   """
@@ -1564,6 +1627,7 @@ type Mutation {
     team: String
   ): DatabaseMutationResult!
   setCanary(input: ActivationInput!, team: String): ActivationResult!
+  setEnvVars(input: SetEnvVarsInput!, team: String): EnvVarsMutationResult!
   startCommandRun(command: [String!]!, environmentSlug: String!, function: String, projectId: String!, service: String!, team: String): StartCommandRunResult!
   startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!
   startShellSession(command: String, environmentSlug: String!, instance: String, projectId: String!, service: String!, team: String): StartShellSessionResult!
@@ -1571,6 +1635,7 @@ type Mutation {
   submitManifest(input: SubmitManifestInput!, team: String): SubmitManifestResult!
   triggerCertificateValidation(id: String!, team: String): CertificateMutationResult!
   triggerReroute(input: TriggerRerouteInput!, team: String): TriggerRerouteResult!
+  unsetEnvVars(input: UnsetEnvVarsInput!, team: String): EnvVarsMutationResult!
 
   """
   Change a database server. A setting change deploys the server right away and returns a deploymentId to poll.
@@ -1788,6 +1853,7 @@ type Query {
   deploymentsByVersion(team: String, versionId: String!): [Deployment!]!
   domain(id: String!, team: String): Domain
   domains(team: String): [Domain!]!
+  envVars(input: EnvVarTargetInput!, team: String): [EnvVar!]!
   environments(projectId: String, team: String): [Environment!]!
   filesystem(id: String!, team: String): Filesystem
   filesystems(team: String): [Filesystem!]!
@@ -1798,6 +1864,7 @@ type Query {
   projects(team: String): [Project!]!
   releaseOutput(after: String, team: String, versionId: String!): ReleaseOutput!
   resolveProject(input: ResolveProjectInput!): ResolveProjectResult!
+  resolvedServiceEnv(environmentSlug: String!, projectId: String!, service: String!, team: String): ResolvedServiceEnv!
   secret(id: String!, team: String): Secret
   secrets(cloudAccountId: String, team: String): [Secret!]!
   serviceLogs(cursor: String, environmentSlug: String!, function: String, grep: String, limit: Int, projectId: String!, service: String!, since: String = "1h", team: String): LogPage!
@@ -1896,12 +1963,32 @@ type ResolvedAccess {
   resource: String!
 }
 
+type ResolvedEnvVar {
+  key: String!
+
+  """Lower layers that set the same key, nearest first"""
+  overrides: [EnvVarSourceEnum!]!
+  source: EnvVarSourceEnum!
+
+  """
+  The value. For SECRET, the secret reference; for BINDING, the bound resource, with the key ending in _*.
+  """
+  value: String!
+}
+
 type ResolvedEnvironmentType {
   config: JSON!
   environment: String!
   plan: DeploymentPlanType!
   provenance: [VariableProvenanceEntry!]!
   resolvedYaml: String!
+}
+
+type ResolvedServiceEnv {
+  variables: [ResolvedEnvVar!]!
+
+  """The live version this env was read from"""
+  versionNumber: Int!
 }
 
 type ResourceEnvironmentGroup {
@@ -2013,6 +2100,27 @@ enum ServiceRuntimeEnum {
 enum ServiceTypeEnum {
   HTTP
   STATIC
+}
+
+input SetEnvVarsInput {
+  """Required for CLOUD_ACCOUNT"""
+  cloudAccountId: String
+
+  """Required for ENVIRONMENT"""
+  environmentSlug: String
+
+  """Required for NETWORK"""
+  networkId: String
+
+  """Required for PROJECT and ENVIRONMENT"""
+  projectId: String
+  scope: EnvVarScopeEnum!
+
+  """
+  ENVIRONMENT only: a service name, for an override that applies to that service only
+  """
+  service: String
+  variables: [EnvVarInput!]!
 }
 
 type StartCommandRunResult {
@@ -2153,6 +2261,27 @@ type TriggerRerouteResult {
 
   """Version number of the live version"""
   versionNumber: Float
+}
+
+input UnsetEnvVarsInput {
+  """Required for CLOUD_ACCOUNT"""
+  cloudAccountId: String
+
+  """Required for ENVIRONMENT"""
+  environmentSlug: String
+  keys: [String!]!
+
+  """Required for NETWORK"""
+  networkId: String
+
+  """Required for PROJECT and ENVIRONMENT"""
+  projectId: String
+  scope: EnvVarScopeEnum!
+
+  """
+  ENVIRONMENT only: a service name, for an override that applies to that service only
+  """
+  service: String
 }
 
 """

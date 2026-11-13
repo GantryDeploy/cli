@@ -10,6 +10,7 @@ import { registerClustersCommand } from './commands/clusters'
 import { registerDatabasesCommand } from './commands/databases'
 import { registerDeploymentsCommand } from './commands/deployments'
 import { registerDomainsCommand } from './commands/domains'
+import { registerEnvCommand } from './commands/env'
 import { registerEnvironmentsCommand } from './commands/environments'
 import { registerFilesystemsCommand } from './commands/filesystems'
 import { registerLiftCommand } from './commands/lift'
@@ -65,6 +66,7 @@ registerWhoamiCommand(program)
 registerCloudsCommand(program)
 registerProjectsCommand(program)
 registerEnvironmentsCommand(program)
+registerEnvCommand(program)
 registerNetworksCommand(program)
 registerBastionsCommand(program)
 registerCachesCommand(program)

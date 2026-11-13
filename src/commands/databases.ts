@@ -7,6 +7,8 @@ import type {
   AdoptDatabaseMutationVariables,
   CreateDatabaseMutation,
   CreateDatabaseMutationVariables,
+  DatabaseLogsQuery,
+  DatabaseLogsQueryVariables,
   GetDatabaseCredentialsQuery,
   GetDatabaseCredentialsQueryVariables,
   GetDatabaseEngineVersionsQuery,
@@ -50,6 +52,8 @@ import { isTerminalStatus } from '../lib/deployment-status'
 import { getDefaultPort, normalizeEngine, toDatabaseEngineEnum } from '../lib/engine'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { bastionHostId } from '../lib/known-hosts'
+import { streamLogs, withLogQueryOptions } from '../lib/log-stream'
+import type { LogQueryOptions } from '../lib/log-stream'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 import { openDirectTunnel, openSshTunnel } from '../lib/ssh-tunnel'
@@ -62,6 +66,18 @@ interface TunnelOptions {
   bastion?: string
   trustHostKey?: boolean
 }
+
+const DATABASE_LOGS = /* GraphQL */ `
+  query DatabaseLogs($id: String!, $since: String, $limit: Int, $grep: String, $cursor: String) {
+    databaseLogs(id: $id, since: $since, limit: $limit, grep: $grep, cursor: $cursor) {
+      lines {
+        timestamp
+        message
+      }
+      cursor
+    }
+  }
+`
 
 const DATABASES_QUERY = /* GraphQL */ `
   query GetDatabases {
@@ -1217,4 +1233,34 @@ export function registerDatabasesCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  withLogQueryOptions(
+    dbCmd
+      .command('logs')
+      .description("Show a database's engine logs")
+      .argument('<slug>', 'Database slug')
+  ).action(async (slug: string, options: LogQueryOptions) => {
+    let db: Database
+    try {
+      db = await requireDatabase(slug)
+    } catch (error) {
+      printError(formatApiError(error))
+      process.exit(1)
+    }
+
+    await streamLogs(
+      async (cursor) =>
+        (
+          await graphqlRequest<DatabaseLogsQuery, DatabaseLogsQueryVariables>(DATABASE_LOGS, {
+            id: db.id,
+            since: options.since,
+            limit: options.limit,
+            grep: options.grep,
+            cursor,
+          })
+        ).databaseLogs,
+      options.refresh === true,
+      `No log lines for ${slug} in the last ${options.since}.`
+    )
+  })
 }

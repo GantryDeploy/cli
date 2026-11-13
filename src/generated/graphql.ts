@@ -739,6 +739,17 @@ export type CreateClusterMutationVariables = Exact<{
 
 export type CreateClusterMutation = { createCluster: { success: boolean, message: string | null, deploymentId: string | null, cluster: { id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string } | null } };
 
+export type DatabaseLogsQueryVariables = Exact<{
+  id: string;
+  since?: string | null | undefined;
+  limit?: number | null | undefined;
+  grep?: string | null | undefined;
+  cursor?: string | null | undefined;
+}>;
+
+
+export type DatabaseLogsQuery = { databaseLogs: { cursor: string, lines: Array<{ timestamp: string, message: string }> } };
+
 export type GetDatabasesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -964,6 +975,20 @@ export type VerifyLoginQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type VerifyLoginQuery = { whoami: { teamIds: Array<string>, kind: string, tokenName: string, authenticated: boolean } };
+
+export type ServiceLogsQueryVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+  function?: string | null | undefined;
+  since?: string | null | undefined;
+  limit?: number | null | undefined;
+  grep?: string | null | undefined;
+  cursor?: string | null | undefined;
+}>;
+
+
+export type ServiceLogsQuery = { serviceLogs: { cursor: string, lines: Array<{ timestamp: string, message: string }> } };
 
 export type GetNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 

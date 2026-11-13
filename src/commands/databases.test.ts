@@ -1585,4 +1585,77 @@ describe('databases command', () => {
       })
     })
   })
+
+  describe('logs', () => {
+    let stdout: MockInstance
+    let stderr: MockInstance
+
+    const logPage = (...messages: string[]) => ({
+      databaseLogs: {
+        cursor: 'eyJhZnRlciI6MTc5Mjk5OTk5NTAwMCwiaWRzIjpbXX0',
+        lines: messages.map((message) => ({ timestamp: '2026-10-26T20:41:00.118Z', message })),
+      },
+    })
+
+    beforeEach(() => {
+      stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+      stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    })
+
+    it("prints a database's engine log by slug", async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [publicDatabase, database] })
+        .mockResolvedValueOnce(
+          logPage('FATAL:  password authentication failed for user "gantry_admin"')
+        )
+
+      await expect(run(['logs', 'primary'])).rejects.toThrow('process.exit(0)')
+
+      expect(sentQuery(1)).toContain('databaseLogs')
+      expect(sentVariables(1)).toEqual({
+        id: 'db-id-1',
+        since: '1h',
+        limit: undefined,
+        grep: undefined,
+        cursor: undefined,
+      })
+      expect(stdout.mock.calls.map((call) => String(call[0])).join('')).toContain(
+        'FATAL:  password authentication failed for user "gantry_admin"\n'
+      )
+    })
+
+    it('sends the window, limit and grep it is given', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(logPage())
+
+      await expect(
+        run(['logs', 'primary', '--since', '2d', '--limit', '20', '--grep', 'deadlock'])
+      ).rejects.toThrow('process.exit(0)')
+
+      expect(sentVariables(1)).toMatchObject({ since: '2d', limit: 20, grep: 'deadlock' })
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining('No log lines for primary in the last 2d.')
+      )
+    })
+
+    it('stops at an unknown slug without asking for logs', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
+
+      await expect(run(['logs', 'reporting'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('Database not found.')
+      expect(graphqlRequest).toHaveBeenCalledOnce()
+    })
+
+    it('exits 1 with the API message when the logs request fails', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockRejectedValueOnce(new Error('There was an error while loading the logs.'))
+
+      await expect(run(['logs', 'primary'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('There was an error while loading the logs.')
+    })
+  })
 })

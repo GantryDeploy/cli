@@ -15,6 +15,7 @@ import { registerFilesystemsCommand } from './commands/filesystems'
 import { registerLiftCommand } from './commands/lift'
 import { registerLoadBalancersCommand } from './commands/load-balancers'
 import { registerLoginCommand } from './commands/login'
+import { registerLogsCommand } from './commands/logs'
 import { registerNetworksCommand } from './commands/networks'
 import { registerPreviewCommand } from './commands/preview'
 import { registerProjectsCommand } from './commands/projects'
@@ -69,6 +70,7 @@ registerCachesCommand(program)
 registerClustersCommand(program)
 registerRunCommand(program)
 registerShellCommand(program)
+registerLogsCommand(program)
 registerDatabasesCommand(program)
 registerFilesystemsCommand(program)
 registerLiftCommand(program)

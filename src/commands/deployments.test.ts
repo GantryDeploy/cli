@@ -28,7 +28,8 @@ describe('deployments list', () => {
     vi.restoreAllMocks()
   })
 
-  it('labels version choices with Version.number', async () => {
+  it('looks up the --env environment and labels version choices with Version.number', async () => {
+    vi.mocked(selectEnvironment).mockResolvedValueOnce('e5rk2w')
     graphqlRequest
       .mockResolvedValueOnce({
         versionsByProject: [
@@ -47,10 +48,11 @@ describe('deployments list', () => {
       'list',
       '--project',
       'p9ue62',
-      '--environment',
-      'e5rk2w',
+      '--env',
+      'staging',
     ])
 
+    expect(selectEnvironment).toHaveBeenCalledWith('p9ue62', 'staging')
     const query = String(graphqlRequest.mock.calls[0]?.[0])
     expect(query).toMatch(/\bnumber\b/)
     expect(query).not.toContain('versionNumber')
@@ -230,7 +232,7 @@ describe('deployments commands', () => {
 
     await run('list')
 
-    expect(selectEnvironment).toHaveBeenCalledWith('p9ue62')
+    expect(selectEnvironment).toHaveBeenCalledWith('p9ue62', undefined)
     expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
       projectId: 'p9ue62',
       environmentId: 'g3hm8p',
@@ -241,9 +243,10 @@ describe('deployments commands', () => {
   })
 
   it('stops when the environment has no versions', async () => {
+    vi.mocked(selectEnvironment).mockResolvedValueOnce('g3hm8p')
     graphqlRequest.mockResolvedValueOnce({ versionsByProject: [] })
 
-    await run('list', '--project', 'p9ue62', '--environment', 'g3hm8p')
+    await run('list', '--project', 'p9ue62', '--env', 'production')
 
     expect(printed()).toContain('No versions found.')
     expect(graphqlRequest).toHaveBeenCalledOnce()

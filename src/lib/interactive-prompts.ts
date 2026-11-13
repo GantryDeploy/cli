@@ -60,6 +60,7 @@ const ENVIRONMENTS_QUERY = /* GraphQL */ `
     environments(projectId: $projectId) {
       id
       name
+      slug
       projectId
       isProduction
     }
@@ -210,7 +211,8 @@ export async function selectProject(): Promise<string> {
   })
 }
 
-export async function selectEnvironment(projectId: string): Promise<string> {
+/** The ID of the project's environment named `slug` (case-insensitive), or one the user picks. */
+export async function selectEnvironment(projectId: string, slug?: string): Promise<string> {
   const data = await graphqlRequest<
     GetEnvironmentChoicesQuery,
     GetEnvironmentChoicesQueryVariables
@@ -221,6 +223,17 @@ export async function selectEnvironment(projectId: string): Promise<string> {
   if (data.environments.length === 0) {
     printError('No environments found for the selected project.')
     process.exit(1)
+  }
+
+  if (slug !== undefined) {
+    const match = data.environments.find((e) => e.slug.toLowerCase() === slug.toLowerCase())
+    if (!match) {
+      printError(
+        `Environment '${slug}' not found in this project. Available: ${data.environments.map((e) => e.slug).join(', ')}`
+      )
+      process.exit(1)
+    }
+    return match.id
   }
 
   return select({

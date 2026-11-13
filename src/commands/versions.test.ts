@@ -30,7 +30,8 @@ describe('versions list', () => {
     vi.restoreAllMocks()
   })
 
-  it('selects Version.number and prints it', async () => {
+  it('looks up the --env environment and prints each Version.number', async () => {
+    vi.mocked(selectEnvironment).mockResolvedValueOnce('e5rk2w')
     graphqlRequest.mockResolvedValueOnce({
       versionsByProject: [
         { id: 'q7mx2v', number: 42, gitRef: 'main', createdAt: '2026-01-01T00:00:00Z' },
@@ -46,10 +47,11 @@ describe('versions list', () => {
       'list',
       '--project',
       'p9ue62',
-      '--environment',
-      'e5rk2w',
+      '--env',
+      'staging',
     ])
 
+    expect(selectEnvironment).toHaveBeenCalledWith('p9ue62', 'staging')
     const query = String(graphqlRequest.mock.calls[0]?.[0])
     expect(query).toMatch(/\bnumber\b/)
     expect(query).not.toContain('versionNumber')
@@ -107,7 +109,7 @@ describe('versions list branches', () => {
 
     await run()
 
-    expect(selectEnvironment).toHaveBeenCalledWith('p9ue62')
+    expect(selectEnvironment).toHaveBeenCalledWith('p9ue62', undefined)
     expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
       projectId: 'p9ue62',
       environmentId: 'g3hm8p',
@@ -118,18 +120,20 @@ describe('versions list branches', () => {
   })
 
   it('says so when there are no versions', async () => {
+    vi.mocked(selectEnvironment).mockResolvedValueOnce('g3hm8p')
     graphqlRequest.mockResolvedValueOnce({ versionsByProject: [] })
 
-    await run('--project', 'p9ue62', '--environment', 'g3hm8p')
+    await run('--project', 'p9ue62', '--env', 'production')
 
     expect(logSpy).toHaveBeenCalledWith('No versions found.')
     expect(selectProject).not.toHaveBeenCalled()
   })
 
   it('exits with the API error', async () => {
+    vi.mocked(selectEnvironment).mockResolvedValueOnce('g3hm8p')
     graphqlRequest.mockRejectedValueOnce(new Error('Project not found'))
 
-    await expect(run('--project', 'j2vq7r', '--environment', 'g3hm8p')).rejects.toThrow(
+    await expect(run('--project', 'j2vq7r', '--env', 'production')).rejects.toThrow(
       'process.exit(1)'
     )
 

@@ -10,7 +10,7 @@ import { parseCliVarFlags, resolveAllEnvironments, resolveYaml } from '../lib/re
 interface ValidateOptions {
   cwd?: string
   file?: string
-  environment?: string
+  env?: string
   var?: string[]
 }
 
@@ -20,7 +20,7 @@ export function registerValidateCommand(program: Command): void {
     .description('Validate gantry.yml and exit non-zero if it is invalid')
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-f, --file <path>', 'Path to gantry.yml (defaults to ./gantry.yml)')
-    .option('-e, --environment <environment>', 'Validate only this environment')
+    .option('-e, --env <environment>', 'Validate only this environment')
     .option(
       '--var <key=value>',
       'Override a declared variable (repeatable). CLI wins over project + environment values.',
@@ -49,17 +49,17 @@ export function registerValidateCommand(program: Command): void {
 
       const fileLabel = path.basename(yamlPath)
 
-      if (options.environment) {
+      if (options.env) {
         const result = await resolveYaml({
           yamlPath,
-          environment: options.environment,
+          environment: options.env,
           cliVariables,
         })
         if (!result.ok) {
-          printError(`Environment "${options.environment}" is invalid:`)
+          printError(`Environment "${options.env}" is invalid:`)
           exitWithResolutionErrors(result.errors)
         }
-        printSuccess(`${fileLabel} is valid (${options.environment})`)
+        printSuccess(`${fileLabel} is valid (${options.env})`)
         return
       }
 

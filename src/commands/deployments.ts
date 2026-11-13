@@ -104,13 +104,13 @@ export function registerDeploymentsCommand(program: Command): void {
     .description('List deployments for a version')
     .option('--version <id>', 'Version ID')
     .option('--project <id>', 'Project ID (used to find version interactively)')
-    .option('--environment <id>', 'Environment ID (used to find version interactively)')
-    .action(async (options: { version?: string; project?: string; environment?: string }) => {
+    .option('--env <environment>', 'Environment name (used to find version interactively)')
+    .action(async (options: { version?: string; project?: string; env?: string }) => {
       try {
         let versionId = options.version
         if (!versionId) {
           const projectId = options.project ?? (await selectProject())
-          const environmentId = options.environment ?? (await selectEnvironment(projectId))
+          const environmentId = await selectEnvironment(projectId, options.env)
 
           const versionsData = await graphqlRequest<
             GetDeploymentVersionsQuery,

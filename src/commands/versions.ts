@@ -23,11 +23,11 @@ export function registerVersionsCommand(program: Command): void {
     .command('list')
     .description('List versions for a project and environment')
     .option('--project <id>', 'Project ID')
-    .option('--environment <id>', 'Environment ID')
-    .action(async (options: { project?: string; environment?: string }) => {
+    .option('--env <environment>', 'Environment name (e.g. "staging")')
+    .action(async (options: { project?: string; env?: string }) => {
       try {
         const projectId = options.project ?? (await selectProject())
-        const environmentId = options.environment ?? (await selectEnvironment(projectId))
+        const environmentId = await selectEnvironment(projectId, options.env)
 
         const data = await graphqlRequest<GetVersionsQuery, GetVersionsQueryVariables>(
           VERSIONS_QUERY,

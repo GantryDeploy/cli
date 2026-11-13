@@ -37,7 +37,10 @@ type ArtifactUploadCliInputs {
   """Cloud the artifact is uploaded to"""
   provider: String!
   region: String!
-  sourcePath: String!
+  source: ArtifactUploadSource
+
+  """Folder to zip. Null when copying from source."""
+  sourcePath: String
   stepId: String!
 }
 
@@ -48,6 +51,17 @@ input ArtifactUploadCliOutputsInput {
 
   """Size of the uploaded zip in bytes"""
   zipSize: Float!
+}
+
+"""A zip to download from another cloud account and upload as objectKey"""
+type ArtifactUploadSource {
+  """
+  Read-only credentials when the cloud is aws. Returned only to the CLI that claims the step, by claimStep.
+  """
+  aws: AwsUploadCredentials
+  bucketName: String!
+  objectKey: String!
+  region: String!
 }
 
 input AwsAlbDefaultActionInput {
@@ -293,7 +307,7 @@ type AwsShellSession {
   tokenValue: String!
 }
 
-"""Short-lived AWS credentials scoped to writing one artifact"""
+"""Short-lived AWS credentials scoped to one artifact or folder"""
 type AwsUploadCredentials {
   accessKeyId: String!
   secretAccessKey: String!
@@ -709,10 +723,28 @@ type CompleteCliStepResult {
   success: Boolean!
 }
 
+"""
+An image to pull from another region or cloud account and push as imageUri
+"""
+type ContainerImageSource {
+  imageUri: String!
+
+  """Container registry to sign in to for the pull"""
+  registryEndpoint: String!
+
+  """
+  Short-lived pull-only password. Returned only to the CLI that claims the step, by claimStep.
+  """
+  registryPassword: String
+  registryUsername: String!
+}
+
 """Inputs for a container-push CLI task"""
 type ContainerPushCliInputs {
   imageUri: String!
-  localImageTag: String!
+
+  """Image the local-build step produced. Null when copying from source."""
+  localImageTag: String
 
   """Container registry to sign in to"""
   registryEndpoint: String!
@@ -724,6 +756,7 @@ type ContainerPushCliInputs {
 
   """Username for the container registry"""
   registryUsername: String!
+  source: ContainerImageSource
   stepId: String!
 }
 
@@ -1600,6 +1633,7 @@ type ObjectUploadCliInputs {
   """Files submitted through submitManifest"""
   manifest: [FileManifestEntry!]
   region: String!
+  source: ObjectUploadSource
   sourcePath: String!
   stepId: String!
 
@@ -1615,6 +1649,19 @@ input ObjectUploadCliOutputsInput {
   """Total bytes uploaded"""
   totalSize: Float!
   uploadedFiles: Int!
+}
+
+"""
+Static files to copy from another cloud account: download keyPrefix/ from the bucket, then upload it as sourcePath '.'
+"""
+type ObjectUploadSource {
+  """
+  Read-only credentials when the cloud is aws. Returned only to the CLI that claims the step, by claimStep.
+  """
+  aws: AwsUploadCredentials
+  bucketName: String!
+  keyPrefix: String!
+  region: String!
 }
 
 """A pre-signed upload for one file"""
@@ -1650,9 +1697,18 @@ type ProjectMutationResult {
   success: Boolean!
 }
 
+"""
+Set exactly one source: sourceEnvironmentId, buildNumber, or sourceVersionId for older CLIs.
+"""
 input PromoteVersionInput {
-  """Source version ID to promote from"""
-  sourceVersionId: String!
+  """Project-wide build number to promote"""
+  buildNumber: Int
+
+  """Environment whose live version is promoted"""
+  sourceEnvironmentId: String
+
+  """Deployed version ID to promote from"""
+  sourceVersionId: String
 
   """Target environment ID to promote to"""
   targetEnvironmentId: String!

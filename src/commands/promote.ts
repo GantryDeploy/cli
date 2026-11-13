@@ -9,20 +9,20 @@ import type {
   PromoteVersionInput,
   PromoteVersionMutation,
   PromoteVersionMutationVariables,
-  StartPromotedDeploymentMutation,
-  StartPromotedDeploymentMutationVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
-import { serviceDeploymentNames, serviceDeploymentSubtasks } from '../lib/deployment-poll'
-import type { ServiceFailure } from '../lib/deployment-poll'
+import {
+  postDeployAsyncOption,
+  skipPostDeployOption,
+  skipPreDeployOption,
+} from '../lib/deploy-command-options'
+import type { DeployCommandOptions } from '../lib/deploy-command-options'
+import { reportVersionDeploy, versionDeployTasks } from '../lib/deploy-version'
+import type { VersionDeployContext } from '../lib/deploy-version'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
 import { printError } from '../lib/output'
-import { postDeployAsyncOption, skipPostDeployOption } from '../lib/post-deploy-options'
-import type { PostDeployOptions } from '../lib/post-deploy-options'
 import { loadProjectIdentity } from '../lib/project-identity'
-import { printRoutingSummary, waitForRouting } from '../lib/routing-wait'
-import type { RoutingResult } from '../lib/routing-wait'
 import { sanitizeTerminal } from '../lib/sanitize'
 
 const PROMOTE_VERSION_MUTATION = /* GraphQL */ `
@@ -34,29 +34,6 @@ const PROMOTE_VERSION_MUTATION = /* GraphQL */ `
       newVersionId
       newVersionNumber
       yamlSnapshot
-    }
-  }
-`
-
-const START_DEPLOYMENT_MUTATION = /* GraphQL */ `
-  mutation StartPromotedDeployment(
-    $environment: String!
-    $config: JSON!
-    $versionId: String
-    $options: DeploymentOptionsInput
-  ) {
-    startDeployment(
-      input: {
-        environment: $environment
-        config: $config
-        versionId: $versionId
-        options: $options
-      }
-    ) {
-      success
-      message
-      deploymentIds
-      versionId
     }
   }
 `
@@ -76,24 +53,10 @@ const BUILD_NUMBER = /^v([1-9]\d{0,8})$/
 
 type ProjectEnvironment = GetPromoteTargetEnvironmentsQuery['environments'][number]
 
-interface PromoteOptions extends PostDeployOptions {
+interface PromoteOptions extends DeployCommandOptions {
   cwd?: string
   from?: string
   verbose?: boolean
-}
-
-interface PromoteContext {
-  newVersionId?: string
-  yamlSnapshot?: string
-  targetEnvSlug?: string
-  versionId?: string
-  deploymentIds?: string[]
-  failedServices?: ServiceFailure[]
-  routing?: RoutingResult
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function findEnvironment(
@@ -131,6 +94,7 @@ export function registerPromoteCommand(program: Command): void {
     )
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-v, --verbose', 'Emit a log line per state change (useful for debugging and CI logs)')
+    .addOption(skipPreDeployOption())
     .addOption(skipPostDeployOption())
     .addOption(postDeployAsyncOption())
     .action(async (targetEnvironment: string, options: PromoteOptions, command: Command) => {
@@ -149,9 +113,9 @@ export function registerPromoteCommand(program: Command): void {
         process.exit(1)
       }
 
-      let finalCtx: PromoteContext
+      let finalCtx: VersionDeployContext
       try {
-        const tasks = new Listr<PromoteContext, CliRenderer>(
+        const tasks = new Listr<VersionDeployContext, CliRenderer>(
           [
             {
               title: 'Promote build',
@@ -184,100 +148,13 @@ export function registerPromoteCommand(program: Command): void {
 
                 ctx.newVersionId = promoteVersion.newVersionId
                 ctx.yamlSnapshot = promoteVersion.yamlSnapshot ?? undefined
-                ctx.targetEnvSlug = targetEnv.slug
+                ctx.environmentSlug = targetEnv.slug
                 task.title = sanitizeTerminal(
                   `Promote build (v${String(promoteVersion.newVersionNumber)} → ${targetEnv.name})`
                 )
               },
             },
-            {
-              title: 'Start deployment',
-              skip: (ctx) => !ctx.newVersionId || !ctx.yamlSnapshot,
-              task: async (ctx, task) => {
-                const { targetEnvSlug, yamlSnapshot } = ctx
-                if (!yamlSnapshot) {
-                  throw new Error('Version snapshot is missing')
-                }
-                if (!targetEnvSlug) {
-                  throw new Error('Target environment is missing')
-                }
-                const config: unknown = JSON.parse(yamlSnapshot)
-                if (!isJsonObject(config)) {
-                  throw new Error('Version snapshot is invalid')
-                }
-
-                const { startDeployment } = await graphqlRequest<
-                  StartPromotedDeploymentMutation,
-                  StartPromotedDeploymentMutationVariables
-                >(START_DEPLOYMENT_MUTATION, {
-                  environment: targetEnvSlug,
-                  config,
-                  versionId: ctx.newVersionId,
-                  options: { skipPostDeploy: options.skipPostDeploy === true },
-                })
-
-                if (!startDeployment.success || !startDeployment.deploymentIds?.length) {
-                  throw new Error(
-                    sanitizeTerminal(startDeployment.message ?? 'Failed to start deployment')
-                  )
-                }
-
-                ctx.deploymentIds = startDeployment.deploymentIds
-                ctx.versionId = startDeployment.versionId ?? ctx.newVersionId
-                task.title = `Start deployment (${String(startDeployment.deploymentIds.length)} service(s))`
-              },
-            },
-            {
-              title: 'Deploy services',
-              skip: (ctx) => !ctx.deploymentIds?.length,
-              task: async (ctx, task) => {
-                const { versionId, deploymentIds } = ctx
-                if (!versionId || !deploymentIds) {
-                  throw new Error('No deployments to monitor')
-                }
-
-                const subtasks = serviceDeploymentSubtasks<PromoteContext>({
-                  versionId,
-                  deploymentIds,
-                  names: await serviceDeploymentNames(versionId),
-                  taskContext: { cwd: workingDir },
-                  isCancelling: () => false,
-                  onFailure: (subCtx, failure) => {
-                    subCtx.failedServices = subCtx.failedServices ?? []
-                    subCtx.failedServices.push(failure)
-                  },
-                })
-
-                // exitOnError: false lets every service finish when a sibling fails.
-                return task.newListr(subtasks, { concurrent: true, exitOnError: false })
-              },
-            },
-            {
-              title: 'Configure routing',
-              // Keeps every post-deploy command line on screen beneath the task.
-              rendererOptions: { outputBar: Infinity, persistentOutput: true },
-              skip: (ctx) => {
-                if (!ctx.versionId) return true
-                const failed = ctx.failedServices?.length ?? 0
-                return failed > 0
-                  ? `${String(failed)} service${failed === 1 ? '' : 's'} failed, routing not applied`
-                  : false
-              },
-              task: async (ctx, task) => {
-                if (!ctx.versionId) throw new Error('Routing started without a version ID')
-                ctx.routing = await waitForRouting({
-                  versionId: ctx.versionId,
-                  isCancelling: () => false,
-                  postDeployAsync: options.postDeployAsync === true,
-                  setTitle: (title) => {
-                    task.title = title
-                  },
-                  writeOutput: (line) => {
-                    task.output = line
-                  },
-                })
-              },
-            },
+            ...versionDeployTasks<VersionDeployContext>({ workingDir, options }),
           ],
           {
             renderer: resolveRenderer(options.verbose ?? false),
@@ -295,13 +172,6 @@ export function registerPromoteCommand(program: Command): void {
         process.exit(1)
       }
 
-      if (finalCtx.routing) printRoutingSummary(finalCtx.routing)
-
-      if (finalCtx.failedServices?.length) {
-        for (const failure of finalCtx.failedServices) {
-          printError(failure.message)
-        }
-        process.exit(1)
-      }
+      reportVersionDeploy(finalCtx)
     })
 }

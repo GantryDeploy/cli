@@ -485,11 +485,16 @@ describe('lift command', () => {
     expect(mocks.printError).toHaveBeenCalledWith('Routing failed - certificate pending')
   })
 
-  it('asks the API to skip post-deploy commands with --skip-post-deploy', async () => {
-    await lift(['production', '--skip-post-deploy'])
+  it.each([
+    [[], { skipPreDeploy: false, skipPostDeploy: false }],
+    [['--skip-pre-deploy'], { skipPreDeploy: true, skipPostDeploy: false }],
+    [['--skip-post-deploy'], { skipPreDeploy: false, skipPostDeploy: true }],
+    [['--skip-pre-deploy', '--skip-post-deploy'], { skipPreDeploy: true, skipPostDeploy: true }],
+  ])('sends the deploy command skips for %j', async (flags, skips) => {
+    await lift(['production', ...flags])
 
     expect(calls('StartLiftDeployment')[0][1]).toMatchObject({
-      options: { deleteStale: false, force: false, skipPostDeploy: true },
+      options: { deleteStale: false, force: false, ...skips },
     })
   })
 

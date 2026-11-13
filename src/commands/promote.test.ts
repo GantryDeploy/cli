@@ -174,7 +174,7 @@ describe('promote command', () => {
           yamlSnapshot: '{"type":"project","services":{"api":{"type":"http"}}}',
         },
       }),
-      StartPromotedDeployment: () => ({
+      StartVersionDeployment: () => ({
         startDeployment: {
           success: true,
           message: null,
@@ -230,12 +230,12 @@ describe('promote command', () => {
     expect(calls('PromoteVersion')).toEqual([
       { input: { sourceEnvironmentId: 'k3x9qa', targetEnvironmentId: 'b9t4rk' } },
     ])
-    expect(calls('StartPromotedDeployment')).toEqual([
+    expect(calls('StartVersionDeployment')).toEqual([
       {
         environment: 'production',
         config: { type: 'project', services: { api: { type: 'http' } } },
         versionId: 'w8fs2k',
-        options: { skipPostDeploy: false },
+        options: { skipPreDeploy: false, skipPostDeploy: false },
       },
     ])
     expect(exitSpy).not.toHaveBeenCalled()
@@ -254,8 +254,8 @@ describe('promote command', () => {
   it('asks the API to skip post-deploy commands with --skip-post-deploy', async () => {
     await run(['production', '--from', 'staging', '--skip-post-deploy'])
 
-    expect(calls('StartPromotedDeployment')).toEqual([
-      expect.objectContaining({ options: { skipPostDeploy: true } }),
+    expect(calls('StartVersionDeployment')).toEqual([
+      expect.objectContaining({ options: { skipPreDeploy: false, skipPostDeploy: true } }),
     ])
   })
 
@@ -424,11 +424,11 @@ describe('promote command', () => {
     await expect(run(['production', '--from', 'v12'])).rejects.toThrow('process.exit(1)')
 
     expect(errors()).toContain('Build 12 has no package for eu-west-1.')
-    expect(calls('StartPromotedDeployment')).toEqual([])
+    expect(calls('StartVersionDeployment')).toEqual([])
   })
 
   it('reports a start that returns no deployments', async () => {
-    handlers.StartPromotedDeployment = () => ({
+    handlers.StartVersionDeployment = () => ({
       startDeployment: { success: true, message: 'Nothing to deploy', deploymentIds: [] },
     })
 
@@ -452,7 +452,7 @@ describe('promote command', () => {
       await expect(run(['production', '--from', 'staging'])).rejects.toThrow('process.exit(1)')
 
       expect(errors()).toContain('Version snapshot is invalid')
-      expect(calls('StartPromotedDeployment')).toEqual([])
+      expect(calls('StartVersionDeployment')).toEqual([])
     }
   )
 })

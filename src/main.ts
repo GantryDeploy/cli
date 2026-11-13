@@ -20,6 +20,7 @@ import { registerNetworksCommand } from './commands/networks'
 import { registerPreviewCommand } from './commands/preview'
 import { registerProjectsCommand } from './commands/projects'
 import { registerPromoteCommand } from './commands/promote'
+import { registerRedeployCommand } from './commands/redeploy'
 import { registerRegionsCommand } from './commands/regions'
 import { registerRerouteCommand } from './commands/reroute'
 import { registerResolveCommand } from './commands/resolve'
@@ -78,6 +79,7 @@ registerPreviewCommand(program)
 registerResolveCommand(program)
 registerValidateCommand(program)
 registerPromoteCommand(program)
+registerRedeployCommand(program)
 registerRegionsCommand(program)
 registerRerouteCommand(program)
 registerActivationCommands(program)

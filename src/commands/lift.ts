@@ -18,6 +18,13 @@ import type {
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
 import {
+  deployCommandSkips,
+  postDeployAsyncOption,
+  skipPostDeployOption,
+  skipPreDeployOption,
+} from '../lib/deploy-command-options'
+import type { DeployCommandOptions } from '../lib/deploy-command-options'
+import {
   DEPLOYMENTS_BY_VERSION_QUERY,
   POLL_INTERVAL_MS,
   serviceDeploymentNames,
@@ -31,8 +38,6 @@ import type { LiftConfig } from '../lib/lift-config'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
 import type { VersionRouteUrl } from '../lib/live-urls'
 import { printError } from '../lib/output'
-import { postDeployAsyncOption, skipPostDeployOption } from '../lib/post-deploy-options'
-import type { PostDeployOptions } from '../lib/post-deploy-options'
 import { findConfigPath } from '../lib/project-identity'
 import { parseCliVarFlags, resolveYaml } from '../lib/resolve-yaml'
 import type { VersionDnsRecord } from '../lib/routing-wait'
@@ -113,7 +118,7 @@ const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
 
 type StartedDeployment = NonNullable<StartLiftDeploymentMutation['startDeployment']['deployment']>
 
-interface LiftOptions extends PostDeployOptions {
+interface LiftOptions extends DeployCommandOptions {
   cwd?: string
   file?: string
   force?: boolean
@@ -227,6 +232,7 @@ export function registerLiftCommand(program: Command): void {
     .option('--delete', 'Delete stale files from storage that are no longer in the deployment')
     .option('-v, --verbose', 'Emit a log line per state change (useful for debugging and CI logs)')
     .option('--wait-for-cleanup', 'Wait for teardown of previous version resources before exiting')
+    .addOption(skipPreDeployOption())
     .addOption(skipPostDeployOption())
     .addOption(postDeployAsyncOption())
     .option(
@@ -461,7 +467,7 @@ export function registerLiftCommand(program: Command): void {
                   options: {
                     deleteStale: options.delete === true,
                     force: options.force === true,
-                    skipPostDeploy: options.skipPostDeploy === true,
+                    ...deployCommandSkips(options),
                   },
                 })
 

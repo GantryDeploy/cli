@@ -1202,6 +1202,11 @@ input DeploymentOptionsInput {
   Go live without running the post-deploy commands. The deployment records the skip.
   """
   skipPostDeploy: Boolean
+
+  """
+  Deploy without running the services' pre-deploy commands. The deployment records the skip.
+  """
+  skipPreDeploy: Boolean
 }
 
 """The phase of a deployment step"""
@@ -1539,6 +1544,7 @@ type Mutation {
   promoteBlueGreen(input: ActivationInput!, team: String): ActivationResult!
   promoteCanary(input: ActivationInput!, team: String): ActivationResult!
   promoteVersion(input: PromoteVersionInput!, team: String): PromoteVersionResult!
+  redeployVersion(input: RedeployVersionInput!, team: String): RedeployVersionResult!
   rollbackDeployment(input: ActivationInput!, team: String): ActivationResult!
 
   """
@@ -1801,6 +1807,30 @@ type Query {
   versionRouteUrls(team: String, versionId: String!): [VersionRouteUrl!]!
   versionsByProject(environmentId: String!, projectId: String!, team: String): [Version!]!
   whoami: WhoAmIResponse!
+}
+
+input RedeployVersionInput {
+  """Environment slug whose live version is redeployed"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+}
+
+type RedeployVersionResult {
+  message: String
+
+  """New version ID in the environment"""
+  newVersionId: String
+
+  """The build's number, shared with the version it redeploys"""
+  newVersionNumber: Int
+  success: Boolean!
+
+  """
+  Configuration of the redeployed version (for passing to startDeployment)
+  """
+  yamlSnapshot: String
 }
 
 type RegionalCertificate {

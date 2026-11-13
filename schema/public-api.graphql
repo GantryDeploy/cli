@@ -1169,6 +1169,11 @@ type Deployment {
   id: String!
   lastMessage: String
   meta: JSON
+
+  """
+  Post-deploy commands of a routing deployment. Null when there are none.
+  """
+  postDeployState: PostDeployState
   projectId: String
   projectName: String
 
@@ -1192,6 +1197,11 @@ input DeploymentOptionsInput {
 
   """Force re-upload all files"""
   force: Boolean
+
+  """
+  Go live without running the post-deploy commands. The deployment records the skip.
+  """
+  skipPostDeploy: Boolean
 }
 
 """The phase of a deployment step"""
@@ -1662,6 +1672,15 @@ type ObjectUploadSource {
   bucketName: String!
   keyPrefix: String!
   region: String!
+}
+
+"""
+Where a deploy's post-deploy commands are. Queued and started mean the version is live.
+"""
+enum PostDeployState {
+  QUEUED
+  SKIPPED
+  STARTED
 }
 
 """A pre-signed upload for one file"""

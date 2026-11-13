@@ -31,6 +31,8 @@ import type { LiftConfig } from '../lib/lift-config'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
 import type { VersionRouteUrl } from '../lib/live-urls'
 import { printError } from '../lib/output'
+import { postDeployAsyncOption, skipPostDeployOption } from '../lib/post-deploy-options'
+import type { PostDeployOptions } from '../lib/post-deploy-options'
 import { findConfigPath } from '../lib/project-identity'
 import { parseCliVarFlags, resolveYaml } from '../lib/resolve-yaml'
 import type { VersionDnsRecord } from '../lib/routing-wait'
@@ -111,7 +113,7 @@ const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
 
 type StartedDeployment = NonNullable<StartLiftDeploymentMutation['startDeployment']['deployment']>
 
-interface LiftOptions {
+interface LiftOptions extends PostDeployOptions {
   cwd?: string
   file?: string
   force?: boolean
@@ -225,6 +227,8 @@ export function registerLiftCommand(program: Command): void {
     .option('--delete', 'Delete stale files from storage that are no longer in the deployment')
     .option('-v, --verbose', 'Emit a log line per state change (useful for debugging and CI logs)')
     .option('--wait-for-cleanup', 'Wait for teardown of previous version resources before exiting')
+    .addOption(skipPostDeployOption())
+    .addOption(postDeployAsyncOption())
     .option(
       '--var <key=value>',
       'Override a declared variable (repeatable). Highest precedence.',
@@ -457,6 +461,7 @@ export function registerLiftCommand(program: Command): void {
                   options: {
                     deleteStale: options.delete === true,
                     force: options.force === true,
+                    skipPostDeploy: options.skipPostDeploy === true,
                   },
                 })
 
@@ -527,16 +532,17 @@ export function registerLiftCommand(program: Command): void {
               },
               task: async (ctx, task) => {
                 if (!ctx.versionId) throw new Error('Routing started without a version ID')
-                const routing = await waitForRouting(
-                  ctx.versionId,
-                  () => cancelling,
-                  (title) => {
+                const routing = await waitForRouting({
+                  versionId: ctx.versionId,
+                  isCancelling: () => cancelling,
+                  postDeployAsync: options.postDeployAsync === true,
+                  setTitle: (title) => {
                     task.title = title
                   },
-                  (line) => {
+                  writeOutput: (line) => {
                     task.output = line
-                  }
-                )
+                  },
+                })
                 ctx.routeUrls = routing.routeUrls
                 ctx.dnsRecords = routing.dnsRecords
               },

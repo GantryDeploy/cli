@@ -18,6 +18,8 @@ import { serviceDeploymentNames, serviceDeploymentSubtasks } from '../lib/deploy
 import type { ServiceFailure } from '../lib/deployment-poll'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
 import { printError } from '../lib/output'
+import { postDeployAsyncOption, skipPostDeployOption } from '../lib/post-deploy-options'
+import type { PostDeployOptions } from '../lib/post-deploy-options'
 import { loadProjectIdentity } from '../lib/project-identity'
 import { printRoutingSummary, waitForRouting } from '../lib/routing-wait'
 import type { RoutingResult } from '../lib/routing-wait'
@@ -74,7 +76,7 @@ const BUILD_NUMBER = /^v([1-9]\d{0,8})$/
 
 type ProjectEnvironment = GetPromoteTargetEnvironmentsQuery['environments'][number]
 
-interface PromoteOptions {
+interface PromoteOptions extends PostDeployOptions {
   cwd?: string
   from?: string
   verbose?: boolean
@@ -129,6 +131,8 @@ export function registerPromoteCommand(program: Command): void {
     )
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-v, --verbose', 'Emit a log line per state change (useful for debugging and CI logs)')
+    .addOption(skipPostDeployOption())
+    .addOption(postDeployAsyncOption())
     .action(async (targetEnvironment: string, options: PromoteOptions, command: Command) => {
       const cwd = globalCwd(command) ?? options.cwd
       const workingDir = cwd ? path.resolve(cwd) : process.cwd()
@@ -209,6 +213,7 @@ export function registerPromoteCommand(program: Command): void {
                   environment: targetEnvSlug,
                   config,
                   versionId: ctx.newVersionId,
+                  options: { skipPostDeploy: options.skipPostDeploy === true },
                 })
 
                 if (!startDeployment.success || !startDeployment.deploymentIds?.length) {
@@ -260,16 +265,17 @@ export function registerPromoteCommand(program: Command): void {
               },
               task: async (ctx, task) => {
                 if (!ctx.versionId) throw new Error('Routing started without a version ID')
-                ctx.routing = await waitForRouting(
-                  ctx.versionId,
-                  () => false,
-                  (title) => {
+                ctx.routing = await waitForRouting({
+                  versionId: ctx.versionId,
+                  isCancelling: () => false,
+                  postDeployAsync: options.postDeployAsync === true,
+                  setTitle: (title) => {
                     task.title = title
                   },
-                  (line) => {
+                  writeOutput: (line) => {
                     task.output = line
-                  }
-                )
+                  },
+                })
               },
             },
           ],

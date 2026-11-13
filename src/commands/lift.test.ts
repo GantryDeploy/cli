@@ -485,6 +485,40 @@ describe('lift command', () => {
     expect(mocks.printError).toHaveBeenCalledWith('Routing failed - certificate pending')
   })
 
+  it('asks the API to skip post-deploy commands with --skip-post-deploy', async () => {
+    await lift(['production', '--skip-post-deploy'])
+
+    expect(calls('StartLiftDeployment')[0][1]).toMatchObject({
+      options: { deleteStale: false, force: false, skipPostDeploy: true },
+    })
+  })
+
+  it('exits once the version is live with --post-deploy-async, leaving the commands running', async () => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_r',
+        status: 'RUNNING',
+        lastMessage: 'Running post-deploy commands',
+        postDeployState: 'QUEUED',
+        steps: [],
+      },
+    })
+
+    await lift(['production', '--post-deploy-async'])
+
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
+    expect(calls('VersionRouteUrls')).toHaveLength(1)
+    expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  it('refuses --skip-post-deploy with --post-deploy-async before deploying', async () => {
+    await expect(lift(['production', '--skip-post-deploy', '--post-deploy-async'])).rejects.toThrow(
+      /cannot be used with/
+    )
+
+    expect(calls('CreateVersion')).toHaveLength(0)
+  })
+
   it('exits non-zero when post-deploy commands fail, saying the version is live', async () => {
     handlers.GetRoutingDeployment = () => ({
       deployment: {

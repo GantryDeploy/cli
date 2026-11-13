@@ -442,6 +442,8 @@ export type DeploymentOptionsInput = {
   deleteStale?: boolean | null | undefined;
   /** Force re-upload all files */
   force?: boolean | null | undefined;
+  /** Go live without running the post-deploy commands. The deployment records the skip. */
+  skipPostDeploy?: boolean | null | undefined;
 };
 
 /** The phase of a deployment step */
@@ -537,6 +539,12 @@ export type ObjectUploadCliOutputsInput = {
   totalSize: number;
   uploadedFiles: number;
 };
+
+/** Where a deploy's post-deploy commands are. Queued and started mean the version is live. */
+export type PostDeployState =
+  | 'QUEUED'
+  | 'SKIPPED'
+  | 'STARTED';
 
 /** Set exactly one source: sourceEnvironmentId, buildNumber, or sourceVersionId for older CLIs. */
 export type PromoteVersionInput = {
@@ -1280,7 +1288,7 @@ export type GetRoutingDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetRoutingDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, steps: Array<{ stepType: string, status: DeploymentStepStatus }> | null } | null };
+export type GetRoutingDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, postDeployState: PostDeployState | null, steps: Array<{ stepType: string, status: DeploymentStepStatus }> | null } | null };
 
 export type VersionRouteUrlsQueryVariables = Exact<{
   versionId: string;

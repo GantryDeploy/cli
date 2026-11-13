@@ -24,6 +24,7 @@ const ROUTING_DEPLOYMENT_QUERY = /* GraphQL */ `
       id
       status
       lastMessage
+      postDeployState
       steps {
         stepType
         status
@@ -120,15 +121,18 @@ async function liveRoutes(versionId: string): Promise<RoutingResult> {
 /**
  * Follows the version's routing deployment until it settles, passing each post-deploy command line
  * to `writeOutput`, and returns the live URLs and DNS records once it completes.
+ * With `postDeployAsync` it returns as soon as the version is live and its commands are queued.
  *
  * @throws when routing or its post-deploy commands fail.
  */
-export async function waitForRouting(
-  versionId: string,
-  isCancelling: () => boolean,
-  setTitle: (title: string) => void,
+export async function waitForRouting(params: {
+  versionId: string
+  isCancelling: () => boolean
+  postDeployAsync: boolean
+  setTitle: (title: string) => void
   writeOutput: (line: string) => void
-): Promise<RoutingResult> {
+}): Promise<RoutingResult> {
+  const { versionId, isCancelling, postDeployAsync, setTitle, writeOutput } = params
   const routingDeploymentId = await findRoutingDeployment(versionId, isCancelling)
   if (isCancelling()) {
     setTitle('Configure routing: Cancelled')
@@ -184,6 +188,15 @@ export async function waitForRouting(
 
     const message = deployment.lastMessage ? ` - ${sanitizeTerminal(deployment.lastMessage)}` : ''
     setTitle(sanitizeTerminal(`Configure routing: ${deployment.status.toUpperCase()}${message}`))
+
+    const live = deployment.postDeployState === 'QUEUED' || deployment.postDeployState === 'STARTED'
+    if (postDeployAsync && live && !isTerminalStatus(deployment.status)) {
+      const routing = await liveRoutes(versionId)
+      setTitle(
+        'Version live. Post-deploy commands are running; their result appears on the deployment.'
+      )
+      return routing
+    }
 
     if (!isTerminalStatus(deployment.status)) continue
 

@@ -235,6 +235,7 @@ describe('promote command', () => {
         environment: 'production',
         config: { type: 'project', services: { api: { type: 'http' } } },
         versionId: 'w8fs2k',
+        options: { skipPostDeploy: false },
       },
     ])
     expect(exitSpy).not.toHaveBeenCalled()
@@ -248,6 +249,60 @@ describe('promote command', () => {
     expect(calls('GetRoutingDeployment')).toEqual([{ id: 'dep_routing' }])
     expect(logSpy.mock.calls.flat().join('\n')).toContain('https://shop.example.com/api')
     expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  it('asks the API to skip post-deploy commands with --skip-post-deploy', async () => {
+    await run(['production', '--from', 'staging', '--skip-post-deploy'])
+
+    expect(calls('StartPromotedDeployment')).toEqual([
+      expect.objectContaining({ options: { skipPostDeploy: true } }),
+    ])
+  })
+
+  it('exits once the version is live with --post-deploy-async', async () => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_routing',
+        status: 'RUNNING',
+        lastMessage: 'Running post-deploy commands',
+        postDeployState: 'STARTED',
+        steps: [{ stepType: 'post-deploy', status: 'PROCESSING' }],
+      },
+    })
+
+    await run(['production', '--from', 'staging', '--post-deploy-async'])
+
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
+    expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  it('keeps waiting for post-deploy commands without --post-deploy-async', async () => {
+    let polls = 0
+    handlers.GetRoutingDeployment = () => {
+      polls += 1
+      return {
+        deployment:
+          polls < 3
+            ? {
+                id: 'dep_routing',
+                status: 'RUNNING',
+                lastMessage: null,
+                postDeployState: 'QUEUED',
+                steps: [],
+              }
+            : {
+                id: 'dep_routing',
+                status: 'COMPLETE',
+                lastMessage: null,
+                postDeployState: 'STARTED',
+                steps: [],
+              },
+      }
+    }
+
+    await run(['production', '--from', 'staging'])
+
+    expect(calls('GetRoutingDeployment')).toHaveLength(3)
   })
 
   it('exits non-zero when post-deploy commands fail, saying the version is live', async () => {

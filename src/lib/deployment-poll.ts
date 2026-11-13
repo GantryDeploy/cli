@@ -277,8 +277,7 @@ async function pollAllDeployments(
     if (isCancelling()) {
       for (const [id, resolve] of resolvers) {
         if (!completedDeployments.has(id)) {
-          const updateTitle = titleUpdaters.get(id)
-          if (updateTitle) updateTitle(`${id}: Cancelled`)
+          titleUpdaters.get(id)?.(`${id}: Cancelled`)
           completedDeployments.add(id)
           resolve()
         }
@@ -297,9 +296,8 @@ async function pollAllDeployments(
 
       for (const deployment of result.deploymentsByVersion) {
         const id = deployment.id
-        const updateTitle = titleUpdaters.get(id)
-
-        if (!updateTitle || completedDeployments.has(id)) continue
+        if (!resolvers.has(id) || completedDeployments.has(id)) continue
+        const updateTitle = (title: string) => titleUpdaters.get(id)?.(title)
 
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty serviceName should fall back to the deployment id for display
         const targetLabel = sanitizeTerminal(deployment.serviceName || id)
@@ -361,16 +359,15 @@ async function pollAllDeployments(
         }
       }
 
-      const allTargetsDone = [...titleUpdaters.keys()].every((id) => completedDeployments.has(id))
+      const allTargetsDone = [...resolvers.keys()].every((id) => completedDeployments.has(id))
       if (allTargetsDone) {
         return
       }
 
       if (Date.now() - lastActivityTime > TIMEOUT_MS) {
-        for (const [id] of titleUpdaters) {
+        for (const id of resolvers.keys()) {
           if (!completedDeployments.has(id)) {
-            const updateTitle = titleUpdaters.get(id)
-            if (updateTitle) updateTitle(`${id}: Timed out`)
+            titleUpdaters.get(id)?.(`${id}: Timed out`)
             completedDeployments.add(id)
             rejecters.get(id)?.(new Error(`Timed out (no activity for 5 minutes)`))
           }
@@ -387,7 +384,7 @@ async function pollAllDeployments(
           : ''
 
       if (consecutiveNetworkErrors >= MAX_CONSECUTIVE_NETWORK_ERRORS) {
-        for (const [id] of titleUpdaters) {
+        for (const id of resolvers.keys()) {
           if (!completedDeployments.has(id)) {
             const targetLabel = id
             completedDeployments.add(id)
@@ -404,9 +401,9 @@ async function pollAllDeployments(
       const backoffDelay = Math.min(2000 * Math.pow(2, consecutiveNetworkErrors - 1), 60_000)
       await new Promise((resolve) => setTimeout(resolve, backoffDelay))
 
-      for (const [id, updateTitle] of titleUpdaters) {
+      for (const id of resolvers.keys()) {
         if (!completedDeployments.has(id)) {
-          updateTitle(
+          titleUpdaters.get(id)?.(
             `${id}: Retrying (${String(consecutiveNetworkErrors)}/${String(MAX_CONSECUTIVE_NETWORK_ERRORS)})... ${formattedError}`
           )
         }
@@ -460,6 +457,17 @@ export function serviceDeploymentSubtasks<Ctx>(params: {
   const titleUpdaters = new Map<string, (title: string) => void>()
   const resolvers = new Map<string, () => void>()
   const rejecters = new Map<string, (error: Error) => void>()
+  // Created up front: the poller can settle a service before listr starts its subtask.
+  const outcomes = new Map(
+    deploymentIds.map((id) => {
+      const outcome = new Promise<void>((resolve, reject) => {
+        resolvers.set(id, resolve)
+        rejecters.set(id, reject)
+      })
+      outcome.catch(() => undefined)
+      return [id, outcome] as const
+    })
+  )
 
   const subtasks = deploymentIds.map((id) => ({
     title: `${names.get(id) ?? id}: Waiting...`,
@@ -469,10 +477,7 @@ export function serviceDeploymentSubtasks<Ctx>(params: {
       })
 
       try {
-        await new Promise<void>((resolve, reject) => {
-          resolvers.set(id, resolve)
-          rejecters.set(id, reject)
-        })
+        await outcomes.get(id)
       } catch (error) {
         onFailure(ctx, {
           id,
@@ -484,8 +489,7 @@ export function serviceDeploymentSubtasks<Ctx>(params: {
     },
   }))
 
-  // Not awaited: the poller settles each subtask's promise. Its first cycle waits
-  // POLL_INTERVAL_MS, which gives the subtasks time to register their title updaters.
+  // Not awaited: the poller settles each service's outcome.
   void pollAllDeployments(versionId, taskContext, titleUpdaters, resolvers, rejecters, isCancelling)
 
   return subtasks

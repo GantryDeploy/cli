@@ -12,14 +12,8 @@ import type {
   CreateVersionMutationVariables,
   DeploymentsByVersionQuery,
   DeploymentsByVersionQueryVariables,
-  GetLiftDeploymentQuery,
-  GetLiftDeploymentQueryVariables,
   StartLiftDeploymentMutation,
   StartLiftDeploymentMutationVariables,
-  VersionDnsRecordsQuery,
-  VersionDnsRecordsQueryVariables,
-  VersionRouteUrlsQuery,
-  VersionRouteUrlsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
@@ -35,11 +29,12 @@ import { buildDockerBuildArgs, runDocker } from '../lib/exec'
 import { readLiftConfig } from '../lib/lift-config'
 import type { LiftConfig } from '../lib/lift-config'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
-import { buildLiveUrlLines } from '../lib/live-urls'
 import type { VersionRouteUrl } from '../lib/live-urls'
-import { printError, printHeading } from '../lib/output'
+import { printError } from '../lib/output'
 import { findConfigPath } from '../lib/project-identity'
 import { parseCliVarFlags, resolveYaml } from '../lib/resolve-yaml'
+import type { VersionDnsRecord } from '../lib/routing-wait'
+import { printRoutingSummary, waitForRouting } from '../lib/routing-wait'
 import { sanitizeTerminal } from '../lib/sanitize'
 import {
   cleanStagingDir,
@@ -99,35 +94,6 @@ const START_DEPLOYMENT_MUTATION = /* GraphQL */ `
   }
 `
 
-const DEPLOYMENT_QUERY = /* GraphQL */ `
-  query GetLiftDeployment($id: String!) {
-    deployment(id: $id) {
-      id
-      teamId
-      environmentId
-      status
-      lastMessage
-      startedAt
-      updatedAt
-      completedAt
-      projectName
-      projectId
-      serviceName
-      environmentName
-      steps {
-        id
-        stepType
-        status
-        phase
-        executor
-        cliTask
-        cliStatus
-        sequence
-      }
-    }
-  }
-`
-
 const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
   mutation CancelLiftDeployment($id: String!) {
     cancelDeployment(id: $id) {
@@ -143,37 +109,7 @@ const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
   }
 `
 
-const VERSION_ROUTE_URLS_QUERY = /* GraphQL */ `
-  query VersionRouteUrls($versionId: String!) {
-    versionRouteUrls(versionId: $versionId) {
-      url
-      domain
-      path
-      serviceName
-      cache
-    }
-  }
-`
-
-const VERSION_DNS_RECORDS_QUERY = /* GraphQL */ `
-  query VersionDnsRecords($versionId: String!) {
-    versionDnsRecords(versionId: $versionId) {
-      hostname
-      recordType
-      name
-      value
-      managed
-      syncStatus
-    }
-  }
-`
-
-type VersionDnsRecord = VersionDnsRecordsQuery['versionDnsRecords'][number]
-
 type StartedDeployment = NonNullable<StartLiftDeploymentMutation['startDeployment']['deployment']>
-
-// Measured from when every service finishes, not from the start of the lift.
-const ROUTING_DISCOVERY_TIMEOUT_MS = 2 * 60 * 1000
 
 interface LiftOptions {
   cwd?: string
@@ -589,119 +525,15 @@ export function registerLiftCommand(program: Command): void {
               },
               task: async (ctx, task) => {
                 if (!ctx.versionId) throw new Error('Routing started without a version ID')
-
-                const startTime = Date.now()
-                let routingDeploymentId: string | null = null
-
-                while (!routingDeploymentId) {
-                  await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-
-                  if (cancelling) {
-                    task.title = 'Configure routing: Cancelled'
-                    return
+                const routing = await waitForRouting(
+                  ctx.versionId,
+                  () => cancelling,
+                  (title) => {
+                    task.title = title
                   }
-
-                  if (Date.now() - startTime > ROUTING_DISCOVERY_TIMEOUT_MS) {
-                    task.title = 'Configure routing: No routing configured'
-                    return
-                  }
-
-                  try {
-                    const result = await graphqlRequest<
-                      DeploymentsByVersionQuery,
-                      DeploymentsByVersionQueryVariables
-                    >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId: ctx.versionId })
-
-                    const routingDep = result.deploymentsByVersion.find(
-                      (d) => d.scope === 'project-env'
-                    )
-
-                    if (routingDep) {
-                      routingDeploymentId = routingDep.id
-                    }
-                  } catch {
-                    // Transient: the next poll retries.
-                  }
-                }
-
-                task.title = 'Configure routing: Running'
-
-                // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
-                while (true) {
-                  await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-
-                  if (cancelling) {
-                    task.title = 'Configure routing: Cancelled'
-                    return
-                  }
-
-                  try {
-                    const result = await graphqlRequest<
-                      GetLiftDeploymentQuery,
-                      GetLiftDeploymentQueryVariables
-                    >(DEPLOYMENT_QUERY, { id: routingDeploymentId })
-
-                    const deployment = result.deployment
-                    if (!deployment) {
-                      task.title = 'Configure routing: Not found'
-                      return
-                    }
-
-                    const message = deployment.lastMessage
-                      ? ` - ${sanitizeTerminal(deployment.lastMessage)}`
-                      : ''
-                    task.title = sanitizeTerminal(
-                      `Configure routing: ${deployment.status.toUpperCase()}${message}`
-                    )
-
-                    if (isTerminalStatus(deployment.status)) {
-                      const normalized = deployment.status
-                      if (normalized === 'COMPLETE') {
-                        try {
-                          const routes = await graphqlRequest<
-                            VersionRouteUrlsQuery,
-                            VersionRouteUrlsQueryVariables
-                          >(VERSION_ROUTE_URLS_QUERY, { versionId: ctx.versionId })
-                          ctx.routeUrls = routes.versionRouteUrls
-                        } catch {
-                          // Routing already succeeded; the URL list is informational.
-                        }
-                        try {
-                          const dns = await graphqlRequest<
-                            VersionDnsRecordsQuery,
-                            VersionDnsRecordsQueryVariables
-                          >(VERSION_DNS_RECORDS_QUERY, { versionId: ctx.versionId })
-                          ctx.dnsRecords = dns.versionDnsRecords
-                        } catch {
-                          // Routing already succeeded; the DNS records are informational.
-                        }
-                        const urlCount = ctx.routeUrls?.length ?? 0
-                        const urlSuffix =
-                          urlCount > 0
-                            ? `: ${String(urlCount)} URL${urlCount === 1 ? '' : 's'} live`
-                            : ''
-                        task.title = `Routing complete${urlSuffix}${message}`
-                        return
-                      } else if (normalized === 'FAILED') {
-                        throw new Error(`Routing failed${message}`)
-                      } else {
-                        task.title = sanitizeTerminal(
-                          `Configure routing: ${deployment.status.toUpperCase()}`
-                        )
-                        return
-                      }
-                    }
-                  } catch (error) {
-                    if (
-                      error instanceof Error &&
-                      (error.message.includes('Routing failed') ||
-                        error.message.includes('not found'))
-                    ) {
-                      throw error
-                    }
-                    // Transient: the next poll retries.
-                  }
-                }
+                )
+                ctx.routeUrls = routing.routeUrls
+                ctx.dnsRecords = routing.dnsRecords
               },
             },
 
@@ -888,27 +720,7 @@ export function registerLiftCommand(program: Command): void {
           primaryDeployment: undefined,
         })
 
-        if (finalCtx.dnsRecords && finalCtx.dnsRecords.length > 0) {
-          printHeading('DNS records')
-          const recs = finalCtx.dnsRecords
-          const typeW = Math.max(...recs.map((r) => sanitizeTerminal(r.recordType).length))
-          const nameW = Math.max(...recs.map((r) => sanitizeTerminal(r.name).length))
-          for (const rec of recs) {
-            console.log(
-              `  ${sanitizeTerminal(rec.recordType).padEnd(typeW)}  ${sanitizeTerminal(rec.name).padEnd(nameW)}  ${sanitizeTerminal(rec.value)}`
-            )
-          }
-          if (recs.some((r) => !r.managed)) {
-            console.log('\n  Add the records above at your DNS provider.')
-          }
-        }
-
-        if (finalCtx.routeUrls && finalCtx.routeUrls.length > 0) {
-          printHeading('Deployed routes')
-          for (const line of buildLiveUrlLines(finalCtx.routeUrls)) {
-            console.log(line)
-          }
-        }
+        printRoutingSummary(finalCtx)
 
         if (finalCtx.failedServices && finalCtx.failedServices.length > 0) {
           const n = finalCtx.failedServices.length

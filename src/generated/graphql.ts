@@ -926,33 +926,12 @@ export type StartLiftDeploymentMutationVariables = Exact<{
 
 export type StartLiftDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null, deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, serviceName: string | null, environmentName: string | null } | null } };
 
-export type GetLiftDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetLiftDeploymentQuery = { deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, serviceName: string | null, environmentName: string | null, steps: Array<{ id: string, stepType: string, status: DeploymentStepStatus, phase: DeploymentPhase, executor: StepExecutor, cliTask: string | null, cliStatus: CliStatus | null, sequence: number }> | null } | null };
-
 export type CancelLiftDeploymentMutationVariables = Exact<{
   id: string;
 }>;
 
 
 export type CancelLiftDeploymentMutation = { cancelDeployment: { success: boolean, message: string | null, deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, updatedAt: string } | null } };
-
-export type VersionRouteUrlsQueryVariables = Exact<{
-  versionId: string;
-}>;
-
-
-export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null }> };
-
-export type VersionDnsRecordsQueryVariables = Exact<{
-  versionId: string;
-}>;
-
-
-export type VersionDnsRecordsQuery = { versionDnsRecords: Array<{ hostname: string, recordType: string, name: string, value: string, managed: boolean, syncStatus: string }> };
 
 export type GetLoadBalancersQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1276,6 +1255,27 @@ export type ResolveProjectQueryVariables = Exact<{
 
 
 export type ResolveProjectQuery = { resolveProject: { ok: boolean, blueprintReference: string | null, errors: Array<{ code: string, message: string, path: string, suggestion: string | null }>, environments: Array<{ environment: string, config: Record<string, unknown>, resolvedYaml: string, provenance: Array<{ name: string, type: string, value: string, source: string }>, plan: { services: Array<{ name: string, type: string, deploymentType: string, source: string, cluster: string | null }>, routing: Array<{ domain: string, entryType: string, loadBalancer: string | null, paths: Array<{ path: string, service: string, deploymentType: string, routeHops: Array<string> }> }>, builds: Array<{ name: string, architecture: string }> } }> } };
+
+export type GetRoutingDeploymentQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetRoutingDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null } | null };
+
+export type VersionRouteUrlsQueryVariables = Exact<{
+  versionId: string;
+}>;
+
+
+export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null }> };
+
+export type VersionDnsRecordsQueryVariables = Exact<{
+  versionId: string;
+}>;
+
+
+export type VersionDnsRecordsQuery = { versionDnsRecords: Array<{ hostname: string, recordType: string, name: string, value: string, managed: boolean, syncStatus: string }> };
 
 export type SubmitManifestMutationVariables = Exact<{
   input: SubmitManifestInput;

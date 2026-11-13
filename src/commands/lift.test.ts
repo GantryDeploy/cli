@@ -214,7 +214,7 @@ describe('lift command', () => {
       ClaimStep: () => ({ claimStep: { success: true, step: CLAIMED_STEP } }),
       CompleteCliStep: () => ({ completeCliStep: { success: true } }),
       FailCliStep: () => ({ failCliStep: { success: true } }),
-      GetLiftDeployment: () => ({ deployment: { id: 'dep_r', status: 'COMPLETE' } }),
+      GetRoutingDeployment: () => ({ deployment: { id: 'dep_r', status: 'COMPLETE' } }),
       VersionRouteUrls: () => ({
         versionRouteUrls: [{ url: 'https://shop.example.com', path: '/', serviceName: 'web' }],
       }),
@@ -278,7 +278,7 @@ describe('lift command', () => {
       fileResults: [{ path: 'index.html', hash: 'abc', success: true }],
     })
 
-    expect(calls('GetLiftDeployment')[0][1]).toEqual({ id: 'dep_r' })
+    expect(calls('GetRoutingDeployment')[0][1]).toEqual({ id: 'dep_r' })
     expect(mocks.printHeading).toHaveBeenCalledWith('DNS records')
     expect(mocks.printHeading).toHaveBeenCalledWith('Deployed routes')
     expect(logSpy).toHaveBeenCalledWith('  CNAME  shop.example.com  d1.cloudfront.net')
@@ -385,7 +385,7 @@ describe('lift command', () => {
 
     expect(calls('FailCliStep')[0][1]).toEqual({ stepId: 'step_1', error: 'upload refused' })
     expect(calls('CompleteCliStep')).toHaveLength(0)
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(mocks.printError).toHaveBeenCalledWith(
       'Deployment failed: 1 of 1 service did not succeed'
     )
@@ -456,7 +456,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(process.exitCode).toBeUndefined()
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
   })
 
   it('gives up after ten consecutive API failures while polling', async () => {
@@ -476,7 +476,7 @@ describe('lift command', () => {
   })
 
   it('exits with the routing failure', async () => {
-    handlers.GetLiftDeployment = () => ({
+    handlers.GetRoutingDeployment = () => ({
       deployment: { id: 'dep_r', status: 'FAILED', lastMessage: 'certificate pending' },
     })
 
@@ -486,7 +486,7 @@ describe('lift command', () => {
   })
 
   it('stops waiting on routing when its deployment disappears', async () => {
-    handlers.GetLiftDeployment = () => ({ deployment: null })
+    handlers.GetRoutingDeployment = () => ({ deployment: null })
 
     await lift(['production'])
 
@@ -920,7 +920,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('DeploymentsByVersion')).toHaveLength(0)
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(mocks.printError).not.toHaveBeenCalled()
     expect(process.exitCode).toBeUndefined()
   })
@@ -946,7 +946,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(mocks.printError).not.toHaveBeenCalled()
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
   })
 
   it('gives up after ten consecutive network errors without an HTTP status', async () => {
@@ -984,7 +984,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(mocks.printError).toHaveBeenCalledWith(
       'Deployment failed: 2 of 2 services did not succeed'
     )
@@ -999,7 +999,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
     expect(mocks.printError).not.toHaveBeenCalled()
   })
 
@@ -1008,7 +1008,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(calls('DeploymentsByVersion').length).toBeGreaterThan(50)
     expect(mocks.printHeading).not.toHaveBeenCalled()
     expect(mocks.printError).not.toHaveBeenCalled()
@@ -1025,7 +1025,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('CancelLiftDeployment')[0][1]).toEqual({ id: 'dep_1' })
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
@@ -1033,7 +1033,7 @@ describe('lift command', () => {
     handlers.CancelLiftDeployment = () => {
       throw new Error('Deployment already complete')
     }
-    handlers.GetLiftDeployment = () => {
+    handlers.GetRoutingDeployment = () => {
       sigintHandler()()
       return { deployment: { id: 'dep_r', status: 'RUNNING' } }
     }
@@ -1041,13 +1041,13 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('CancelLiftDeployment')).toHaveLength(1)
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
     expect(calls('VersionRouteUrls')).toHaveLength(0)
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
   it('settles on a cancelled routing deployment without fetching URLs', async () => {
-    handlers.GetLiftDeployment = () => ({ deployment: { id: 'dep_r', status: 'CANCELLED' } })
+    handlers.GetRoutingDeployment = () => ({ deployment: { id: 'dep_r', status: 'CANCELLED' } })
 
     await lift(['production'])
 
@@ -1057,7 +1057,7 @@ describe('lift command', () => {
 
   it('retries routing polls and tolerates failed URL and DNS lookups', async () => {
     let call = 0
-    handlers.GetLiftDeployment = () => {
+    handlers.GetRoutingDeployment = () => {
       call++
       if (call === 1) throw new Error('socket hang up')
       return { deployment: { id: 'dep_r', status: 'COMPLETE', lastMessage: 'Routes applied' } }
@@ -1071,7 +1071,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(2)
+    expect(calls('GetRoutingDeployment')).toHaveLength(2)
     expect(mocks.printHeading).not.toHaveBeenCalled()
     expect(mocks.printError).not.toHaveBeenCalled()
   })

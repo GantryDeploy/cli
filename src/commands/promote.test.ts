@@ -83,6 +83,18 @@ function deployment(overrides: Record<string, unknown> = {}) {
   return { id: 'dep_api', serviceName: 'api', status: 'RUNNING', steps: [], ...overrides }
 }
 
+const ROUTING = {
+  id: 'dep_routing',
+  scope: 'project-env',
+  serviceName: null,
+  status: 'RUNNING',
+  steps: [],
+}
+
+function withRouting(...services: unknown[]) {
+  return [...services, ROUTING]
+}
+
 describe('promoteSource', () => {
   it.each([
     ['staging', { sourceEnvironmentId: 'k3x9qa' }],
@@ -149,7 +161,7 @@ describe('promote command', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] })
     mocks.graphqlRequest.mockReset()
     mocks.executeCliTask.mockReset().mockResolvedValue(COPY_RESULT)
-    sequence([deployment({ status: 'COMPLETE' })])
+    sequence(withRouting(deployment({ status: 'COMPLETE' })))
     handlers = {
       GetPromoteTargetEnvironments: () => ({ environments }),
       PromoteVersion: () => ({
@@ -178,6 +190,21 @@ describe('promote command', () => {
       }),
       CompleteCliStep: () => ({ completeCliStep: { success: true } }),
       FailCliStep: () => ({ failCliStep: { success: true } }),
+      GetRoutingDeployment: () => ({
+        deployment: { id: 'dep_routing', status: 'COMPLETE', lastMessage: null },
+      }),
+      VersionRouteUrls: () => ({
+        versionRouteUrls: [
+          {
+            url: 'https://shop.example.com/api',
+            domain: 'shop.example.com',
+            path: '/api',
+            serviceName: 'api',
+            cache: false,
+          },
+        ],
+      }),
+      VersionDnsRecords: () => ({ versionDnsRecords: [] }),
     }
     mocks.graphqlRequest.mockImplementation((query: string, variables: Record<string, unknown>) => {
       const operation = Object.keys(handlers).find((name) => query.includes(`${name}(`))
@@ -213,6 +240,40 @@ describe('promote command', () => {
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
+  it('waits for routing and prints the live routes', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await run(['production', '--from', 'staging'])
+
+    expect(calls('GetRoutingDeployment')).toEqual([{ id: 'dep_routing' }])
+    expect(logSpy.mock.calls.flat().join('\n')).toContain('https://shop.example.com/api')
+    expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  it('fails when routing fails after every service deployed', async () => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_routing',
+        status: 'FAILED',
+        lastMessage: 'There was an error while updating the load balancer.',
+      },
+    })
+
+    await expect(run(['production', '--from', 'staging'])).rejects.toThrow('process.exit(1)')
+
+    expect(errors()).toContain(
+      'Routing failed - There was an error while updating the load balancer.'
+    )
+  })
+
+  it('applies no routing when a service fails', async () => {
+    sequence(withRouting(deployment({ status: 'FAILED' })))
+
+    await expect(run(['production', '--from', 'staging'])).rejects.toThrow('process.exit(1)')
+
+    expect(calls('GetRoutingDeployment')).toEqual([])
+  })
+
   it('promotes a build by number', async () => {
     await run(['production', '--from', 'v12'])
 
@@ -223,10 +284,12 @@ describe('promote command', () => {
 
   it('claims a copy step and runs it without project files', async () => {
     sequence(
-      [deployment()],
-      [deployment({ steps: [COPY_STEP] })],
-      [deployment({ steps: [{ ...COPY_STEP, status: 'COMPLETE', cliStatus: 'COMPLETE' }] })],
-      [deployment({ status: 'COMPLETE' })]
+      withRouting(deployment()),
+      withRouting(deployment({ steps: [COPY_STEP] })),
+      withRouting(
+        deployment({ steps: [{ ...COPY_STEP, status: 'COMPLETE', cliStatus: 'COMPLETE' }] })
+      ),
+      withRouting(deployment({ status: 'COMPLETE' }))
     )
 
     await run(['production', '--from', 'staging', '--cwd', '/srv/shop'])
@@ -241,9 +304,11 @@ describe('promote command', () => {
 
   it('fails the step and the promote when the copy fails', async () => {
     sequence(
-      [deployment()],
-      [deployment({ steps: [COPY_STEP] })],
-      [deployment({ status: 'FAILED', lastMessage: 'There was an error while uploading.' })]
+      withRouting(deployment()),
+      withRouting(deployment({ steps: [COPY_STEP] })),
+      withRouting(
+        deployment({ status: 'FAILED', lastMessage: 'There was an error while uploading.' })
+      )
     )
     mocks.executeCliTask.mockRejectedValueOnce(new Error('AccessDenied reading the source zip'))
 

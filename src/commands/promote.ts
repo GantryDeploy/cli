@@ -19,6 +19,8 @@ import type { ServiceFailure } from '../lib/deployment-poll'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
 import { printError } from '../lib/output'
 import { loadProjectIdentity } from '../lib/project-identity'
+import { printRoutingSummary, waitForRouting } from '../lib/routing-wait'
+import type { RoutingResult } from '../lib/routing-wait'
 import { sanitizeTerminal } from '../lib/sanitize'
 
 const PROMOTE_VERSION_MUTATION = /* GraphQL */ `
@@ -85,6 +87,7 @@ interface PromoteContext {
   versionId?: string
   deploymentIds?: string[]
   failedServices?: ServiceFailure[]
+  routing?: RoutingResult
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -244,6 +247,26 @@ export function registerPromoteCommand(program: Command): void {
                 return task.newListr(subtasks, { concurrent: true, exitOnError: false })
               },
             },
+            {
+              title: 'Configure routing',
+              skip: (ctx) => {
+                if (!ctx.versionId) return true
+                const failed = ctx.failedServices?.length ?? 0
+                return failed > 0
+                  ? `${String(failed)} service${failed === 1 ? '' : 's'} failed, routing not applied`
+                  : false
+              },
+              task: async (ctx, task) => {
+                if (!ctx.versionId) throw new Error('Routing started without a version ID')
+                ctx.routing = await waitForRouting(
+                  ctx.versionId,
+                  () => false,
+                  (title) => {
+                    task.title = title
+                  }
+                )
+              },
+            },
           ],
           {
             renderer: resolveRenderer(options.verbose ?? false),
@@ -260,6 +283,8 @@ export function registerPromoteCommand(program: Command): void {
         printError(formatApiError(error))
         process.exit(1)
       }
+
+      if (finalCtx.routing) printRoutingSummary(finalCtx.routing)
 
       if (finalCtx.failedServices?.length) {
         for (const failure of finalCtx.failedServices) {

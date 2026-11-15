@@ -19,7 +19,6 @@ import { sanitizeTerminal } from '../lib/sanitize'
 
 const LOAD_BALANCER_TYPES = {
   APPLICATION: 'APPLICATION',
-  GATEWAY_HTTP: 'GATEWAY_HTTP',
   GLOBAL: 'GLOBAL',
 } as const satisfies Record<LoadBalancerTypeEnum, LoadBalancerTypeEnum>
 

@@ -64,6 +64,7 @@ export interface NamedBuildConfig {
 const ROUTE_HOP_LABELS: Record<string, string> = {
   cloudfront: 'CloudFront',
   alb: 'ALB',
+  'api-gateway': 'API Gateway',
   ecs: 'ECS',
   lambda: 'Lambda',
   'lambda-edge': 'Lambda@Edge',

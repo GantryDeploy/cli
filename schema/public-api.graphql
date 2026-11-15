@@ -1514,7 +1514,6 @@ enum LoadBalancerStatusEnum {
 """Type of load balancer"""
 enum LoadBalancerTypeEnum {
   APPLICATION
-  GATEWAY_HTTP
   GLOBAL
 }
 

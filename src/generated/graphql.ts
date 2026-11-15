@@ -444,6 +444,8 @@ export type DeploymentOptionsInput = {
   force?: boolean | null | undefined;
   /** Go live without running the post-deploy commands. The deployment records the skip. */
   skipPostDeploy?: boolean | null | undefined;
+  /** Deploy without running the services' pre-deploy commands. The deployment records the skip. */
+  skipPreDeploy?: boolean | null | undefined;
 };
 
 /** The phase of a deployment step */
@@ -478,6 +480,46 @@ export type DeploymentStepStatus =
   | 'PENDING'
   | 'PROCESSING'
   | 'QUEUED';
+
+export type EnvVarInput = {
+  key: string;
+  value: string;
+};
+
+/** Where a stored env var applies. Narrower scopes win over broader ones. */
+export type EnvVarScopeEnum =
+  | 'CLOUD_ACCOUNT'
+  | 'ENVIRONMENT'
+  | 'NETWORK'
+  | 'PROJECT'
+  | 'TEAM';
+
+/** Where a value in a service env came from, lowest precedence first. */
+export type EnvVarSourceEnum =
+  | 'BINDING'
+  | 'CLOUD_ACCOUNT'
+  | 'ENVIRONMENT'
+  | 'ENVIRONMENT_YAML'
+  | 'NETWORK'
+  | 'PROJECT'
+  | 'SECRET'
+  | 'SERVICE_OVERRIDE'
+  | 'SERVICE_YAML'
+  | 'TEAM';
+
+export type EnvVarTargetInput = {
+  /** Required for CLOUD_ACCOUNT */
+  cloudAccountId?: string | null | undefined;
+  /** Required for ENVIRONMENT */
+  environmentSlug?: string | null | undefined;
+  /** Required for NETWORK */
+  networkId?: string | null | undefined;
+  /** Required for PROJECT and ENVIRONMENT */
+  projectId?: string | null | undefined;
+  scope: EnvVarScopeEnum;
+  /** ENVIRONMENT only: a service name, for an override that applies to that service only */
+  service?: string | null | undefined;
+};
 
 export type FileManifestItem = {
   /** MD5 hash of the file content */
@@ -515,7 +557,6 @@ export type LoadBalancerStatusEnum =
 /** Type of load balancer */
 export type LoadBalancerTypeEnum =
   | 'APPLICATION'
-  | 'GATEWAY_HTTP'
   | 'GLOBAL';
 
 export type LocalBuildCliOutputsInput = {
@@ -558,6 +599,13 @@ export type PromoteVersionInput = {
   targetEnvironmentId: string;
 };
 
+export type RedeployVersionInput = {
+  /** Environment slug whose live version is redeployed */
+  environment: string;
+  /** Project ID */
+  projectId: string;
+};
+
 export type ResolveProjectInput = {
   environment?: string | null | undefined;
   projectId: string;
@@ -568,6 +616,21 @@ export type ResolveProjectInput = {
 export type SecretKeyValueInput = {
   key: string;
   value: string;
+};
+
+export type SetEnvVarsInput = {
+  /** Required for CLOUD_ACCOUNT */
+  cloudAccountId?: string | null | undefined;
+  /** Required for ENVIRONMENT */
+  environmentSlug?: string | null | undefined;
+  /** Required for NETWORK */
+  networkId?: string | null | undefined;
+  /** Required for PROJECT and ENVIRONMENT */
+  projectId?: string | null | undefined;
+  scope: EnvVarScopeEnum;
+  /** ENVIRONMENT only: a service name, for an override that applies to that service only */
+  service?: string | null | undefined;
+  variables: Array<EnvVarInput>;
 };
 
 export type StartTeardownInput = {
@@ -600,6 +663,21 @@ export type SubmitManifestInput = {
 export type SubnetTypeEnum =
   | 'PRIVATE'
   | 'PUBLIC';
+
+export type UnsetEnvVarsInput = {
+  /** Required for CLOUD_ACCOUNT */
+  cloudAccountId?: string | null | undefined;
+  /** Required for ENVIRONMENT */
+  environmentSlug?: string | null | undefined;
+  keys: Array<string>;
+  /** Required for NETWORK */
+  networkId?: string | null | undefined;
+  /** Required for PROJECT and ENVIRONMENT */
+  projectId?: string | null | undefined;
+  scope: EnvVarScopeEnum;
+  /** ENVIRONMENT only: a service name, for an override that applies to that service only */
+  service?: string | null | undefined;
+};
 
 /** Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly. */
 export type UpdateDatabaseInput = {
@@ -890,6 +968,43 @@ export type CreateCertificateMutationVariables = Exact<{
 
 export type CreateCertificateMutation = { createCertificate: { success: boolean, message: string | null, certificate: { id: string, primaryDomain: string, status: CertificateStatusEnum, createdAt: string } | null } };
 
+export type EnvVarsQueryVariables = Exact<{
+  input: EnvVarTargetInput;
+}>;
+
+
+export type EnvVarsQuery = { envVars: Array<{ key: string, value: string, updatedAt: string }> };
+
+export type SetEnvVarsMutationVariables = Exact<{
+  input: SetEnvVarsInput;
+}>;
+
+
+export type SetEnvVarsMutation = { setEnvVars: { success: boolean, message: string | null, created: Array<string>, updated: Array<string>, removed: Array<string> } };
+
+export type ReplaceEnvVarsMutationVariables = Exact<{
+  input: SetEnvVarsInput;
+}>;
+
+
+export type ReplaceEnvVarsMutation = { replaceEnvVars: { success: boolean, message: string | null, created: Array<string>, updated: Array<string>, removed: Array<string> } };
+
+export type UnsetEnvVarsMutationVariables = Exact<{
+  input: UnsetEnvVarsInput;
+}>;
+
+
+export type UnsetEnvVarsMutation = { unsetEnvVars: { success: boolean, message: string | null, created: Array<string>, updated: Array<string>, removed: Array<string> } };
+
+export type ResolvedServiceEnvQueryVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+}>;
+
+
+export type ResolvedServiceEnvQuery = { resolvedServiceEnv: { versionNumber: number, variables: Array<{ key: string, value: string, source: EnvVarSourceEnum, overrides: Array<EnvVarSourceEnum> }> } };
+
 export type GetEnvironmentsQueryVariables = Exact<{
   projectId?: string | null | undefined;
 }>;
@@ -1036,22 +1151,19 @@ export type PromoteVersionMutationVariables = Exact<{
 
 export type PromoteVersionMutation = { promoteVersion: { success: boolean, message: string | null, promotionId: string | null, newVersionId: string | null, newVersionNumber: number | null, yamlSnapshot: string | null } };
 
-export type StartPromotedDeploymentMutationVariables = Exact<{
-  environment: string;
-  config: Record<string, unknown>;
-  versionId?: string | null | undefined;
-  options?: DeploymentOptionsInput | null | undefined;
-}>;
-
-
-export type StartPromotedDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null } };
-
 export type GetPromoteTargetEnvironmentsQueryVariables = Exact<{
   projectId: string;
 }>;
 
 
 export type GetPromoteTargetEnvironmentsQuery = { environments: Array<{ id: string, name: string, slug: string }> };
+
+export type RedeployVersionMutationVariables = Exact<{
+  input: RedeployVersionInput;
+}>;
+
+
+export type RedeployVersionMutation = { redeployVersion: { success: boolean, message: string | null, newVersionId: string | null, newVersionNumber: number | null, yamlSnapshot: string | null } };
 
 export type TriggerRerouteMutationVariables = Exact<{
   config: Record<string, unknown>;
@@ -1216,6 +1328,16 @@ export type GetBastionNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
 export type GetBastionNetworksQuery = { networks: Array<{ id: string, name: string, slug: string, region: string, cloudAccountId: string, stackStatus: string | null }> };
 
+export type StartVersionDeploymentMutationVariables = Exact<{
+  environment: string;
+  config: Record<string, unknown>;
+  versionId?: string | null | undefined;
+  options?: DeploymentOptionsInput | null | undefined;
+}>;
+
+
+export type StartVersionDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null } };
+
 export type ClaimStepMutationVariables = Exact<{
   stepId: string;
 }>;
@@ -1272,7 +1394,7 @@ export type GetEnvironmentChoicesQueryVariables = Exact<{
 }>;
 
 
-export type GetEnvironmentChoicesQuery = { environments: Array<{ id: string, name: string, projectId: string, isProduction: boolean }> };
+export type GetEnvironmentChoicesQuery = { environments: Array<{ id: string, name: string, slug: string, projectId: string, isProduction: boolean }> };
 
 export type GetSecretChoicesQueryVariables = Exact<{
   cloudAccountId?: string | null | undefined;

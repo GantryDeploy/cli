@@ -7,6 +7,10 @@ describe('formatRouteChain', () => {
     expect(formatRouteChain(['cloudfront', 'alb', 'lambda'], '-')).toBe('CloudFront → ALB → Lambda')
   })
 
+  it('labels a gateway hop', () => {
+    expect(formatRouteChain(['api-gateway', 'lambda'], '-')).toBe('API Gateway → Lambda')
+  })
+
   it('passes unknown hops through verbatim', () => {
     expect(formatRouteChain(['cloudflare', 'fly-machine'], '-')).toBe('Cloudflare → fly-machine')
   })

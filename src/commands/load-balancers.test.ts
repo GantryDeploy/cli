@@ -317,10 +317,12 @@ describe('load-balancers command', () => {
     })
 
     it('refuses a type the cloud does not offer', async () => {
-      graphqlRequest.mockResolvedValueOnce(lbTypes)
+      graphqlRequest.mockResolvedValueOnce({
+        loadBalancerTypes: lbTypes.loadBalancerTypes.filter((t) => t.type === 'APPLICATION'),
+      })
 
       await expect(
-        run(['lb', 'create', '--cloud', 'cloud_1', '--name', 'Gateway', '--type', 'GATEWAY_HTTP'])
+        run(['lb', 'create', '--cloud', 'cloud_1', '--name', 'Global', '--type', 'GLOBAL'])
       ).rejects.toThrow(ExitError)
 
       expect(printedErrors()).toContain('That load balancer type is not offered on this cloud.')

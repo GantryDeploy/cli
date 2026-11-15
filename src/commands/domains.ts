@@ -11,7 +11,12 @@ import type {
   GetDomainsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { foreignAwsFlagsMessage, isAws, unsupportedCloud, type ResolvedCloud } from '../lib/clouds'
+import {
+  foreignAwsFlagsMessage,
+  isAws,
+  invalidConfiguration,
+  type ResolvedCloud,
+} from '../lib/clouds'
 import { awsCertificateRegions, awsOption } from '../lib/clouds/aws'
 import {
   isValidCertificateDomain,
@@ -88,7 +93,7 @@ async function certificateCloudSettings(
   awsRegions: string | undefined
 ): Promise<Pick<CreateCertificateInput, 'aws'>> {
   if (!isAws(cloud.provider)) {
-    printError(unsupportedCloud('certificates'))
+    printError(invalidConfiguration('certificate'))
     process.exit(1)
   }
   const regions = await awsCertificateRegions(awsRegions, await fetchRegions(cloud.provider))

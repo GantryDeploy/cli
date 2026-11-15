@@ -11,7 +11,7 @@ import type {
   GetFilesystemsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import { foreignAwsFlagsMessage, isAws, invalidConfiguration } from '../lib/clouds'
 import { awsFilesystemSettings, awsOption, type AwsFilesystemFlags } from '../lib/clouds/aws'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
@@ -131,7 +131,7 @@ export function registerFilesystemsCommand(program: Command): void {
           process.exit(1)
         }
         if (!isAws(cloud.provider)) {
-          printError(unsupportedCloud('filesystems'))
+          printError(invalidConfiguration('filesystem'))
           process.exit(1)
         }
         const cloudAccountId = cloud.id

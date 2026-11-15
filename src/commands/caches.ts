@@ -24,7 +24,7 @@ import {
   selectBastion,
 } from '../lib/bastion-prompts'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import { foreignAwsFlagsMessage, isAws, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import {
   awsCacheSettings,
   awsCatalogFamily,
@@ -199,7 +199,7 @@ export function registerCachesCommand(program: Command): void {
           { provider }
         )
         if (data.cacheTypes.length === 0) {
-          console.log(unsupportedCloud('caches'))
+          console.log(noTypesForCloud('cache'))
           return
         }
 
@@ -352,7 +352,7 @@ export function registerCachesCommand(program: Command): void {
             GetCacheTypesQueryVariables
           >(CACHE_TYPES_QUERY, { provider: cloud.provider })
           if (cacheTypes.length === 0 || !isAws(cloud.provider)) {
-            printError(unsupportedCloud('caches'))
+            printError(invalidConfiguration('cache'))
             process.exit(1)
           }
 

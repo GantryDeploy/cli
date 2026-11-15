@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { foreignAwsFlagsMessage, isAws, toCloudProvider, unsupportedCloud } from '.'
+import {
+  foreignAwsFlagsMessage,
+  invalidConfiguration,
+  isAws,
+  noTypesForCloud,
+  toCloudProvider,
+} from '.'
 
 describe('clouds', () => {
   it.each([
@@ -25,8 +31,12 @@ describe('clouds', () => {
     expect(isAws(provider)).toBe(expected)
   })
 
-  it('words the unsupported-cloud message the same everywhere', () => {
-    expect(unsupportedCloud('caches')).toBe("This cloud doesn't support caches.")
+  it('words an invalid configuration the same everywhere', () => {
+    expect(invalidConfiguration('cache')).toBe('The cache configuration is not valid.')
+  })
+
+  it('says when a cloud has no types of a resource', () => {
+    expect(noTypesForCloud('load balancer')).toBe('This cloud has no load balancer types.')
   })
 
   describe('foreignAwsFlagsMessage', () => {

@@ -217,7 +217,7 @@ type SourceCredentials = ObjectUploadSource['aws']
 
 function requireSourceCredentials(credentials: SourceCredentials): NonNullable<SourceCredentials> {
   if (!credentials) {
-    throw new Error("This cloud doesn't support copying builds between cloud accounts.")
+    throw new Error('The build copy configuration is not valid.')
   }
   return credentials
 }
@@ -601,7 +601,7 @@ async function executeArtifactUpload(
 ): Promise<ArtifactUploadCliOutputsInput> {
   const upload = ARTIFACT_UPLOADERS[inputs.provider]
   if (!upload) {
-    throw new Error("This cloud doesn't support artifact uploads.")
+    throw new Error('The artifact upload configuration is not valid.')
   }
 
   let artifact: Buffer

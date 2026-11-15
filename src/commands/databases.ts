@@ -37,7 +37,7 @@ import {
   selectBastion,
 } from '../lib/bastion-prompts'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import { foreignAwsFlagsMessage, isAws, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import {
   awsCatalogFamily,
   awsDatabaseCreateSettings,
@@ -399,7 +399,7 @@ export function registerDatabasesCommand(program: Command): void {
           { provider }
         )
         if (data.databaseTypes.length === 0) {
-          console.log(unsupportedCloud('databases'))
+          console.log(noTypesForCloud('database'))
           return
         }
 
@@ -558,7 +558,7 @@ export function registerDatabasesCommand(program: Command): void {
             GetDatabaseTypesQueryVariables
           >(DATABASE_TYPES_QUERY, { provider: cloud.provider })
           if (databaseTypes.length === 0 || !isAws(cloud.provider)) {
-            printError(unsupportedCloud('databases'))
+            printError(invalidConfiguration('database'))
             process.exit(1)
           }
 

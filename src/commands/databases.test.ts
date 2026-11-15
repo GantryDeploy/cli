@@ -195,7 +195,7 @@ describe('databases command', () => {
 
       await run(['engines', '--cloud', 'cloud-1'])
 
-      expect(logLines()).toEqual(["This cloud doesn't support databases."])
+      expect(logLines()).toEqual(['This cloud has no database types.'])
     })
 
     it('exits non-zero when the API fails', async () => {
@@ -637,7 +637,7 @@ describe('databases command', () => {
 
       await expect(run([...createArgs, '--engine', 'mysql'])).rejects.toThrow('process.exit(1)')
 
-      expect(errorOutput()).toContain("This cloud doesn't support databases.")
+      expect(errorOutput()).toContain('The database configuration is not valid.')
       expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
 

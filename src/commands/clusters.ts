@@ -10,7 +10,7 @@ import type {
   GetClusterTypesQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import { foreignAwsFlagsMessage, isAws, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import { awsClusterSettings, awsOption } from '../lib/clouds/aws'
 import { resolveCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
@@ -114,7 +114,7 @@ export function registerClustersCommand(program: Command): void {
           { provider }
         )
         if (data.clusterTypes.length === 0) {
-          console.log(unsupportedCloud('clusters'))
+          console.log(noTypesForCloud('cluster'))
           return
         }
 
@@ -170,7 +170,7 @@ export function registerClustersCommand(program: Command): void {
           >(CLUSTER_TYPES_QUERY, { provider: cloud.provider })
           const onlyType = clusterTypes.at(0)
           if (!onlyType || !isAws(cloud.provider)) {
-            printError(unsupportedCloud('clusters'))
+            printError(invalidConfiguration('cluster'))
             process.exit(1)
           }
 

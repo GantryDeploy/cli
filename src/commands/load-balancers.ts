@@ -11,7 +11,7 @@ import type {
   LoadBalancerTypeEnum,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { foreignAwsFlagsMessage, unsupportedCloud } from '../lib/clouds'
+import { foreignAwsFlagsMessage, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import { awsOption } from '../lib/clouds/aws'
 import { resolveCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
@@ -131,7 +131,7 @@ export function registerLoadBalancersCommand(program: Command): void {
           GetLoadBalancerTypesQueryVariables
         >(LOAD_BALANCER_TYPES_QUERY, { provider })
         if (data.loadBalancerTypes.length === 0) {
-          console.log(unsupportedCloud('load balancers'))
+          console.log(noTypesForCloud('load balancer'))
           return
         }
 
@@ -193,7 +193,7 @@ export function registerLoadBalancersCommand(program: Command): void {
             GetLoadBalancerTypesQueryVariables
           >(LOAD_BALANCER_TYPES_QUERY, { provider: cloud.provider })
           if (loadBalancerTypes.length === 0) {
-            printError(unsupportedCloud('load balancers'))
+            printError(invalidConfiguration('load balancer'))
             process.exit(1)
           }
 

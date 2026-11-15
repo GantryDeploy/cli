@@ -1392,7 +1392,7 @@ describe('artifact-upload task flow', () => {
   it('refuses a cloud the CLI cannot upload to yet', async () => {
     await expect(
       executeCliTask(artifactUpload({ provider: 'gcp' }), context({ stagingDir: root }))
-    ).rejects.toThrow("This cloud doesn't support artifact uploads yet.")
+    ).rejects.toThrow("This cloud doesn't support artifact uploads.")
     expect(s3.send).not.toHaveBeenCalled()
   })
 
@@ -1444,7 +1444,7 @@ describe('artifact-upload task flow', () => {
             cwd: '/srv/shop',
           }
         )
-      ).rejects.toThrow("This cloud doesn't support copying builds between cloud accounts yet.")
+      ).rejects.toThrow("This cloud doesn't support copying builds between cloud accounts.")
       expect(s3.send).not.toHaveBeenCalled()
     })
 

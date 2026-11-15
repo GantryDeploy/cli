@@ -217,7 +217,7 @@ type SourceCredentials = ObjectUploadSource['aws']
 
 function requireSourceCredentials(credentials: SourceCredentials): NonNullable<SourceCredentials> {
   if (!credentials) {
-    throw new Error("This cloud doesn't support copying builds between cloud accounts yet.")
+    throw new Error("This cloud doesn't support copying builds between cloud accounts.")
   }
   return credentials
 }
@@ -601,7 +601,7 @@ async function executeArtifactUpload(
 ): Promise<ArtifactUploadCliOutputsInput> {
   const upload = ARTIFACT_UPLOADERS[inputs.provider]
   if (!upload) {
-    throw new Error("This cloud doesn't support artifact uploads yet.")
+    throw new Error("This cloud doesn't support artifact uploads.")
   }
 
   let artifact: Buffer

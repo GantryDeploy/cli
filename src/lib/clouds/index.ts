@@ -28,7 +28,7 @@ export function toCloudProvider(value: string): CloudProviderEnum {
 }
 
 export function unsupportedCloud(feature: string): string {
-  return `This cloud doesn't support ${feature} yet.`
+  return `This cloud doesn't support ${feature}.`
 }
 
 /** Resource rows report their cloud in lowercase (`aws`), cloud accounts as the enum (`AWS`). */

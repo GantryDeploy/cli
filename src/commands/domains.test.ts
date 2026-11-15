@@ -553,7 +553,7 @@ describe('domains command', () => {
 
       await expect(run([...certFlags, '--cloud', 'cloud_cf_1'])).rejects.toThrow(ExitError)
 
-      expect(printedErrors()).toContain("This cloud doesn't support certificates yet.")
+      expect(printedErrors()).toContain("This cloud doesn't support certificates.")
       expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
 

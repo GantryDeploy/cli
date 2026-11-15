@@ -302,7 +302,7 @@ describe('caches command', () => {
         'process.exit(1)'
       )
 
-      expect(errorOutput()).toContain("This cloud doesn't support caches yet.")
+      expect(errorOutput()).toContain("This cloud doesn't support caches.")
       expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
 
@@ -747,7 +747,7 @@ describe('caches command', () => {
 
       await run(['engines', '--cloud', 'cloud-1'])
 
-      expect(logLines()).toEqual(["This cloud doesn't support caches yet."])
+      expect(logLines()).toEqual(["This cloud doesn't support caches."])
     })
 
     it('exits non-zero when the API fails', async () => {

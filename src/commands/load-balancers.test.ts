@@ -176,7 +176,7 @@ describe('load-balancers command', () => {
 
       await run(['lb', 'types', '--cloud', 'ca_9mx4'])
 
-      expect(printed()).toContain("This cloud doesn't support load balancers yet.")
+      expect(printed()).toContain("This cloud doesn't support load balancers.")
     })
 
     it('prints the API error and exits non-zero', async () => {
@@ -335,7 +335,7 @@ describe('load-balancers command', () => {
 
       await expect(run(['lb', 'create', '--cloud', 'ca_9mx4'])).rejects.toThrow(ExitError)
 
-      expect(printedErrors()).toContain("This cloud doesn't support load balancers yet.")
+      expect(printedErrors()).toContain("This cloud doesn't support load balancers.")
     })
 
     it('refuses AWS flags on another cloud', async () => {

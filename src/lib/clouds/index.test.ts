@@ -26,7 +26,7 @@ describe('clouds', () => {
   })
 
   it('words the unsupported-cloud message the same everywhere', () => {
-    expect(unsupportedCloud('caches')).toBe("This cloud doesn't support caches yet.")
+    expect(unsupportedCloud('caches')).toBe("This cloud doesn't support caches.")
   })
 
   describe('foreignAwsFlagsMessage', () => {

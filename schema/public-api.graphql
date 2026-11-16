@@ -315,7 +315,7 @@ type AwsUploadCredentials {
 }
 
 type Bastion {
-  """IPv4 CIDR blocks allowed to SSH in. Empty for a private bastion."""
+  """CIDR blocks allowed to SSH in. Empty for a private bastion."""
   allowedCidrs: [String!]!
   cloudAccountId: String!
   createdAt: String!
@@ -810,7 +810,7 @@ input ContainerPushCliOutputsInput {
 
 input CreateBastionInput {
   """
-  IPv4 CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address.
+  CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address.
   """
   allowedCidrs: [String!]
 

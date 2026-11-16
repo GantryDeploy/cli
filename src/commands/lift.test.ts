@@ -427,6 +427,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('FailCliStep')[0][1]).toEqual({ stepId: 'step_1', error: 'upload refused' })
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
     expect(calls('CompleteCliStep')).toHaveLength(0)
     expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(mocks.printError).toHaveBeenCalledWith(
@@ -923,6 +924,83 @@ describe('lift command', () => {
     expect(calls('CompleteCliStep')).toHaveLength(1)
     expect(mocks.printError).not.toHaveBeenCalled()
     expect(process.exitCode).toBeUndefined()
+  })
+
+  const STILL_CLAIMED = [deployment({ steps: [{ ...PENDING_STEP, cliStatus: 'CLAIMED' }] })]
+
+  it('fails the service with the task error and cancels the deployment when the step failure cannot be recorded', async () => {
+    mocks.executeCliTask.mockRejectedValue(new Error('docker push denied: unauthorized'))
+    handlers.FailCliStep = () => {
+      throw new GantryApiError('Gantry API is temporarily unavailable. (HTTP 503)', undefined, 503)
+    }
+    sequence([], [deployment({ steps: [PENDING_STEP] })], STILL_CLAIMED)
+
+    await lift(['production'])
+
+    expect(calls('FailCliStep')[0][1]).toEqual({
+      stepId: 'step_1',
+      error: 'docker push denied: unauthorized',
+    })
+    expect(calls('CancelLiftDeployment')[0][1]).toEqual({ id: 'dep_1' })
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Deployment failed: 1 of 1 service did not succeed'
+    )
+    expect(process.exitCode).toBe(1)
+  })
+
+  it.each([
+    [
+      'is rejected',
+      () => ({ failCliStep: { success: false, message: 'Step is not claimed by a CLI.' } }),
+    ],
+    [
+      'fails',
+      () => {
+        throw new Error('fetch failed')
+      },
+    ],
+  ])(
+    'cancels the deployment when a claim request fails and the step failure %s',
+    async (_case, failCliStep) => {
+      handlers.ClaimStep = () => {
+        throw new GantryApiError(
+          'Gantry API encountered an internal error. (HTTP 500)',
+          undefined,
+          500
+        )
+      }
+      handlers.FailCliStep = failCliStep
+      sequence([], [deployment({ steps: [PENDING_STEP] })], STILL_CLAIMED)
+
+      await lift(['production'])
+
+      expect(calls('FailCliStep')[0][1]).toEqual({
+        stepId: 'step_1',
+        error: 'The CLI could not claim the step.',
+      })
+      expect(calls('CancelLiftDeployment')[0][1]).toEqual({ id: 'dep_1' })
+      expect(mocks.executeCliTask).not.toHaveBeenCalled()
+      expect(process.exitCode).toBe(1)
+    }
+  )
+
+  it('fails the step when the API does not accept its result', async () => {
+    handlers.CompleteCliStep = () => ({
+      completeCliStep: { success: false, message: 'The step outputs are invalid.' },
+    })
+    sequence(
+      [],
+      [deployment({ steps: [PENDING_STEP] })],
+      [deployment({ status: 'FAILED', lastMessage: 'There was an error while uploading.' })]
+    )
+
+    await lift(['production'])
+
+    expect(calls('FailCliStep')[0][1]).toEqual({
+      stepId: 'step_1',
+      error: 'The step outputs are invalid.',
+    })
+    expect(process.exitCode).toBe(1)
   })
 
   function twoServices() {

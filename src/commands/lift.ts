@@ -6,8 +6,6 @@ import type { Command } from 'commander'
 import { Listr } from 'listr2'
 
 import type {
-  CancelLiftDeploymentMutation,
-  CancelLiftDeploymentMutationVariables,
   CreateVersionMutation,
   CreateVersionMutationVariables,
   DeploymentsByVersionQuery,
@@ -25,6 +23,7 @@ import {
 } from '../lib/deploy-command-options'
 import type { DeployCommandOptions } from '../lib/deploy-command-options'
 import {
+  cancelDeployment,
   DEPLOYMENTS_BY_VERSION_QUERY,
   POLL_INTERVAL_MS,
   serviceDeploymentNames,
@@ -108,21 +107,6 @@ const START_DEPLOYMENT_MUTATION = /* GraphQL */ `
         projectId
         serviceName
         environmentName
-      }
-    }
-  }
-`
-
-const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
-  mutation CancelLiftDeployment($id: String!) {
-    cancelDeployment(id: $id) {
-      success
-      message
-      deployment {
-        id
-        status
-        lastMessage
-        updatedAt
       }
     }
   }
@@ -327,14 +311,7 @@ export function registerLiftCommand(program: Command): void {
         console.log('\nCancelling deployment...')
 
         for (const id of deploymentIds) {
-          try {
-            await graphqlRequest<
-              CancelLiftDeploymentMutation,
-              CancelLiftDeploymentMutationVariables
-            >(CANCEL_DEPLOYMENT_MUTATION, { id })
-          } catch {
-            // Best effort: keep cancelling the rest.
-          }
+          await cancelDeployment(id)
         }
       }
 

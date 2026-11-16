@@ -1076,13 +1076,6 @@ export type StartLiftDeploymentMutationVariables = Exact<{
 
 export type StartLiftDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null, deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, serviceName: string | null, environmentName: string | null } | null } };
 
-export type CancelLiftDeploymentMutationVariables = Exact<{
-  id: string;
-}>;
-
-
-export type CancelLiftDeploymentMutation = { cancelDeployment: { success: boolean, message: string | null, deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, updatedAt: string } | null } };
-
 export type GetLoadBalancersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1365,6 +1358,13 @@ export type ClaimStepMutation = { claimStep: { success: boolean, message: string
         | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, architecture: string | null, buildArgs: Array<{ name: string, value: string }> | null }
         | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null, source: { bucketName: string, region: string, keyPrefix: string, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null } | null }
        | null } | null } };
+
+export type CancelLiftDeploymentMutationVariables = Exact<{
+  id: string;
+}>;
+
+
+export type CancelLiftDeploymentMutation = { cancelDeployment: { success: boolean, message: string | null } };
 
 export type CompleteCliStepMutationVariables = Exact<{
   stepId: string;

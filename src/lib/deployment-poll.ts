@@ -1,4 +1,6 @@
 import type {
+  CancelLiftDeploymentMutation,
+  CancelLiftDeploymentMutationVariables,
   ClaimStepMutation,
   ClaimStepMutationVariables,
   CompleteCliStepMutation,
@@ -106,6 +108,15 @@ const CLAIM_STEP_MUTATION = /* GraphQL */ `
   }
 `
 
+const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
+  mutation CancelLiftDeployment($id: String!) {
+    cancelDeployment(id: $id) {
+      success
+      message
+    }
+  }
+`
+
 const COMPLETE_CLI_STEP_MUTATION = /* GraphQL */ `
   mutation CompleteCliStep(
     $stepId: String!
@@ -202,18 +213,58 @@ export function getPhaseDisplay(deployment: VersionDeployment): string {
   return deployment.status.toUpperCase()
 }
 
+/**
+ * Tells the server this CLI gave up on a step, cancelling the deployment when the step failure
+ * cannot be recorded. Never throws.
+ *
+ * @returns true when the step failure was recorded, so the deployment reports FAILED on its own.
+ */
+async function abandonStep(stepId: string, deploymentId: string, error: string): Promise<boolean> {
+  try {
+    const { failCliStep } = await graphqlRequest<FailCliStepMutation, FailCliStepMutationVariables>(
+      FAIL_CLI_STEP_MUTATION,
+      { stepId, error }
+    )
+    if (failCliStep.success) return true
+  } catch {
+    // Cancelling the deployment below still releases it.
+  }
+  await cancelDeployment(deploymentId)
+  return false
+}
+
+/** Best effort. Never throws. */
+export async function cancelDeployment(deploymentId: string): Promise<void> {
+  try {
+    await graphqlRequest<CancelLiftDeploymentMutation, CancelLiftDeploymentMutationVariables>(
+      CANCEL_DEPLOYMENT_MUTATION,
+      { id: deploymentId }
+    )
+  } catch {
+    // Nothing further the CLI can do.
+  }
+}
+
 async function handleCliStep(
   step: VersionDeploymentStep,
+  deploymentId: string,
   targetLabel: string,
   taskContext: TaskContext,
   updateTitle: (title: string) => void
 ): Promise<{ refusal: string } | null> {
   updateTitle(`${targetLabel}: Claiming step ${String(step.cliTask)}...`)
 
-  const claimResult = await graphqlRequest<ClaimStepMutation, ClaimStepMutationVariables>(
-    CLAIM_STEP_MUTATION,
-    { stepId: step.id }
-  )
+  let claimResult: ClaimStepMutation
+  try {
+    claimResult = await graphqlRequest<ClaimStepMutation, ClaimStepMutationVariables>(
+      CLAIM_STEP_MUTATION,
+      { stepId: step.id }
+    )
+  } catch (error) {
+    // The claim may have committed before the request failed.
+    if (await abandonStep(step.id, deploymentId, 'The CLI could not claim the step.')) return null
+    throw error
+  }
 
   const claimedStep = claimResult.claimStep.step
   if (!claimResult.claimStep.success || !claimedStep) {
@@ -234,22 +285,20 @@ async function handleCliStep(
 
     updateTitle(`${targetLabel}: Completing ${String(claimedStep.cliTask)}...`)
 
-    await graphqlRequest<CompleteCliStepMutation, CompleteCliStepMutationVariables>(
-      COMPLETE_CLI_STEP_MUTATION,
-      {
-        stepId: claimedStep.id,
-        outputs,
-        fileResults: fileResults ?? null,
-      }
-    )
+    const { completeCliStep } = await graphqlRequest<
+      CompleteCliStepMutation,
+      CompleteCliStepMutationVariables
+    >(COMPLETE_CLI_STEP_MUTATION, {
+      stepId: claimedStep.id,
+      outputs,
+      fileResults: fileResults ?? null,
+    })
+    if (!completeCliStep.success) {
+      throw new Error(completeCliStep.message ?? 'The step result was not accepted.')
+    }
   } catch (taskError) {
     const errorMessage = taskError instanceof Error ? taskError.message : 'Unknown error'
-
-    await graphqlRequest<FailCliStepMutation, FailCliStepMutationVariables>(
-      FAIL_CLI_STEP_MUTATION,
-      { stepId: step.id, error: redact(errorMessage) }
-    )
-
+    if (await abandonStep(claimedStep.id, deploymentId, redact(errorMessage))) return null
     throw taskError
   }
   return null
@@ -337,13 +386,17 @@ async function pollAllDeployments(
             }
 
             runningSteps.set(id, pendingStep.id)
-            void handleCliStep(pendingStep, targetLabel, taskContext, updateTitle)
+            void handleCliStep(pendingStep, id, targetLabel, taskContext, updateTitle)
               .then(
                 (claim) => {
                   if (claim) refusedClaims.set(pendingStep.id, claim.refusal)
                 },
-                () => {
-                  // The failure surfaces as a FAILED deployment on a later poll.
+                (error: unknown) => {
+                  if (completedDeployments.has(id)) return
+                  const reason = formatApiError(error)
+                  updateTitle(`${targetLabel}: Failed - ${reason}`)
+                  completedDeployments.add(id)
+                  rejecters.get(id)?.(new Error(`${targetLabel}: ${reason}`))
                 }
               )
               .finally(() => {

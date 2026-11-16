@@ -5,6 +5,7 @@ import { Command } from 'commander'
 import { registerActivationCommands } from './commands/activation'
 import { registerBastionsCommand } from './commands/bastions'
 import { registerCachesCommand } from './commands/caches'
+import { registerCleanupCommand } from './commands/cleanup'
 import { registerCloudsCommand } from './commands/clouds'
 import { registerClustersCommand } from './commands/clusters'
 import { registerDatabasesCommand } from './commands/databases'
@@ -77,6 +78,7 @@ registerLogsCommand(program)
 registerDatabasesCommand(program)
 registerFilesystemsCommand(program)
 registerLiftCommand(program)
+registerCleanupCommand(program)
 registerPreviewCommand(program)
 registerResolveCommand(program)
 registerValidateCommand(program)

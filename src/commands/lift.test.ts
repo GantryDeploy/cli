@@ -229,9 +229,12 @@ describe('lift command', () => {
         ],
       }),
       CancelLiftDeployment: () => ({ cancelDeployment: { success: true } }),
+      GetCleanupItems: () => ({ cleanupItems: [] }),
     }
     mocks.graphqlRequest.mockImplementation((query: string, variables: Record<string, unknown>) => {
-      const operation = Object.keys(handlers).find((name) => query.includes(`${name}(`))
+      const operation = Object.keys(handlers).find(
+        (name) => query.includes(`${name}(`) || query.includes(`${name} {`)
+      )
       if (!operation) throw new Error(`Unexpected query: ${query}`)
       return Promise.resolve().then(() => handlers[operation](variables))
     })
@@ -287,6 +290,46 @@ describe('lift command', () => {
     expect(process.exitCode).toBeUndefined()
     expect(mocks.removeStagingDir).toHaveBeenCalledWith(workingDir)
     expect(process.listeners('SIGINT')).not.toContain(sigintHandler())
+  })
+
+  it('ends by pointing at gantry cleanup when previous routing is still running', async () => {
+    handlers.GetCleanupItems = () => ({
+      cleanupItems: [
+        {
+          id: 'e7kq2m',
+          kind: 'PREVIOUS_ROUTING',
+          description: 'Previous routing for shop.example.com',
+          readyToRemove: false,
+          hostnames: [
+            {
+              hostname: 'shop.example.com',
+              dnsMoved: false,
+              dnsTarget: 'd-4f7a2b9c1e.execute-api.us-east-2.amazonaws.com',
+            },
+          ],
+        },
+      ],
+    })
+
+    await lift(['production', '--force'])
+
+    const hint = String(logSpy.mock.calls.at(-1)?.[0])
+    expect(hint).toContain('Previous routing for shop.example.com')
+    expect(hint).toContain('Run "gantry cleanup" once DNS has moved.')
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it('still succeeds when the cleanup check fails', async () => {
+    handlers.GetCleanupItems = () => {
+      throw new Error('network unreachable')
+    }
+
+    await lift(['production', '--force'])
+
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Could not check for infrastructure to clean up: network unreachable'
+    )
+    expect(process.exitCode).toBeUndefined()
   })
 
   it('runs setup commands, then builds named images in dependency order', async () => {

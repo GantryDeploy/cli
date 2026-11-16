@@ -231,6 +231,10 @@ export type CertificateStatusEnum =
   | 'PENDING'
   | 'VALIDATING';
 
+/** What a cleanup item is */
+export type CleanupKindEnum =
+  | 'PREVIOUS_ROUTING';
+
 /** The status of CLI execution for a step */
 export type CliStatus =
   | 'CLAIMED'
@@ -792,6 +796,18 @@ export type GetCacheTunnelBastionQueryVariables = Exact<{
 
 
 export type GetCacheTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
+
+export type GetCleanupItemsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetCleanupItemsQuery = { cleanupItems: Array<{ id: string, kind: CleanupKindEnum, description: string, readyToRemove: boolean, hostnames: Array<{ hostname: string, dnsMoved: boolean, dnsTarget: string | null }> }> };
+
+export type CleanUpMutationVariables = Exact<{
+  ids: Array<string | number> | string | number;
+}>;
+
+
+export type CleanUpMutation = { cleanUp: { success: boolean, message: string | null, removed: Array<string> } };
 
 export type GetCloudsQueryVariables = Exact<{ [key: string]: never; }>;
 

@@ -581,6 +581,39 @@ type ClaimStepResult {
   success: Boolean!
 }
 
+type CleanupHostname {
+  """Whether public DNS for the hostname already points at its new routing"""
+  dnsMoved: Boolean!
+
+  """
+  The record value the hostname must point at, when Gantry has one for it
+  """
+  dnsTarget: String
+  hostname: String!
+}
+
+"""Infrastructure that no live version uses and can be removed"""
+type CleanupItem {
+  description: String!
+  hostnames: [CleanupHostname!]!
+  id: ID!
+  kind: CleanupKindEnum!
+
+  """False while traffic may still reach this item"""
+  readyToRemove: Boolean!
+}
+
+"""What a cleanup item is"""
+enum CleanupKindEnum {
+  PREVIOUS_ROUTING
+}
+
+type CleanupResult {
+  message: String
+  removed: [ID!]!
+  success: Boolean!
+}
+
 """Inputs the CLI needs to run a step, shaped by the step cliTask"""
 union CliInputs = ArtifactUploadCliInputs | ContainerPushCliInputs | LocalBuildCliInputs | ObjectUploadCliInputs
 
@@ -1585,6 +1618,7 @@ type Mutation {
   ): DatabaseMutationResult!
   cancelDeployment(id: String!, team: String): CancelDeploymentResult!
   claimStep(stepId: String!, team: String): ClaimStepResult!
+  cleanUp(ids: [ID!]!, team: String): CleanupResult!
   completeCliStep(fileResults: [FileUploadResultInput!], outputs: CliTaskOutputsInput!, stepId: String!, team: String): CompleteCliStepResult!
   createBastion(input: CreateBastionInput!, team: String): BastionMutationResult!
   createCache(input: CreateCacheInput!, team: String): CacheMutationResult!
@@ -1831,6 +1865,9 @@ type Query {
   cacheTypes(provider: CloudProviderEnum!): [CacheTypeInfo!]!
   caches(team: String): [Cache!]!
   certificates(cloudAccountId: String, domainId: String, team: String): [Certificate!]!
+
+  """Infrastructure no live version uses, waiting for the team to remove it"""
+  cleanupItems(team: String): [CleanupItem!]!
   cloudAccountResources(cloudAccountId: String!, groupBy: ResourceGroupingEnum = PROJECT, team: String): CloudAccountResourcesResult!
   cloudRegions(provider: CloudProviderEnum!): [CloudRegion!]!
   clouds(team: String): [CloudAccount!]!

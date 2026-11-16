@@ -51,6 +51,18 @@ import {
 } from '../lib/tasks'
 import type { NamedBuildConfig } from '../types'
 
+import { cleanupHint, fetchCleanupItems } from './cleanup'
+
+/** Tell the user about infrastructure waiting for `gantry cleanup`. The deploy already succeeded. */
+async function printCleanupHint(): Promise<void> {
+  try {
+    const lines = cleanupHint(await fetchCleanupItems())
+    if (lines.length > 0) console.log(`\n${lines.join('\n')}`)
+  } catch (error) {
+    printError(`Could not check for infrastructure to clean up: ${formatApiError(error)}`)
+  }
+}
+
 const CREATE_VERSION_MUTATION = /* GraphQL */ `
   mutation CreateVersion($config: JSON!, $environment: String, $gitRef: String) {
     createVersion(input: { config: $config, environment: $environment, gitRef: $gitRef }) {
@@ -738,6 +750,7 @@ export function registerLiftCommand(program: Command): void {
         })
 
         printRoutingSummary(finalCtx)
+        await printCleanupHint()
 
         if (finalCtx.failedServices && finalCtx.failedServices.length > 0) {
           const n = finalCtx.failedServices.length

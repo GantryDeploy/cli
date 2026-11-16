@@ -382,6 +382,7 @@ async function pollAllDeployments(
               updateTitle(`${targetLabel}: Failed - ${refusal}`)
               completedDeployments.add(id)
               rejecters.get(id)?.(new Error(`${targetLabel}: ${refusal}`))
+              void cancelDeployment(id)
               continue
             }
 

@@ -454,6 +454,7 @@ describe('lift command', () => {
 
     expect(calls('ClaimStep')).toHaveLength(1)
     expect(mocks.executeCliTask).not.toHaveBeenCalled()
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
     expect(mocks.printError).not.toHaveBeenCalled()
     expect(process.exitCode).toBeUndefined()
   })
@@ -472,6 +473,9 @@ describe('lift command', () => {
 
       expect(calls('ClaimStep')).toHaveLength(1)
       expect(mocks.executeCliTask).not.toHaveBeenCalled()
+      expect(calls('CancelLiftDeployment').map((call) => call[1] as unknown)).toEqual([
+        { id: 'dep_1' },
+      ])
       expect(mocks.printError).toHaveBeenCalledWith(
         'Deployment failed: 1 of 1 service did not succeed'
       )

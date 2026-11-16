@@ -50,6 +50,7 @@ function bastion(overrides: Partial<Omit<Bastion, 'status'>> & { status?: string
     status: 'active',
     networkId: 'n1',
     cloudAccountId: 'ca_1',
+    publicAccess: true,
     publicIp: '203.0.113.10',
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -157,16 +158,18 @@ describe('bastion prompts', () => {
   })
 
   describe('selectBastion', () => {
-    it('lists bastions with their status and public IP, and returns the chosen one', async () => {
-      const noIp = bastion({ slug: 'inner', name: 'Inner', publicIp: null })
-      respond({ bastions: [bastion(), noIp] })
+    it('lists bastions with their status and how they are reached, and returns the chosen one', async () => {
+      const inner = bastion({ slug: 'inner', name: 'Inner', publicAccess: false, publicIp: null })
+      const pending = bastion({ slug: 'new', name: 'New', publicIp: null })
+      respond({ bastions: [bastion(), inner, pending] })
       vi.mocked(select).mockResolvedValueOnce('inner')
 
-      await expect(selectBastion()).resolves.toEqual(noIp)
+      await expect(selectBastion()).resolves.toEqual(inner)
       const { choices } = vi.mocked(select).mock.calls[0][0] as { choices: readonly unknown[] }
       expect(choices).toEqual([
         { name: 'Edge (active) — 203.0.113.10', value: 'edge' },
-        { name: 'Inner (active)', value: 'inner' },
+        { name: 'Inner (active) — private', value: 'inner' },
+        { name: 'New (active)', value: 'new' },
       ])
     })
 
@@ -211,7 +214,14 @@ describe('bastion prompts', () => {
 
       expect(created.status).toBe('pending')
       expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({
-        input: { cloudAccountId: 'ca_1', networkId: 'n1', name: 'My Edge', slug: 'my-edge' },
+        input: {
+          cloudAccountId: 'ca_1',
+          networkId: 'n1',
+          name: 'My Edge',
+          slug: 'my-edge',
+          publicAccess: false,
+          allowedCidrs: undefined,
+        },
       })
       expect(select).not.toHaveBeenCalled()
       expect(input).not.toHaveBeenCalled()

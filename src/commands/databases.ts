@@ -21,8 +21,6 @@ import type {
   GetDatabaseServiceUsersQueryVariables,
   GetDatabaseSizesQuery,
   GetDatabaseSizesQueryVariables,
-  GetDatabaseTunnelBastionQuery,
-  GetDatabaseTunnelBastionQueryVariables,
   GetDatabaseTypesQuery,
   GetDatabaseTypesQueryVariables,
   RotateDatabaseServiceUserMutation,
@@ -30,12 +28,8 @@ import type {
   UpdateDatabaseMutation,
   UpdateDatabaseMutationVariables,
 } from '../generated/graphql'
-import {
-  activeOnly,
-  createBastionInteractive,
-  fetchBastionCredentials,
-  selectBastion,
-} from '../lib/bastion-prompts'
+import { activeOnly, createBastionInteractive, selectBastion } from '../lib/bastion-prompts'
+import { openBastionTunnel } from '../lib/bastion-tunnel'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, isAws, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import {
@@ -51,12 +45,11 @@ import { buildDatabaseUpdate, type DatabaseUpdateOptions } from '../lib/database
 import { isTerminalStatus } from '../lib/deployment-status'
 import { getDefaultPort, normalizeEngine, toDatabaseEngineEnum } from '../lib/engine'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
-import { bastionHostId } from '../lib/known-hosts'
 import { streamLogs, withLogQueryOptions } from '../lib/log-stream'
 import type { LogQueryOptions } from '../lib/log-stream'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
-import { openDirectTunnel, openSshTunnel } from '../lib/ssh-tunnel'
+import { openDirectTunnel } from '../lib/ssh-tunnel'
 import { isInteractive } from '../lib/terminal'
 
 type Database = GetDatabasesQuery['databases'][number]
@@ -1160,46 +1153,13 @@ export function registerDatabasesCommand(program: Command): void {
         const spinner = ora('Connecting tunnel...').start()
 
         try {
-          const credentials = await fetchBastionCredentials(bastionSlug)
-          const bastionData = await graphqlRequest<
-            GetDatabaseTunnelBastionQuery,
-            GetDatabaseTunnelBastionQueryVariables
-          >(
-            /* GraphQL */ `
-              query GetDatabaseTunnelBastion($slug: String!) {
-                bastion(slug: $slug) {
-                  id
-                  publicIp
-                }
-              }
-            `,
-            {
-              slug: bastionSlug,
-            }
-          )
-
-          const { bastion } = bastionData
-          const bastionIp = bastion?.publicIp
-          if (!bastion || !bastionIp) {
-            spinner.fail('Bastion host does not have a public IP address.')
-            process.exit(1)
-          }
-
-          const tunnel = await openSshTunnel({
-            bastionHost: bastionIp,
-            bastionUsername: credentials.sshUser,
-            hostKey: {
-              hostId: bastionHostId({ id: bastion.id, publicIp: bastionIp }),
-              label: bastionSlug,
-              expectedFingerprint: credentials.hostKeyFingerprint,
-              trustHostKey: options?.trustHostKey,
-              pauseOutput: () => spinner.stop(),
-              resumeOutput: () => spinner.start(),
-            },
-            privateKey: credentials.privateKey,
+          const tunnel = await openBastionTunnel({
+            slug: bastionSlug,
             remoteHost,
             remotePort,
             localPort,
+            trustHostKey: options?.trustHostKey,
+            spinner,
           })
 
           spinner.succeed('Tunnel connected')

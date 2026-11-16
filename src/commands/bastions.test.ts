@@ -26,8 +26,18 @@ const promptMocks = vi.hoisted(() => ({
 }))
 
 const graphqlRequest = vi.hoisted(() => vi.fn())
+const sessionMocks = vi.hoisted(() => ({
+  proxySession: vi.fn(),
+  startBastionSession: vi.fn(),
+}))
+const sessionPluginInstalled = vi.hoisted(() => vi.fn())
 
 vi.mock('fs', () => fsMocks)
+vi.mock('../lib/bastion-session', () => sessionMocks)
+vi.mock('../lib/session-plugin', () => ({
+  PLUGIN_MISSING_MESSAGE: 'session-manager-plugin was not found.',
+  sessionPluginInstalled,
+}))
 vi.mock('child_process', () => ({ spawn: spawnMock }))
 vi.mock('../lib/bastion-prompts', () => ({
   ...promptMocks,
@@ -38,7 +48,7 @@ vi.mock('../lib/client', () => ({
   graphqlRequest,
 }))
 
-const { createTempKeyFile, registerBastionsCommand } = await import('./bastions')
+const { createTempKeyFile, registerBastionsCommand, selfProxyCommand } = await import('./bastions')
 
 const TEMP_DIR = '/tmp/gantry-bastion-abc123'
 const PRIVATE_KEY = '-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----'
@@ -47,6 +57,7 @@ const bastion = {
   slug: 'edge',
   name: 'Edge',
   status: 'active',
+  publicAccess: true,
   publicIp: '203.0.113.10',
 } as unknown as Bastion
 
@@ -194,6 +205,53 @@ describe('bastions command', () => {
       expect(listenerCounts()).toEqual(initialListeners)
     })
 
+    it('reaches a private bastion by slug through this CLI as the ProxyCommand', async () => {
+      spawnMock.mockReturnValue(fakeChild())
+      sessionPluginInstalled.mockReturnValue(true)
+      promptMocks.fetchBastion.mockResolvedValueOnce({
+        ...bastion,
+        publicAccess: false,
+        publicIp: null,
+      })
+
+      await run(['ssh', 'edge'])
+
+      const args = spawnMock.mock.calls[0]?.[1] as string[]
+      expect(args).toContain(`ProxyCommand=${selfProxyCommand('edge')}`)
+      expect(args.at(-1)).toBe('ec2-user@edge')
+    })
+
+    it('quotes a CLI path holding spaces in the ProxyCommand', () => {
+      const { argv, execPath } = process
+      process.argv = ['node', '/Users/ops team/.npm/bin/gantry']
+      Object.defineProperty(process, 'execPath', { value: '/usr/local/bin/node' })
+      try {
+        expect(selfProxyCommand('edge')).toBe(
+          "/usr/local/bin/node '/Users/ops team/.npm/bin/gantry' bastions proxy edge"
+        )
+      } finally {
+        process.argv = argv
+        Object.defineProperty(process, 'execPath', { value: execPath })
+      }
+    })
+
+    it('refuses a private bastion without the session plugin, before fetching its key', async () => {
+      sessionPluginInstalled.mockReturnValue(false)
+      promptMocks.fetchBastion.mockResolvedValueOnce({
+        ...bastion,
+        publicAccess: false,
+        publicIp: null,
+      })
+
+      await expect(run(['ssh', 'edge'])).rejects.toThrow(ExitError)
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('session-manager-plugin was not found.')
+      )
+      expect(promptMocks.fetchBastionCredentials).not.toHaveBeenCalled()
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+
     it('removes the key when spawn throws synchronously', async () => {
       spawnMock.mockImplementation(() => {
         throw new Error('spawn failed')
@@ -257,13 +315,14 @@ describe('bastions command', () => {
   })
 
   describe('list', () => {
-    it('prints each bastion with its public IP', async () => {
+    it('prints each bastion with how it is reached', async () => {
       promptMocks.fetchBastions.mockResolvedValueOnce([
         { ...bastion, createdAt: '2026-04-02T09:00:00Z' },
         {
           slug: 'staging-jump',
           name: 'Staging jump',
           status: 'creating',
+          publicAccess: false,
           publicIp: null,
           createdAt: '2026-04-03T09:00:00Z',
         },
@@ -277,7 +336,7 @@ describe('bastions command', () => {
       expect(output).toContain('203.0.113.10')
       expect(output).toContain('staging-jump')
       expect(output).toContain('CREATING')
-      expect(output).toContain('—')
+      expect(output).toContain('private')
     })
 
     it('says so when there are no bastions', async () => {
@@ -491,6 +550,31 @@ describe('bastions command', () => {
       )
     })
 
+    it('hints a private bastion by slug through gantry bastions proxy', async () => {
+      const hostPublicKey =
+        'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICYYpJ9NxY3QwueHe9yfjYTdR8TqLEhJ5iV1nJjM/dj2'
+      promptMocks.fetchBastion.mockResolvedValueOnce({
+        ...bastion,
+        publicAccess: false,
+        publicIp: null,
+      })
+      promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
+        privateKey: PRIVATE_KEY,
+        sshUser: 'ec2-user',
+        hostPublicKey,
+        hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
+      })
+
+      await run(['key', 'edge'])
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `  Trust host key:  echo 'edge ${hostPublicKey}' >> ~/.ssh/known_hosts`
+      )
+      expect(errorSpy).toHaveBeenCalledWith(
+        "  Connect:         ssh -i ~/.ssh/edge.pem -o ProxyCommand='gantry bastions proxy edge' -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 ec2-user@edge"
+      )
+    })
+
     it('prints no key when the recorded host key is malformed', async () => {
       promptMocks.fetchBastionCredentials.mockResolvedValueOnce({
         privateKey: PRIVATE_KEY,
@@ -591,10 +675,80 @@ describe('bastions command', () => {
         name: 'Prod jump',
         slug: 'prod-jump',
         waitForActive: false,
+        publicAccess: false,
+        allowedCidrs: undefined,
       })
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('Bastion created: Prod jump (prod-jump)')
       )
+    })
+
+    it('creates a public bastion open to each --allow-cidr', async () => {
+      promptMocks.createBastionInteractive.mockResolvedValueOnce(bastion)
+
+      await run([
+        'create',
+        '--name',
+        'Edge',
+        '--public',
+        '--allow-cidr',
+        '203.0.113.0/24',
+        '--allow-cidr',
+        '198.51.100.7/32',
+      ])
+
+      expect(promptMocks.createBastionInteractive).toHaveBeenCalledWith(
+        expect.objectContaining({
+          publicAccess: true,
+          allowedCidrs: ['203.0.113.0/24', '198.51.100.7/32'],
+        })
+      )
+    })
+
+    it('refuses --allow-cidr without --public', async () => {
+      await expect(run(['create', '--allow-cidr', '203.0.113.0/24'])).rejects.toThrow(
+        'process.exit(1)'
+      )
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('--allow-cidr applies only with --public.')
+      )
+      expect(promptMocks.createBastionInteractive).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('proxy', () => {
+    const SESSION = {
+      region: 'us-east-2',
+      sessionId: 'gantry-bastion-session-0a1b2c3d4e5f67890',
+      streamUrl: 'wss://ssmmessages.us-east-2.amazonaws.com/v1/data-channel/session',
+      tokenValue: 'AAEAAQ-session-token',
+      target: 'i-0a1b2c3d4e5f67890',
+    }
+
+    it("hands stdio to the bastion's session and exits with the plugin's code", async () => {
+      sessionMocks.startBastionSession.mockResolvedValueOnce(SESSION)
+      sessionMocks.proxySession.mockResolvedValueOnce(0)
+
+      await expect(run(['proxy', 'edge'])).rejects.toThrow('process.exit(0)')
+
+      expect(sessionMocks.startBastionSession).toHaveBeenCalledWith('edge')
+      expect(sessionMocks.proxySession).toHaveBeenCalledWith(SESSION)
+    })
+
+    it('reports a refused session on stderr only', async () => {
+      const stdout = vi.spyOn(process.stdout, 'write')
+      sessionMocks.startBastionSession.mockRejectedValueOnce(
+        new Error("This bastion isn't ready for sessions yet.")
+      )
+
+      await expect(run(['proxy', 'edge'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("This bastion isn't ready for sessions yet.")
+      )
+      expect(console.log).not.toHaveBeenCalled()
+      expect(stdout).not.toHaveBeenCalled()
     })
 
     it('exits with the API error', async () => {

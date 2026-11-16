@@ -29,8 +29,8 @@ vi.mock('../lib/project-identity', () => ({
   resolveEnvironmentSlug: mocks.resolveEnvironmentSlug,
 }))
 
-const { joinCommand, registerShellCommand, sessionPluginArgs, sessionPluginInstalled } =
-  await import('./shell')
+const { sessionPluginArgs, sessionPluginInstalled } = await import('../lib/session-plugin')
+const { joinCommand, registerShellCommand } = await import('./shell')
 
 class ExitError extends Error {
   constructor(readonly code: number | undefined) {

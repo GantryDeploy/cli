@@ -1,5 +1,4 @@
 import { spawn } from 'child_process'
-import { existsSync } from 'fs'
 import * as path from 'path'
 
 import type { Command } from 'commander'
@@ -13,6 +12,13 @@ import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
 import { printError } from '../lib/output'
 import { loadProjectIdentity, resolveEnvironmentSlug } from '../lib/project-identity'
+import {
+  PLUGIN_INSTALL_URL,
+  PLUGIN_MISSING_MESSAGE,
+  SESSION_PLUGIN,
+  sessionPluginArgs,
+  sessionPluginInstalled,
+} from '../lib/session-plugin'
 
 const START_SHELL_SESSION = /* GraphQL */ `
   mutation StartShellSession(
@@ -43,9 +49,6 @@ const START_SHELL_SESSION = /* GraphQL */ `
   }
 `
 
-export const SESSION_PLUGIN = 'session-manager-plugin'
-const PLUGIN_INSTALL_URL =
-  'https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html'
 const SESSION_ERROR_MESSAGE = 'There was an error while opening the session.'
 
 type AwsShellSession = NonNullable<StartShellSessionMutation['startShellSession']['aws']>
@@ -54,33 +57,6 @@ interface ShellOptions {
   env?: string
   instance?: string
   cwd?: string
-}
-
-export function sessionPluginInstalled(
-  searchPath = process.env.PATH,
-  platform = process.platform
-): boolean {
-  const extensions = platform === 'win32' ? ['.exe', ''] : ['']
-  return (searchPath ?? '')
-    .split(path.delimiter)
-    .filter(Boolean)
-    .some((dir) => extensions.some((ext) => existsSync(path.join(dir, SESSION_PLUGIN + ext))))
-}
-
-/** The arguments the AWS CLI passes the plugin for `aws ecs execute-command`. */
-export function sessionPluginArgs(session: AwsShellSession): string[] {
-  return [
-    JSON.stringify({
-      sessionId: session.sessionId,
-      streamUrl: session.streamUrl,
-      tokenValue: session.tokenValue,
-    }),
-    session.region,
-    'StartSession',
-    '',
-    JSON.stringify({ Target: session.target }),
-    `https://ssm.${session.region}.${session.region.startsWith('cn-') ? 'amazonaws.com.cn' : 'amazonaws.com'}`,
-  ]
 }
 
 /** ECS takes the command as one string, so an argument holding spaces or quotes is quoted. */
@@ -144,7 +120,7 @@ export function registerShellCommand(program: Command): void {
 
       // Checked first, so a missing plugin doesn't open a session nobody can attach to.
       if (!sessionPluginInstalled()) {
-        printError(`${SESSION_PLUGIN} was not found. Install it from ${PLUGIN_INSTALL_URL}`)
+        printError(PLUGIN_MISSING_MESSAGE)
         process.exit(1)
       }
 
@@ -187,7 +163,7 @@ export function registerShellCommand(program: Command): void {
       }
       const exitCode = await attach(started.aws)
       if (exitCode === null) {
-        printError(`${SESSION_PLUGIN} was not found. Install it from ${PLUGIN_INSTALL_URL}`)
+        printError(PLUGIN_MISSING_MESSAGE)
         process.exit(1)
       }
       process.exit(exitCode)

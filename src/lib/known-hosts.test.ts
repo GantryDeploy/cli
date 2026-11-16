@@ -70,6 +70,10 @@ describe('known-hosts', () => {
         'bastion-r3bq9m@203.0.113.10'
       )
     })
+
+    it('keys a private bastion by id alone', () => {
+      expect(bastionHostId({ id: 'r3bq9m', publicIp: null })).toBe('bastion-r3bq9m')
+    })
   })
 
   describe('store', () => {

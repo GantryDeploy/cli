@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { mkdtempSync, rmSync } from 'fs'
 import { homedir, tmpdir } from 'os'
 import { join } from 'path'
+import { PassThrough } from 'stream'
 
 import { confirm } from '@inquirer/prompts'
 import type { ConnectConfig } from 'ssh2'
@@ -105,7 +106,7 @@ function setTty(value: boolean) {
 
 function open(trustHostKey?: boolean, expectedFingerprint: string | null = null) {
   const tunnel = openSshTunnel({
-    bastionHost: '1.2.3.4',
+    endpoint: { host: '1.2.3.4' },
     bastionUsername: 'ec2-user',
     hostKey: { hostId: 'i-0abc', label: 'my-bastion', expectedFingerprint, trustHostKey },
     privateKey: 'fake-key',
@@ -332,8 +333,7 @@ describe('openSshTunnel forwarding', () => {
 
   function openReady() {
     const tunnel = openSshTunnel({
-      bastionHost: '1.2.3.4',
-      bastionPort: 2222,
+      endpoint: { host: '1.2.3.4' },
       bastionUsername: 'ubuntu',
       hostKey: { hostId: 'i-0abc', label: 'my-bastion', expectedFingerprint: null },
       privateKey: 'fake-key',
@@ -350,23 +350,28 @@ describe('openSshTunnel forwarding', () => {
     const { tunnel, client, server } = openReady()
 
     await expect(tunnel).resolves.toMatchObject({ localPort: 45678 })
-    expect(client.config).toMatchObject({ host: '1.2.3.4', port: 2222, username: 'ubuntu' })
+    expect(client.config).toMatchObject({ host: '1.2.3.4', port: 22, username: 'ubuntu' })
     expect(server.listen).toHaveBeenCalledWith(15432, '127.0.0.1', expect.any(Function))
   })
 
-  it('defaults to port 22 and signs in as the bastion user', () => {
+  it('runs SSH over a session stream for a private bastion and releases it when SSH closes', () => {
+    const sock = new PassThrough()
+    const release = vi.fn()
     const tunnel = openSshTunnel({
-      bastionHost: '1.2.3.4',
+      endpoint: { sock, release },
       bastionUsername: 'ec2-user',
-      hostKey: { hostId: 'i-0abc', label: 'b', expectedFingerprint: null },
+      hostKey: { hostId: 'bastion-bst_4f7a2b', label: 'ops-jump', expectedFingerprint: null },
       privateKey: 'k',
-      remoteHost: 'db',
+      remoteHost: 'db.internal',
       remotePort: 5432,
     })
     const client = last(clients)
-    expect(client.config).toMatchObject({ port: 22, username: 'ec2-user' })
-    client.emit('error', new Error('x'))
-    return expect(tunnel).rejects.toThrow()
+
+    expect(client.config?.sock).toBe(sock)
+    expect(client.config).not.toHaveProperty('host')
+    client.emit('close')
+    expect(release).toHaveBeenCalledOnce()
+    return expect(tunnel).rejects.toThrow('SSH connection closed before the tunnel opened')
   })
 
   it('forwards each local connection to the remote host and tears both ends down together', async () => {

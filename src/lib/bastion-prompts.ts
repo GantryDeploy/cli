@@ -29,6 +29,7 @@ export const BASTIONS_QUERY = /* GraphQL */ `
       networkId
       cloudAccountId
       sshUser
+      publicAccess
       publicIp
       createdAt
     }
@@ -45,6 +46,7 @@ export const BASTION_QUERY = /* GraphQL */ `
       networkId
       cloudAccountId
       sshUser
+      publicAccess
       publicIp
       createdAt
     }
@@ -76,6 +78,7 @@ export const CREATE_BASTION_MUTATION = /* GraphQL */ `
         networkId
         cloudAccountId
         sshUser
+        publicAccess
         publicIp
       }
       deploymentId
@@ -157,7 +160,7 @@ export async function selectBastion(
   }
 
   const choices: { name: string; value: string }[] = filtered.map((b) => {
-    const ip = b.publicIp ? ` — ${b.publicIp}` : ''
+    const ip = b.publicAccess ? (b.publicIp ? ` — ${b.publicIp}` : '') : ' — private'
     return {
       name: `${b.name} (${b.status})${ip}`,
       value: b.slug,
@@ -219,6 +222,8 @@ export async function createBastionInteractive(options: {
   name?: string
   slug?: string
   waitForActive?: boolean
+  publicAccess?: boolean
+  allowedCidrs?: string[]
 }): Promise<CreatedBastion> {
   let cloudAccountId = options.cloudAccountId
   let networkId = options.networkId
@@ -282,6 +287,8 @@ export async function createBastionInteractive(options: {
           networkId,
           name,
           slug,
+          publicAccess: options.publicAccess ?? false,
+          allowedCidrs: options.allowedCidrs,
         },
       }
     )

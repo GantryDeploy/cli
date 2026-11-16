@@ -272,12 +272,16 @@ export type ContainerPushCliOutputsInput = {
 };
 
 export type CreateBastionInput = {
+  /** IPv4 CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address. */
+  allowedCidrs?: Array<string> | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
-  /** Network ID - must have public subnets */
+  /** Network ID */
   networkId: string;
+  /** Give the bastion a public address that takes SSH from allowedCidrs. Without it the bastion has no inbound access and is reached through startBastionSession. Fixed at create. */
+  publicAccess?: boolean;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
 };
@@ -790,13 +794,6 @@ export type CreateCacheMutationVariables = Exact<{
 
 export type CreateCacheMutation = { createCache: { success: boolean, message: string | null, deploymentId: string | null, cache: { id: string, name: string, slug: string, engine: CacheEngineEnum, status: CacheStatusEnum } | null } };
 
-export type GetCacheTunnelBastionQueryVariables = Exact<{
-  slug: string;
-}>;
-
-
-export type GetCacheTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
-
 export type GetCleanupItemsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -928,13 +925,6 @@ export type GetDatabaseOperationQueryVariables = Exact<{
 
 
 export type GetDatabaseOperationQuery = { deployment: { status: DeploymentStatus, lastMessage: string | null } | null };
-
-export type GetDatabaseTunnelBastionQueryVariables = Exact<{
-  slug: string;
-}>;
-
-
-export type GetDatabaseTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
 
 export type GetDeploymentQueryVariables = Exact<{
   id: string;
@@ -1297,14 +1287,14 @@ export type GetBastionsQueryVariables = Exact<{
 }>;
 
 
-export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string }> };
+export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicAccess: boolean, publicIp: string | null, createdAt: string }> };
 
 export type GetBastionQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string } | null };
+export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicAccess: boolean, publicIp: string | null, createdAt: string } | null };
 
 export type GetBastionPrivateKeyQueryVariables = Exact<{
   slug: string;
@@ -1318,7 +1308,7 @@ export type CreateBastionMutationVariables = Exact<{
 }>;
 
 
-export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null } | null } };
+export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicAccess: boolean, publicIp: string | null } | null } };
 
 export type DestroyBastionMutationVariables = Exact<{
   slug: string;
@@ -1336,6 +1326,20 @@ export type GetBastionNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type GetBastionNetworksQuery = { networks: Array<{ id: string, name: string, slug: string, region: string, cloudAccountId: string, stackStatus: string | null }> };
+
+export type StartBastionSessionMutationVariables = Exact<{
+  slug: string;
+}>;
+
+
+export type StartBastionSessionMutation = { startBastionSession: { success: boolean, message: string | null, aws: { region: string, sessionId: string, streamUrl: string, tokenValue: string, target: string } | null } };
+
+export type GetTunnelBastionQueryVariables = Exact<{
+  slug: string;
+}>;
+
+
+export type GetTunnelBastionQuery = { bastion: { id: string, publicAccess: boolean, publicIp: string | null } | null };
 
 export type StartVersionDeploymentMutationVariables = Exact<{
   environment: string;

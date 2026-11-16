@@ -315,6 +315,8 @@ type AwsUploadCredentials {
 }
 
 type Bastion {
+  """IPv4 CIDR blocks allowed to SSH in. Empty for a private bastion."""
+  allowedCidrs: [String!]!
   cloudAccountId: String!
   createdAt: String!
 
@@ -330,7 +332,7 @@ type Bastion {
   id: String!
   name: String!
 
-  """Network ID - must have public subnets"""
+  """Network ID"""
   networkId: String!
 
   """Cloud the bastion runs in, from its cloud account"""
@@ -339,7 +341,14 @@ type Bastion {
   """Cloud-specific data including instance details and SSH key reference"""
   providerData: JSON!
 
-  """Public IP address used for SSH, set once provisioned"""
+  """
+  Whether the bastion has a public address that takes SSH. A private bastion is reached through startBastionSession.
+  """
+  publicAccess: Boolean!
+
+  """
+  Public IP address used for SSH, set once a public bastion is provisioned
+  """
   publicIp: String
   region: String!
 
@@ -800,14 +809,24 @@ input ContainerPushCliOutputsInput {
 }
 
 input CreateBastionInput {
+  """
+  IPv4 CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address.
+  """
+  allowedCidrs: [String!]
+
   """Cloud account ID"""
   cloudAccountId: String!
 
   """User-friendly name"""
   name: String!
 
-  """Network ID - must have public subnets"""
+  """Network ID"""
   networkId: String!
+
+  """
+  Give the bastion a public address that takes SSH from allowedCidrs. Without it the bastion has no inbound access and is reached through startBastionSession. Fixed at create.
+  """
+  publicAccess: Boolean! = false
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
@@ -1661,6 +1680,7 @@ type Mutation {
   ): DatabaseMutationResult!
   setCanary(input: ActivationInput!, team: String): ActivationResult!
   setEnvVars(input: SetEnvVarsInput!, team: String): EnvVarsMutationResult!
+  startBastionSession(slug: String!, team: String): StartBastionSessionResult!
   startCommandRun(command: [String!]!, environmentSlug: String!, function: String, projectId: String!, service: String!, team: String): StartCommandRunResult!
   startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!
   startShellSession(command: String, environmentSlug: String!, instance: String, projectId: String!, service: String!, team: String): StartShellSessionResult!
@@ -2157,6 +2177,13 @@ input SetEnvVarsInput {
   """
   service: String
   variables: [EnvVarInput!]!
+}
+
+type StartBastionSessionResult {
+  """A session to the bastion's SSH port, for a bastion on AWS"""
+  aws: AwsShellSession
+  message: String
+  success: Boolean!
 }
 
 type StartCommandRunResult {

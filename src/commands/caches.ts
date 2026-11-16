@@ -12,17 +12,11 @@ import type {
   GetCacheSizesQuery,
   GetCacheSizesQueryVariables,
   GetCachesQueryVariables,
-  GetCacheTunnelBastionQuery,
-  GetCacheTunnelBastionQueryVariables,
   GetCacheTypesQuery,
   GetCacheTypesQueryVariables,
 } from '../generated/graphql'
-import {
-  activeOnly,
-  createBastionInteractive,
-  fetchBastionCredentials,
-  selectBastion,
-} from '../lib/bastion-prompts'
+import { activeOnly, createBastionInteractive, selectBastion } from '../lib/bastion-prompts'
+import { openBastionTunnel } from '../lib/bastion-tunnel'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, isAws, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import {
@@ -33,10 +27,8 @@ import {
 } from '../lib/clouds/aws'
 import { getDefaultPort, normalizeEngine, toCacheEngineEnum } from '../lib/engine'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
-import { bastionHostId } from '../lib/known-hosts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
-import { openSshTunnel } from '../lib/ssh-tunnel'
 
 type Cache = GetCachesQuery['caches'][number]
 
@@ -561,46 +553,13 @@ export function registerCachesCommand(program: Command): void {
         const spinner = ora('Connecting tunnel...').start()
 
         try {
-          const credentials = await fetchBastionCredentials(bastionSlug)
-          const bastionData = await graphqlRequest<
-            GetCacheTunnelBastionQuery,
-            GetCacheTunnelBastionQueryVariables
-          >(
-            /* GraphQL */ `
-              query GetCacheTunnelBastion($slug: String!) {
-                bastion(slug: $slug) {
-                  id
-                  publicIp
-                }
-              }
-            `,
-            {
-              slug: bastionSlug,
-            }
-          )
-
-          const { bastion } = bastionData
-          const bastionIp = bastion?.publicIp
-          if (!bastion || !bastionIp) {
-            spinner.fail('Bastion host does not have a public IP address.')
-            process.exit(1)
-          }
-
-          const tunnel = await openSshTunnel({
-            bastionHost: bastionIp,
-            bastionUsername: credentials.sshUser,
-            hostKey: {
-              hostId: bastionHostId({ id: bastion.id, publicIp: bastionIp }),
-              label: bastionSlug,
-              expectedFingerprint: credentials.hostKeyFingerprint,
-              trustHostKey: options?.trustHostKey,
-              pauseOutput: () => spinner.stop(),
-              resumeOutput: () => spinner.start(),
-            },
-            privateKey: credentials.privateKey,
+          const tunnel = await openBastionTunnel({
+            slug: bastionSlug,
             remoteHost,
             remotePort,
             localPort,
+            trustHostKey: options?.trustHostKey,
+            spinner,
           })
 
           spinner.succeed('Tunnel connected')

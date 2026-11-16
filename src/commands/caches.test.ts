@@ -13,10 +13,10 @@ const promptMocks = vi.hoisted(() => ({ input: vi.fn(), select: vi.fn() }))
 const bastionMocks = vi.hoisted(() => ({
   activeOnly: vi.fn(),
   createBastionInteractive: vi.fn(),
-  fetchBastionCredentials: vi.fn(),
   selectBastion: vi.fn(),
 }))
-const tunnelMocks = vi.hoisted(() => ({ openDirectTunnel: vi.fn(), openSshTunnel: vi.fn() }))
+const tunnelMocks = vi.hoisted(() => ({ openDirectTunnel: vi.fn() }))
+const bastionTunnel = vi.hoisted(() => ({ openBastionTunnel: vi.fn() }))
 const cloudMocks = vi.hoisted(() => ({
   resolveCloud: vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' })),
   selectNetwork: vi.fn(),
@@ -31,6 +31,7 @@ vi.mock('../lib/client', () => ({
 vi.mock('../lib/bastion-prompts', () => bastionMocks)
 vi.mock('../lib/interactive-prompts', () => cloudMocks)
 vi.mock('../lib/ssh-tunnel', () => tunnelMocks)
+vi.mock('../lib/bastion-tunnel', () => bastionTunnel)
 
 const { registerCachesCommand } = await import('./caches')
 
@@ -89,10 +90,6 @@ const reachableCache = {
   ...cache,
   endpoint: 'sessions.abc123.use1.cache.amazonaws.com:6379',
   port: 6379,
-}
-
-const bastion = {
-  bastion: { id: 'r3bq9m', publicIp: '203.0.113.10' },
 }
 
 describe('caches command', () => {
@@ -406,13 +403,7 @@ describe('caches command', () => {
           return realOn(event, listener)
         }) as typeof process.on)
         close.mockResolvedValue(undefined)
-        bastionMocks.fetchBastionCredentials.mockResolvedValue({
-          privateKey: 'fake-bastion-private-key',
-          sshUser: 'ubuntu',
-          hostPublicKey: null,
-          hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
-        })
-        tunnelMocks.openSshTunnel.mockResolvedValue({ localPort: 16379, close })
+        bastionTunnel.openBastionTunnel.mockResolvedValue({ localPort: 16379, close })
       })
 
       async function runUntilSigint(args: string[]): Promise<void> {
@@ -425,10 +416,8 @@ describe('caches command', () => {
         await pending
       }
 
-      it('tunnels through the named bastion, passes the host-key policy and closes on SIGINT', async () => {
-        graphqlRequest
-          .mockResolvedValueOnce({ caches: [reachableCache] })
-          .mockResolvedValueOnce(bastion)
+      it('tunnels through the named bastion and closes on SIGINT', async () => {
+        graphqlRequest.mockResolvedValueOnce({ caches: [reachableCache] })
 
         await runUntilSigint([
           'tunnel',
@@ -442,36 +431,14 @@ describe('caches command', () => {
 
         expect(bastionMocks.selectBastion).not.toHaveBeenCalled()
         expect(promptMocks.input).not.toHaveBeenCalled()
-        expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('ops-bastion')
-        expect(sentQuery(1)).toContain('query GetCacheTunnelBastion($slug: String!)')
-        expect(sentVariables(1)).toEqual({ slug: 'ops-bastion' })
-
-        const config = tunnelMocks.openSshTunnel.mock.calls[0]?.[0] as {
-          hostKey: { pauseOutput: () => void; resumeOutput: () => void }
-        }
-        expect(config).toEqual({
-          bastionHost: '203.0.113.10',
-          bastionUsername: 'ubuntu',
-          hostKey: {
-            hostId: 'bastion-r3bq9m@203.0.113.10',
-            label: 'ops-bastion',
-            expectedFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
-            trustHostKey: true,
-            pauseOutput: expect.any(Function) as unknown,
-            resumeOutput: expect.any(Function) as unknown,
-          },
-          privateKey: 'fake-bastion-private-key',
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith({
+          slug: 'ops-bastion',
           remoteHost: 'sessions.abc123.use1.cache.amazonaws.com',
           remotePort: 6379,
           localPort: 16379,
+          trustHostKey: true,
+          spinner,
         })
-        spinner.stop.mockClear()
-        spinner.start.mockClear()
-        config.hostKey.pauseOutput()
-        expect(spinner.stop).toHaveBeenCalledTimes(1)
-        expect(spinner.start).not.toHaveBeenCalled()
-        config.hostKey.resumeOutput()
-        expect(spinner.start).toHaveBeenCalledTimes(1)
 
         expect(spinner.succeed).toHaveBeenCalledWith('Tunnel connected')
         expect(logLines()).toEqual([
@@ -488,9 +455,8 @@ describe('caches command', () => {
       })
 
       it('uses the bastion chosen from the network', async () => {
-        graphqlRequest
-          .mockResolvedValueOnce({ caches: [reachableCache] })
-          .mockResolvedValueOnce(bastion)
+        graphqlRequest.mockResolvedValueOnce({ caches: [reachableCache] })
+
         bastionMocks.selectBastion.mockResolvedValueOnce({ slug: 'net-bastion' })
 
         await runUntilSigint(['tunnel', 'sessions', '--port', '16379'])
@@ -500,18 +466,17 @@ describe('caches command', () => {
           includeCreateOption: true,
           filter: bastionMocks.activeOnly,
         })
-        expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('net-bastion')
-        expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
-          expect.objectContaining({
-            hostKey: expect.objectContaining({ trustHostKey: undefined }) as unknown,
-          })
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
+          expect.objectContaining({ slug: 'net-bastion' })
+        )
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
+          expect.objectContaining({ trustHostKey: undefined })
         )
       })
 
       it('creates a bastion when asked and waits for it', async () => {
-        graphqlRequest
-          .mockResolvedValueOnce({ caches: [reachableCache] })
-          .mockResolvedValueOnce(bastion)
+        graphqlRequest.mockResolvedValueOnce({ caches: [reachableCache] })
+
         bastionMocks.selectBastion.mockResolvedValueOnce('create')
         bastionMocks.createBastionInteractive.mockResolvedValueOnce({ slug: 'new-bastion' })
 
@@ -522,7 +487,9 @@ describe('caches command', () => {
           networkId: 'h4nw8r',
           waitForActive: true,
         })
-        expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('new-bastion')
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
+          expect.objectContaining({ slug: 'new-bastion' })
+        )
       })
 
       it.each([
@@ -530,11 +497,10 @@ describe('caches command', () => {
         ['VALKEY', '6379'],
         ['MEMCACHED', '11211'],
       ])('tunnels to the %s default port with the prompted local port', async (engine, port) => {
-        graphqlRequest
-          .mockResolvedValueOnce({
-            caches: [{ ...cache, engine, endpoint: 'sessions.cache.internal' }],
-          })
-          .mockResolvedValueOnce(bastion)
+        graphqlRequest.mockResolvedValueOnce({
+          caches: [{ ...cache, engine, endpoint: 'sessions.cache.internal' }],
+        })
+
         promptMocks.input.mockResolvedValueOnce('20000')
 
         await runUntilSigint(['tunnel', 'sessions', '--bastion', 'ops-bastion'])
@@ -548,68 +514,52 @@ describe('caches command', () => {
         expect(prompt.validate('65536')).toBe('Enter a valid port (1-65535)')
         expect(prompt.validate('six')).toBe('Enter a valid port (1-65535)')
         expect(prompt.validate('20000')).toBe(true)
-        expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
           expect.objectContaining({ remotePort: Number(port), localPort: 20000 })
         )
       })
 
       it('offers the provider port for an unknown engine', async () => {
-        graphqlRequest
-          .mockResolvedValueOnce({
-            caches: [
-              {
-                ...cache,
-                engine: 'DRAGONFLY',
-                endpoint: 'sessions.cache.internal',
-                port: 6380,
-              },
-            ],
-          })
-          .mockResolvedValueOnce(bastion)
+        graphqlRequest.mockResolvedValueOnce({
+          caches: [
+            {
+              ...cache,
+              engine: 'DRAGONFLY',
+              endpoint: 'sessions.cache.internal',
+              port: 6380,
+            },
+          ],
+        })
+
         promptMocks.input.mockResolvedValueOnce('6380')
 
         await runUntilSigint(['tunnel', 'sessions', '--bastion', 'ops-bastion'])
 
         expect(promptMocks.input).toHaveBeenCalledWith(expect.objectContaining({ default: '6380' }))
-        expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
           expect.objectContaining({ remotePort: 6380 })
         )
       })
 
       it('tunnels to the cache picked from the prompt', async () => {
-        graphqlRequest
-          .mockResolvedValueOnce({ caches: [reachableCache] })
-          .mockResolvedValueOnce(bastion)
+        graphqlRequest.mockResolvedValueOnce({ caches: [reachableCache] })
+
         promptMocks.select.mockResolvedValueOnce('cache-id-1')
 
         await runUntilSigint(['tunnel', '--bastion', 'ops-bastion', '--port', '16379'])
 
-        expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
           expect.objectContaining({ remoteHost: 'sessions.abc123.use1.cache.amazonaws.com' })
         )
-      })
-
-      it('fails when the bastion has no public IP', async () => {
-        graphqlRequest
-          .mockResolvedValueOnce({ caches: [reachableCache] })
-          .mockResolvedValueOnce({ bastion: null })
-
-        await expect(
-          run(['tunnel', 'sessions', '--bastion', 'ops-bastion', '--port', '16379'])
-        ).rejects.toThrow('process.exit(1)')
-
-        expect(spinner.fail).toHaveBeenCalledWith('Bastion host does not have a public IP address.')
-        expect(tunnelMocks.openSshTunnel).not.toHaveBeenCalled()
       })
 
       it.each([
         [new Error('Host key verification failed'), 'Host key verification failed'],
         ['ETIMEDOUT', 'ETIMEDOUT'],
       ])('reports an SSH failure (%s)', async (failure, message) => {
-        graphqlRequest
-          .mockResolvedValueOnce({ caches: [reachableCache] })
-          .mockResolvedValueOnce(bastion)
-        tunnelMocks.openSshTunnel.mockRejectedValueOnce(failure)
+        graphqlRequest.mockResolvedValueOnce({ caches: [reachableCache] })
+
+        bastionTunnel.openBastionTunnel.mockRejectedValueOnce(failure)
 
         await expect(
           run(['tunnel', 'sessions', '--bastion', 'ops-bastion', '--port', '16379'])
@@ -630,7 +580,7 @@ describe('caches command', () => {
 
       expect(errorOutput()).toContain('Unknown database or cache engine.')
       expect(promptMocks.input).not.toHaveBeenCalled()
-      expect(tunnelMocks.openSshTunnel).not.toHaveBeenCalled()
+      expect(bastionTunnel.openBastionTunnel).not.toHaveBeenCalled()
     })
 
     it('prompts with only active caches', async () => {

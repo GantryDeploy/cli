@@ -19,7 +19,8 @@ export interface HostKeyPolicy {
 
 export interface BastionIdentity {
   id: string
-  publicIp: string
+  /** Null for a private bastion, reached through the cloud's session service. */
+  publicIp: string | null
 }
 
 export class HostKeyError extends Error {
@@ -38,7 +39,7 @@ export function fingerprintHostKey(key: Buffer): string {
 }
 
 export function bastionHostId(bastion: BastionIdentity): string {
-  return `bastion-${bastion.id}@${bastion.publicIp}`
+  return bastion.publicIp ? `bastion-${bastion.id}@${bastion.publicIp}` : `bastion-${bastion.id}`
 }
 
 function readEntries(): Map<string, string> {

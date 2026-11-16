@@ -103,9 +103,27 @@ Each service that binds a database gets its own database user, created on deploy
 
 A deploy fails when the bound Postgres database already holds tables, views, sequences or schemas owned by another database user. `gantry databases adopt <server> <database>` moves them to Gantry's owner role. Each user that owned any of them becomes a member of that role, so it keeps working, now with owner rights over the whole database. The command asks first; pass `--yes` where there is no terminal.
 
+## Private and public bastions
+
+A bastion is private unless you create it with `--public`. A private bastion has no public address and no open ports. The CLI reaches it by asking Gantry to open an AWS Session Manager session to the bastion's SSH port, then runs SSH through that session. This needs AWS's [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) installed, the same as `gantry shell`. You don't need AWS credentials, and each session is recorded in the team's audit log.
+
+```bash
+gantry bastions create --name ops                       # private
+gantry bastions create --name ops --public \
+  --allow-cidr 203.0.113.0/24                           # public, SSH from one range
+```
+
+`--public` gives the bastion a public address that takes SSH from each `--allow-cidr` (any address if you give none). Access is fixed when the bastion is created. To change it, destroy the bastion and create a new one. A private bastion needs a network whose private subnets reach the internet through a NAT gateway.
+
+`gantry bastions proxy <slug>` connects stdin and stdout to a private bastion's SSH port, for use as an `ssh` ProxyCommand. `gantry bastions ssh` and `gantry bastions key` use it for private bastions:
+
+```bash
+ssh -i ~/.ssh/ops.pem -o ProxyCommand='gantry bastions proxy ops' ec2-user@ops
+```
+
 ## Tunnels and bastion host keys
 
-`gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH. The CLI checks the bastion's SSH host key before forwarding anything.
+`gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH, directly to a public bastion or through a session to a private one. The CLI checks the bastion's SSH host key before forwarding anything.
 
 Gantry generates each bastion's host key when it provisions the bastion and returns the key's fingerprint with the bastion's SSH credentials. The CLI checks the key the bastion presents against that fingerprint, so even the first connection is verified and there is nothing to confirm. A key that doesn't match is refused, `--trust-host-key` included. `gantry bastions ssh` does the same by passing `ssh` a known_hosts file holding only that key.
 
@@ -115,7 +133,7 @@ Bastions provisioned before Gantry recorded host keys have no fingerprint until 
 - **Later connections:** the key must match the saved fingerprint. If it doesn't, the CLI refuses to open the tunnel and does not prompt. A changed key can mean someone is intercepting the connection.
 - **No terminal (CI, scripts):** the CLI can't prompt, so an unknown key fails. Pass `--trust-host-key` to trust the key and save it on first connection. The fingerprint is still printed. The flag never overrides a mismatch.
 
-Fingerprints are saved in `~/.gantry/known_hosts`. The directory is created with mode 0700 and the file with mode 0600. Each line is `<host id> <fingerprint>`. The host id is the bastion's EC2 instance id, so a rebuilt bastion is treated as a new host and prompts again rather than failing. If the instance id is not available, the host id is `bastion-<id>@<public IP>`.
+Fingerprints are saved in `~/.gantry/known_hosts`. The directory is created with mode 0700 and the file with mode 0600. Each line is `<host id> <fingerprint>`. The host id is `bastion-<id>@<public IP>` for a public bastion and `bastion-<id>` for a private one.
 
 To reset a bastion whose key legitimately changed, delete its line from `~/.gantry/known_hosts`. The mismatch error names the host id. The next tunnel will prompt again. To forget every bastion, delete the file.
 

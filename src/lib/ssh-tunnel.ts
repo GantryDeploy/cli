@@ -1,13 +1,16 @@
 import * as net from 'net'
+import type { Duplex } from 'stream'
 
 import { Client } from 'ssh2'
 
 import type { HostKeyPolicy } from './known-hosts'
 import { HostKeyError, verifyHostKey } from './known-hosts'
 
+/** How SSH reaches the bastion: its public address, or a stream through the cloud's session service. */
+export type BastionEndpoint = { host: string } | { sock: Duplex; release: () => void }
+
 export interface SshTunnelConfig {
-  bastionHost: string
-  bastionPort?: number
+  endpoint: BastionEndpoint
   bastionUsername: string
   hostKey: HostKeyPolicy
   privateKey: string
@@ -158,9 +161,13 @@ export function openSshTunnel(config: SshTunnelConfig): Promise<TunnelConnection
       }
     })
 
+    const { endpoint } = config
+    sshClient.on('close', () => {
+      if ('release' in endpoint) endpoint.release()
+    })
+
     sshClient.connect({
-      host: config.bastionHost,
-      port: config.bastionPort ?? 22,
+      ...('sock' in endpoint ? { sock: endpoint.sock } : { host: endpoint.host, port: 22 }),
       username: config.bastionUsername,
       privateKey: config.privateKey,
       hostVerifier,

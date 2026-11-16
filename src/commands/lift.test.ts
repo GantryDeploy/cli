@@ -988,6 +988,53 @@ describe('lift command', () => {
     }
   )
 
+  it('times out a service after five minutes on a claimed step this CLI is not running', async () => {
+    let failedAt = 0
+    handlers.FailCliStep = () => {
+      failedAt = Date.now()
+      return { failCliStep: { success: true } }
+    }
+    const start = Date.now()
+    sequence([], STILL_CLAIMED)
+
+    await lift(['production'])
+
+    expect(mocks.executeCliTask).not.toHaveBeenCalled()
+    expect(calls('FailCliStep').map((call) => call[1] as unknown)).toEqual([
+      { stepId: 'step_1', error: 'The CLI stopped waiting for the step to finish.' },
+    ])
+    expect(failedAt - start).toBeGreaterThanOrEqual(5 * 60 * 1000)
+    expect(failedAt - start).toBeLessThan(6 * 60 * 1000)
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Deployment failed: 1 of 1 service did not succeed'
+    )
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('does not time out a server step that runs unchanged for longer than five minutes', async () => {
+    const start = Date.now()
+    byVersionScript(() =>
+      Date.now() - start < 8 * 60 * 1000
+        ? [
+            deployment({
+              lastMessage: 'Creating database',
+              steps: [
+                { ...PENDING_STEP, status: 'PROCESSING', executor: 'WORKER', cliStatus: null },
+              ],
+            }),
+          ]
+        : [deployment({ status: 'COMPLETE' }), ROUTING_PENDING]
+    )
+
+    await lift(['production'])
+
+    expect(calls('FailCliStep')).toHaveLength(0)
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
+    expect(mocks.printError).not.toHaveBeenCalled()
+    expect(process.exitCode).toBeUndefined()
+  })
+
   it('fails the step when the API does not accept its result', async () => {
     handlers.CompleteCliStep = () => ({
       completeCliStep: { success: false, message: 'The step outputs are invalid.' },

@@ -166,18 +166,22 @@ export type VersionDeployment = DeploymentsByVersionQuery['deploymentsByVersion'
 
 type VersionDeploymentStep = NonNullable<VersionDeployment['steps']>[number]
 
-const TIMEOUT_MS = 5 * 60 * 1000
+const UNATTENDED_STEP_TIMEOUT_MS = 5 * 60 * 1000
 
 export const POLL_INTERVAL_MS = 2000
 
-function findPendingCliStep(steps: VersionDeploymentStep[] | null): VersionDeploymentStep | null {
+function findCliStep(
+  steps: VersionDeploymentStep[] | null,
+  cliStatuses: readonly string[]
+): VersionDeploymentStep | null {
   if (!steps) return null
 
   return (
     steps.find(
       (s) =>
         (s.status === 'AWAITING_CLI' || s.status === 'MANIFEST_REQUIRED') &&
-        s.cliStatus === 'PENDING' &&
+        s.cliStatus !== null &&
+        cliStatuses.includes(s.cliStatus) &&
         s.executor === 'CLI' &&
         s.cliTask
     ) ?? null
@@ -318,12 +322,13 @@ async function pollAllDeployments(
   const followRelease = followReleaseOutput(versionId, (deploymentId, line) => {
     outputWriters.get(deploymentId)?.(line)
   })
-  let lastActivityTime: number
   let consecutiveNetworkErrors = 0
   const completedDeployments = new Set<string>()
-  // Deployment ID to the ID of the CLI step this process is running for it.
-  const runningSteps = new Map<string, string>()
+  // Deployments whose CLI step this process is running.
+  const runningSteps = new Set<string>()
   const refusedClaims = new Map<string, string>()
+  // When each deployment started waiting on a CLI step that this process is not running.
+  const unattendedSince = new Map<string, number>()
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
   while (true) {
@@ -347,7 +352,6 @@ async function pollAllDeployments(
       >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId }, { retry: false })
 
       consecutiveNetworkErrors = 0
-      lastActivityTime = Date.now()
 
       // Read before judging statuses, so a release's last lines print before its service settles.
       try {
@@ -373,7 +377,7 @@ async function pollAllDeployments(
         updateTitle(`${targetLabel}: ${phaseDisplay}${message}`)
 
         if (!isCancelling()) {
-          const pendingStep = findPendingCliStep(deployment.steps)
+          const pendingStep = findCliStep(deployment.steps, ['PENDING'])
 
           if (pendingStep) {
             // A refused step that is still unclaimed a poll later has no CLI driving it.
@@ -386,7 +390,8 @@ async function pollAllDeployments(
               continue
             }
 
-            runningSteps.set(id, pendingStep.id)
+            runningSteps.add(id)
+            unattendedSince.delete(id)
             void handleCliStep(pendingStep, id, targetLabel, taskContext, updateTitle)
               .then(
                 (claim) => {
@@ -402,9 +407,32 @@ async function pollAllDeployments(
               )
               .finally(() => {
                 runningSteps.delete(id)
-                lastActivityTime = Date.now()
               })
             continue
+          }
+
+          // A claim this process lost track of, or one another CLI holds and never finishes.
+          const unattendedStep = findCliStep(deployment.steps, ['CLAIMED'])
+          if (!unattendedStep) {
+            unattendedSince.delete(id)
+          } else {
+            const since = unattendedSince.get(id) ?? Date.now()
+            unattendedSince.set(id, since)
+            if (Date.now() - since >= UNATTENDED_STEP_TIMEOUT_MS) {
+              updateTitle(`${targetLabel}: Timed out`)
+              completedDeployments.add(id)
+              rejecters.get(id)?.(
+                new Error(
+                  `${targetLabel}: Timed out after 5 minutes waiting on a step this CLI is not running`
+                )
+              )
+              void abandonStep(
+                unattendedStep.id,
+                id,
+                'The CLI stopped waiting for the step to finish.'
+              )
+              continue
+            }
           }
         }
 
@@ -433,17 +461,6 @@ async function pollAllDeployments(
 
       const allTargetsDone = [...resolvers.keys()].every((id) => completedDeployments.has(id))
       if (allTargetsDone) {
-        return
-      }
-
-      if (Date.now() - lastActivityTime > TIMEOUT_MS) {
-        for (const id of resolvers.keys()) {
-          if (!completedDeployments.has(id)) {
-            titleUpdaters.get(id)?.(`${id}: Timed out`)
-            completedDeployments.add(id)
-            rejecters.get(id)?.(new Error(`Timed out (no activity for 5 minutes)`))
-          }
-        }
         return
       }
     } catch (error) {

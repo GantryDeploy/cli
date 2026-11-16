@@ -272,7 +272,7 @@ export type ContainerPushCliOutputsInput = {
 };
 
 export type CreateBastionInput = {
-  /** IPv4 CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address. */
+  /** CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address. */
   allowedCidrs?: Array<string> | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;

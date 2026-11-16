@@ -272,7 +272,8 @@ async function pollAllDeployments(
   let lastActivityTime: number
   let consecutiveNetworkErrors = 0
   const completedDeployments = new Set<string>()
-  const claimingSteps = new Set<string>()
+  // Deployment ID to the ID of the CLI step this process is running for it.
+  const runningSteps = new Map<string, string>()
   const refusedClaims = new Map<string, string>()
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
@@ -309,6 +310,8 @@ async function pollAllDeployments(
       for (const deployment of result.deploymentsByVersion) {
         const id = deployment.id
         if (!resolvers.has(id) || completedDeployments.has(id)) continue
+        // The running step owns the title, and the status this poll read predates its result.
+        if (runningSteps.has(id)) continue
         const updateTitle = (title: string) => titleUpdaters.get(id)?.(title)
 
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty serviceName should fall back to the deployment id for display
@@ -323,7 +326,7 @@ async function pollAllDeployments(
         if (!isCancelling()) {
           const pendingStep = findPendingCliStep(deployment.steps)
 
-          if (pendingStep && !claimingSteps.has(pendingStep.id)) {
+          if (pendingStep) {
             // A refused step that is still unclaimed a poll later has no CLI driving it.
             const refusal = refusedClaims.get(pendingStep.id)
             if (refusal) {
@@ -333,17 +336,20 @@ async function pollAllDeployments(
               continue
             }
 
-            claimingSteps.add(pendingStep.id)
-            try {
-              const claim = await handleCliStep(pendingStep, targetLabel, taskContext, updateTitle)
-              if (claim) refusedClaims.set(pendingStep.id, claim.refusal)
-            } catch (_error) {
-              // The failure surfaces as a FAILED deployment on the next poll.
-            } finally {
-              claimingSteps.delete(pendingStep.id)
-              lastActivityTime = Date.now()
-            }
-            // This cycle's status predates the step; judge it on the next poll.
+            runningSteps.set(id, pendingStep.id)
+            void handleCliStep(pendingStep, targetLabel, taskContext, updateTitle)
+              .then(
+                (claim) => {
+                  if (claim) refusedClaims.set(pendingStep.id, claim.refusal)
+                },
+                () => {
+                  // The failure surfaces as a FAILED deployment on a later poll.
+                }
+              )
+              .finally(() => {
+                runningSteps.delete(id)
+                lastActivityTime = Date.now()
+              })
             continue
           }
         }

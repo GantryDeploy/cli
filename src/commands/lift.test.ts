@@ -925,6 +925,104 @@ describe('lift command', () => {
     expect(process.exitCode).toBeUndefined()
   })
 
+  function twoServices() {
+    handlers.StartLiftDeployment = () => ({
+      startDeployment: {
+        success: true,
+        deployment: { id: 'dep_1', projectName: 'Shop' },
+        deploymentIds: ['dep_1', 'dep_2'],
+        versionId: 'ver_1',
+      },
+    })
+    handlers.ClaimStep = ({ stepId }) => ({
+      claimStep: {
+        success: true,
+        step: { ...PENDING_STEP, id: stepId, cliInputs: { ...OBJECT_INPUTS, stepId } },
+      },
+    })
+  }
+
+  it("runs a second service's step while the first service's step is still running", async () => {
+    twoServices()
+    const completedAt = new Map<string, number>()
+    handlers.CompleteCliStep = ({ stepId }) => {
+      completedAt.set(stepId as string, Date.now())
+      return { completeCliStep: { success: true } }
+    }
+    mocks.executeCliTask.mockImplementation((inputs: ObjectUploadInputs) =>
+      inputs.stepId === 'step_web'
+        ? new Promise((resolve) =>
+            setTimeout(
+              () => {
+                resolve(OBJECT_RESULT)
+              },
+              3 * 60 * 1000
+            )
+          )
+        : Promise.resolve(OBJECT_RESULT)
+    )
+    const start = Date.now()
+    byVersionScript(() => [
+      completedAt.has('step_web')
+        ? deployment({ status: 'COMPLETE' })
+        : deployment({ steps: [{ ...PENDING_STEP, id: 'step_web' }] }),
+      completedAt.has('step_worker')
+        ? deployment({ id: 'dep_2', serviceName: 'worker', status: 'COMPLETE' })
+        : deployment({
+            id: 'dep_2',
+            serviceName: 'worker',
+            steps: [{ ...PENDING_STEP, id: 'step_worker' }],
+          }),
+      ROUTING_PENDING,
+    ])
+
+    await lift(['production'])
+
+    expect(calls('ClaimStep').map((call) => call[1] as unknown)).toEqual([
+      { stepId: 'step_web' },
+      { stepId: 'step_worker' },
+    ])
+    expect(completedAt.get('step_worker')).toBeLessThan(start + 60 * 1000)
+    expect(completedAt.get('step_web')).toBeGreaterThanOrEqual(start + 3 * 60 * 1000)
+    expect(mocks.printError).not.toHaveBeenCalled()
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it('reports a service that failed while another service is still running its step', async () => {
+    twoServices()
+    let webDone = false
+    mocks.executeCliTask.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () => {
+              webDone = true
+              resolve(OBJECT_RESULT)
+            },
+            3 * 60 * 1000
+          )
+        )
+    )
+    let workerSettledWhileWebRan = false
+    byVersionScript(() => {
+      if (calls('ClaimStep').length > 0 && !webDone) workerSettledWhileWebRan = true
+      return [
+        webDone
+          ? deployment({ status: 'COMPLETE' })
+          : deployment({ steps: [{ ...PENDING_STEP, id: 'step_web' }] }),
+        deployment({ id: 'dep_2', serviceName: 'worker', status: 'FAILED', lastMessage: 'OOM' }),
+      ]
+    })
+
+    await lift(['production'])
+
+    expect(workerSettledWhileWebRan).toBe(true)
+    expect(calls('ClaimStep')).toHaveLength(1)
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Deployment failed: 1 of 2 services did not succeed'
+    )
+  })
+
   it('reports a setup command that cannot start', async () => {
     withSetup({ commands: 'npm run build' })
     mocks.spawn.mockImplementation(

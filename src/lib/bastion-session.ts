@@ -74,6 +74,8 @@ export function openSessionStream(session: AwsSession): SessionStream {
   return {
     sock,
     close: () => {
+      // A destroyed duplex emits AbortError, which is no failure when we closed it.
+      sock.on('error', () => undefined)
       sock.destroy()
       if (plugin.exitCode === null) plugin.kill()
     },

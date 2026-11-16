@@ -3,7 +3,7 @@ import type { Ora } from 'ora'
 import type { GetTunnelBastionQuery, GetTunnelBastionQueryVariables } from '../generated/graphql'
 
 import { fetchBastionCredentials } from './bastion-prompts'
-import { openSessionStream, startBastionSession } from './bastion-session'
+import { privateBastionTransport } from './bastion-transports'
 import { graphqlRequest } from './client'
 import { bastionHostId } from './known-hosts'
 import type { BastionEndpoint, TunnelConnection } from './ssh-tunnel'
@@ -13,6 +13,7 @@ const TUNNEL_BASTION_QUERY = /* GraphQL */ `
   query GetTunnelBastion($slug: String!) {
     bastion(slug: $slug) {
       id
+      provider
       publicAccess
       publicIp
     }
@@ -45,7 +46,7 @@ export async function openBastionTunnel(request: BastionTunnelRequest): Promise<
     publicIp = bastion.publicIp
     endpoint = { host: publicIp }
   } else {
-    const stream = openSessionStream(await startBastionSession(slug))
+    const stream = await privateBastionTransport(bastion.provider).open(slug)
     endpoint = { sock: stream.sock, release: stream.close }
   }
 

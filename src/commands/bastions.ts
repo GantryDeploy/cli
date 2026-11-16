@@ -17,11 +17,10 @@ import {
   nonDestroyed,
   selectBastion,
 } from '../lib/bastion-prompts'
-import { proxySession, startBastionSession } from '../lib/bastion-session'
+import { privateBastionTransport } from '../lib/bastion-transports'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
-import { PLUGIN_MISSING_MESSAGE, sessionPluginInstalled } from '../lib/session-plugin'
 
 import { joinCommand } from './shell'
 
@@ -220,10 +219,7 @@ export function registerBastionsCommand(program: Command): void {
         }
 
         const route = sshRoute(bastion)
-        if (route.proxyCommand && !sessionPluginInstalled()) {
-          printError(PLUGIN_MISSING_MESSAGE)
-          process.exit(1)
-        }
+        if (route.proxyCommand) privateBastionTransport(bastion.provider).assertReady()
 
         const credentials = await fetchBastionCredentials(bastion.slug)
 
@@ -351,7 +347,9 @@ export function registerBastionsCommand(program: Command): void {
       // stdout carries the SSH stream, so every message goes to stderr.
       let exitCode: number
       try {
-        exitCode = await proxySession(await startBastionSession(slug))
+        const bastion = await fetchBastion(slug)
+        if (!bastion) throw new Error(`Bastion host not found: ${slug}`)
+        exitCode = await privateBastionTransport(bastion.provider).proxy(slug)
       } catch (error) {
         printError(formatApiError(error))
         process.exit(1)
@@ -372,7 +370,7 @@ export function registerBastionsCommand(program: Command): void {
     )
     .option(
       '--allow-cidr <cidr>',
-      'IPv4 CIDR block allowed to SSH to a public bastion (repeatable; default: any address)',
+      'CIDR block allowed to SSH to a public bastion (repeatable; default: any address)',
       (cidr: string, previous: string[] | undefined) => [...(previous ?? []), cidr]
     )
     .action(async (options: CreateBastionOptions) => {

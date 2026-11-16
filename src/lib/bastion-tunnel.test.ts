@@ -42,9 +42,11 @@ const request = {
   spinner,
 }
 
-function bastionIs(bastion: { publicAccess: boolean; publicIp: string | null } | null) {
+function bastionIs(
+  bastion: { publicAccess: boolean; publicIp: string | null; provider?: string } | null
+) {
   mocks.graphqlRequest.mockResolvedValueOnce({
-    bastion: bastion && { id: 'r3bq9m', ...bastion },
+    bastion: bastion && { id: 'r3bq9m', provider: 'aws', ...bastion },
   })
 }
 
@@ -126,6 +128,16 @@ describe('openBastionTunnel', () => {
     await expect(openBastionTunnel(request)).rejects.toThrow(
       'Bastion host does not have a public IP address yet.'
     )
+    expect(mocks.openSshTunnel).not.toHaveBeenCalled()
+  })
+
+  it('refuses a private bastion on a cloud the CLI has no transport for', async () => {
+    bastionIs({ provider: 'gcp', publicAccess: false, publicIp: null })
+
+    await expect(openBastionTunnel(request)).rejects.toThrow(
+      'The bastion configuration is not valid.'
+    )
+    expect(mocks.startBastionSession).not.toHaveBeenCalled()
     expect(mocks.openSshTunnel).not.toHaveBeenCalled()
   })
 

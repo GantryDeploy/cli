@@ -57,6 +57,7 @@ const bastion = {
   slug: 'edge',
   name: 'Edge',
   status: 'active',
+  provider: 'aws',
   publicAccess: true,
   publicIp: '203.0.113.10',
 } as unknown as Bastion
@@ -247,6 +248,24 @@ describe('bastions command', () => {
 
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('session-manager-plugin was not found.')
+      )
+      expect(promptMocks.fetchBastionCredentials).not.toHaveBeenCalled()
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+
+    it('refuses a private bastion on a cloud the CLI has no transport for', async () => {
+      sessionPluginInstalled.mockReturnValue(true)
+      promptMocks.fetchBastion.mockResolvedValueOnce({
+        ...bastion,
+        provider: 'gcp',
+        publicAccess: false,
+        publicIp: null,
+      })
+
+      await expect(run(['ssh', 'edge'])).rejects.toThrow(ExitError)
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('The bastion configuration is not valid.')
       )
       expect(promptMocks.fetchBastionCredentials).not.toHaveBeenCalled()
       expect(spawnMock).not.toHaveBeenCalled()
@@ -725,6 +744,27 @@ describe('bastions command', () => {
       tokenValue: 'AAEAAQ-session-token',
       target: 'i-0a1b2c3d4e5f67890',
     }
+    const privateBastion = { ...bastion, publicAccess: false, publicIp: null }
+
+    beforeEach(() => {
+      promptMocks.fetchBastion.mockResolvedValue(privateBastion)
+    })
+
+    it.each([
+      ['a bastion that is not found', null, 'Bastion host not found: edge'],
+      [
+        'a bastion on a cloud the CLI has no transport for',
+        { ...privateBastion, provider: 'gcp' },
+        'The bastion configuration is not valid.',
+      ],
+    ])('refuses %s without opening a session', async (_case, found, message) => {
+      promptMocks.fetchBastion.mockResolvedValueOnce(found)
+
+      await expect(run(['proxy', 'edge'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(message))
+      expect(sessionMocks.startBastionSession).not.toHaveBeenCalled()
+    })
 
     it("hands stdio to the bastion's session and exits with the plugin's code", async () => {
       sessionMocks.startBastionSession.mockResolvedValueOnce(SESSION)

@@ -29,6 +29,7 @@ export const BASTIONS_QUERY = /* GraphQL */ `
       networkId
       cloudAccountId
       sshUser
+      provider
       publicAccess
       publicIp
       createdAt
@@ -46,6 +47,7 @@ export const BASTION_QUERY = /* GraphQL */ `
       networkId
       cloudAccountId
       sshUser
+      provider
       publicAccess
       publicIp
       createdAt
@@ -78,6 +80,7 @@ export const CREATE_BASTION_MUTATION = /* GraphQL */ `
         networkId
         cloudAccountId
         sshUser
+        provider
         publicAccess
         publicIp
       }

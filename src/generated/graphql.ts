@@ -1287,14 +1287,14 @@ export type GetBastionsQueryVariables = Exact<{
 }>;
 
 
-export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicAccess: boolean, publicIp: string | null, createdAt: string }> };
+export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, provider: string, publicAccess: boolean, publicIp: string | null, createdAt: string }> };
 
 export type GetBastionQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicAccess: boolean, publicIp: string | null, createdAt: string } | null };
+export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, provider: string, publicAccess: boolean, publicIp: string | null, createdAt: string } | null };
 
 export type GetBastionPrivateKeyQueryVariables = Exact<{
   slug: string;
@@ -1308,7 +1308,7 @@ export type CreateBastionMutationVariables = Exact<{
 }>;
 
 
-export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicAccess: boolean, publicIp: string | null } | null } };
+export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, provider: string, publicAccess: boolean, publicIp: string | null } | null } };
 
 export type DestroyBastionMutationVariables = Exact<{
   slug: string;
@@ -1339,7 +1339,7 @@ export type GetTunnelBastionQueryVariables = Exact<{
 }>;
 
 
-export type GetTunnelBastionQuery = { bastion: { id: string, publicAccess: boolean, publicIp: string | null } | null };
+export type GetTunnelBastionQuery = { bastion: { id: string, provider: string, publicAccess: boolean, publicIp: string | null } | null };
 
 export type StartVersionDeploymentMutationVariables = Exact<{
   environment: string;

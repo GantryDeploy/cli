@@ -105,7 +105,9 @@ A deploy fails when the bound Postgres database already holds tables, views, seq
 
 ## Private and public bastions
 
-A bastion is private unless you create it with `--public`. A private bastion has no public address and no open ports. The CLI reaches it by asking Gantry to open an AWS Session Manager session to the bastion's SSH port, then runs SSH through that session. This needs AWS's [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) installed, the same as `gantry shell`. You don't need AWS credentials, and each session is recorded in the team's audit log.
+A bastion is private unless you create it with `--public`. A private bastion has no public address and no open ports. The CLI reaches it by asking Gantry to open a session to the bastion's SSH port through the cloud's session service, then runs SSH through that session. You don't need cloud credentials, and each session is recorded in the team's audit log.
+
+On AWS the session runs through Session Manager, which needs AWS's [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) installed, the same as `gantry shell`. A private bastion on AWS needs a network whose private subnets reach the internet through a NAT gateway.
 
 ```bash
 gantry bastions create --name ops                       # private
@@ -113,7 +115,7 @@ gantry bastions create --name ops --public \
   --allow-cidr 203.0.113.0/24                           # public, SSH from one range
 ```
 
-`--public` gives the bastion a public address that takes SSH from each `--allow-cidr` (any address if you give none). Access is fixed when the bastion is created. To change it, destroy the bastion and create a new one. A private bastion needs a network whose private subnets reach the internet through a NAT gateway.
+`--public` gives the bastion a public address that takes SSH from each `--allow-cidr` (any address if you give none). Access is fixed when the bastion is created. To change it, destroy the bastion and create a new one.
 
 `gantry bastions proxy <slug>` connects stdin and stdout to a private bastion's SSH port, for use as an `ssh` ProxyCommand. `gantry bastions ssh` and `gantry bastions key` use it for private bastions:
 

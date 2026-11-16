@@ -84,14 +84,18 @@ describe('followReleaseOutput', () => {
     await follow(deployments('PROCESSING'))
     await follow(deployments('PROCESSING'))
 
-    expect(graphqlRequest).toHaveBeenNthCalledWith(1, RELEASE_OUTPUT_QUERY, {
-      versionId: VERSION_ID,
-      after: undefined,
-    })
-    expect(graphqlRequest).toHaveBeenNthCalledWith(2, RELEASE_OUTPUT_QUERY, {
-      versionId: VERSION_ID,
-      after: 'c1',
-    })
+    expect(graphqlRequest).toHaveBeenNthCalledWith(
+      1,
+      RELEASE_OUTPUT_QUERY,
+      { versionId: VERSION_ID, after: undefined },
+      { retry: false }
+    )
+    expect(graphqlRequest).toHaveBeenNthCalledWith(
+      2,
+      RELEASE_OUTPUT_QUERY,
+      { versionId: VERSION_ID, after: 'c1' },
+      { retry: false }
+    )
     expect(written).toEqual([
       ['dep_8Kq2mZ', '   INFO  Running migrations.'],
       ['dep_8Kq2mZ', '  2026_11_01_120000_add_invoice_status ... DONE'],

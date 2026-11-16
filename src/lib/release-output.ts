@@ -52,7 +52,9 @@ export function followReleaseOutput(
 
     const { releaseOutput } = await graphqlRequest<ReleaseOutputQuery, ReleaseOutputQueryVariables>(
       RELEASE_OUTPUT_QUERY,
-      { versionId, after: cursor }
+      { versionId, after: cursor },
+      // Every caller polls and retries on its next cycle.
+      { retry: false }
     )
     const previous = cursor
     cursor = releaseOutput.cursor ?? cursor

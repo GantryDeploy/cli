@@ -7,6 +7,7 @@ vi.mock(import('./client'), async (importOriginal) => ({
   graphqlRequest,
 }))
 
+const { GantryApiError } = await import('./client')
 const { serviceDeploymentSubtasks } = await import('./deployment-poll')
 
 describe('serviceDeploymentSubtasks', () => {
@@ -70,6 +71,27 @@ describe('serviceDeploymentSubtasks', () => {
         name: 'api',
         message: 'api: Deployment failed - There was an error while deploying the service.',
       }
+    )
+  })
+
+  it('reports the API unreachable after ten failed polls of one attempt each', async () => {
+    graphqlRequest.mockRejectedValue(
+      new GantryApiError('Gantry API is temporarily unavailable. (HTTP 503)', undefined, 503)
+    )
+    const onFailure = vi.fn()
+    const [api] = subtasksFor(['dep_api'], onFailure)
+    const settled = expect(api.task({}, { title: '', output: '' })).rejects.toThrow(
+      'dep_api: Deployment status unknown - CLI could not reach Gantry API after 10 attempts. Last error (HTTP 503): Gantry API is temporarily unavailable. (HTTP 503)'
+    )
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+
+    await settled
+    expect(graphqlRequest).toHaveBeenCalledTimes(10)
+    expect(graphqlRequest).toHaveBeenLastCalledWith(
+      expect.stringContaining('DeploymentsByVersion'),
+      { versionId: 'w8fs2k' },
+      { retry: false }
     )
   })
 

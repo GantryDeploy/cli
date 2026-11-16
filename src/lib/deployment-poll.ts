@@ -294,7 +294,7 @@ async function pollAllDeployments(
       const result = await graphqlRequest<
         DeploymentsByVersionQuery,
         DeploymentsByVersionQueryVariables
-      >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId })
+      >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId }, { retry: false })
 
       consecutiveNetworkErrors = 0
       lastActivityTime = Date.now()

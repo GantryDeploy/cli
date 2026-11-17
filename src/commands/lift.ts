@@ -32,6 +32,8 @@ import {
 import type { VersionDeployment } from '../lib/deployment-poll'
 import { isTerminalStatus } from '../lib/deployment-status'
 import { buildDockerBuildArgs, runDocker } from '../lib/exec'
+import { liftExistingBuild, parseBuildNumber } from '../lib/lift-build'
+import type { LiftSource } from '../lib/lift-build'
 import { readLiftConfig } from '../lib/lift-config'
 import type { LiftConfig } from '../lib/lift-config'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
@@ -122,6 +124,8 @@ interface LiftOptions extends DeployCommandOptions {
   verbose?: boolean
   waitForCleanup?: boolean
   var?: string[]
+  from?: string
+  build?: string
 }
 
 interface LiftContext {
@@ -218,10 +222,50 @@ export function envBlockedTitle(paths: string[]): string {
   return `Copy project files (left out ${noun}: ${paths.join(', ')}; add "!<path>" to .gantryignore to deploy one)`
 }
 
+const LOCAL_ONLY_FLAGS: [keyof LiftOptions, string][] = [
+  ['file', '--file'],
+  ['force', '--force'],
+  ['delete', '--delete'],
+  ['waitForCleanup', '--wait-for-cleanup'],
+]
+
+/**
+ * The build `--from` or `--build` names, null for a lift of the local project, or the message
+ * for flags that can't go together.
+ */
+export function existingBuildSource(options: LiftOptions): LiftSource | null | { refused: string } {
+  if (options.from === undefined && options.build === undefined) return null
+  if (options.from !== undefined && options.build !== undefined) {
+    return { refused: '--from and --build cannot be used together.' }
+  }
+  const local = LOCAL_ONLY_FLAGS.filter(([key]) => options[key] !== undefined).map(
+    ([, flag]) => flag
+  )
+  if (options.var?.length) local.push('--var')
+  if (local.length > 0) {
+    const flag = options.from === undefined ? '--build' : '--from'
+    return { refused: `${local.join(', ')} cannot be used with ${flag}.` }
+  }
+  if (options.from !== undefined) return { from: options.from }
+
+  const buildNumber = parseBuildNumber(options.build ?? '')
+  if (buildNumber === null) {
+    return { refused: '--build must be a build number, such as 12 or v12.' }
+  }
+  return { buildNumber }
+}
+
 export function registerLiftCommand(program: Command): void {
   program
     .command('lift <environment>')
-    .description('Deploy a project to an environment')
+    .description(
+      'Deploy a project to an environment, or with --from or --build, a build that already exists'
+    )
+    .option(
+      '--from <environment>',
+      "Deploy that environment's live build instead of building (the same environment deploys its live build again)"
+    )
+    .option('--build <number>', 'Deploy the build with this number, such as 12 or v12')
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-f, --file <path>', 'Path to gantry.yml (defaults to ./gantry.yml)')
     .option('--force', 'Force re-upload all files, bypassing deduplication')
@@ -240,6 +284,17 @@ export function registerLiftCommand(program: Command): void {
     .action(async (environment: string, options: LiftOptions, command: Command) => {
       const cwd = globalCwd(command) ?? options.cwd
       const workingDir = cwd ? path.resolve(cwd) : process.cwd()
+
+      const source = existingBuildSource(options)
+      if (source !== null) {
+        if ('refused' in source) {
+          printError(source.refused)
+          process.exit(1)
+        }
+        await liftExistingBuild({ environment, source, workingDir, options })
+        return
+      }
+
       // `--file` moves only where the config is read from; the working directory is still what ships.
       const yamlPath = options.file
         ? path.resolve(workingDir, options.file)

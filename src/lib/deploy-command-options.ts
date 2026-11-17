@@ -1,6 +1,6 @@
 import { Option } from 'commander'
 
-/** The pre- and post-deploy flags that `lift`, `promote` and `redeploy` all take. */
+/** The pre- and post-deploy flags that every `lift` takes. */
 export interface DeployCommandOptions {
   skipPreDeploy?: boolean
   skipPostDeploy?: boolean

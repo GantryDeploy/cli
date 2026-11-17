@@ -110,7 +110,7 @@ interface Scope {
   label: string
   /** Default file for pull and push. */
   file: string
-  /** Set for environment scopes, to suggest the redeploy. */
+  /** Set for environment scopes, to suggest lifting the live build again. */
   environmentSlug?: string
 }
 
@@ -207,7 +207,7 @@ function resolveScope(options: ScopeOptions, command: Command): Scope {
 
 function nextDeployHint(scope: Scope): string {
   return scope.environmentSlug
-    ? `Takes effect on the next deploy of ${scope.environmentSlug}. Run \`gantry redeploy ${scope.environmentSlug}\` to apply it now.`
+    ? `Takes effect on the next deploy of ${scope.environmentSlug}. Run \`gantry lift ${scope.environmentSlug} --from ${scope.environmentSlug}\` to apply it now.`
     : 'Takes effect on the next deploy of each environment it covers.'
 }
 
@@ -255,8 +255,8 @@ async function printResolved(scope: Scope, key: string | undefined): Promise<voi
   const data = await graphqlRequest<ResolvedServiceEnvQuery, ResolvedServiceEnvQueryVariables>(
     RESOLVED_SERVICE_ENV_QUERY,
     {
-      projectId: target.projectId as string,
-      environmentSlug: target.environmentSlug as string,
+      projectId: target.projectId!,
+      environmentSlug: target.environmentSlug!,
       service: target.service,
     }
   )

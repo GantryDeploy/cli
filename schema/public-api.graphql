@@ -1,24 +1,3 @@
-input ActivationInput {
-  """Environment slug (e.g. "production")"""
-  environment: String!
-
-  """Project ID"""
-  projectId: String!
-
-  """Target version (rollback/promote) or canary version (canary)"""
-  versionId: String
-
-  """Canary weight, 0–100"""
-  weight: Float
-}
-
-type ActivationResult {
-  """ID of the activation deployment"""
-  deploymentId: String
-  message: String
-  success: Boolean!
-}
-
 """Inputs for an artifact-upload CLI task"""
 type ArtifactUploadCliInputs {
   """
@@ -1045,6 +1024,17 @@ type CreateVersionResult {
   versionNumber: Float
 }
 
+input CutoverInput {
+  """Also complete the release, dropping the previous version"""
+  complete: Boolean
+
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+}
+
 type Database {
   """Days of automatic backups. 0 means backups are off."""
   backupRetentionDays: Int!
@@ -1517,6 +1507,35 @@ The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://
 """
 scalar JSON
 
+"""Set exactly one source: from or buildNumber."""
+input LiftBuildInput {
+  """Project build number to lift"""
+  buildNumber: Int
+
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Environment slug whose live build is lifted"""
+  from: String
+
+  """Project ID"""
+  projectId: String!
+}
+
+type LiftBuildResult {
+  message: String
+  success: Boolean!
+
+  """The new version in the environment"""
+  versionId: String
+
+  """The build's number, which the version shares"""
+  versionNumber: Int
+
+  """Configuration of the new version, for passing to startDeployment"""
+  yamlSnapshot: String
+}
+
 type LoadBalancer {
   cloudAccountId: String!
   createdAt: String!
@@ -1622,7 +1641,8 @@ type LogPage {
 }
 
 type Mutation {
-  abortCanary(input: ActivationInput!, team: String): ActivationResult!
+  """Send all traffic back to the version that was live before the release."""
+  abortRelease(input: ReleaseEnvironmentInput!, team: String): ReleaseOperationResult!
 
   """
   Move a database's objects to Gantry's owner role so service users can be granted access. Each previous owner becomes a member of the owner role, so existing users keep working with owner rights over the whole database. Returns a deploymentId to poll.
@@ -1639,6 +1659,9 @@ type Mutation {
   claimStep(stepId: String!, team: String): ClaimStepResult!
   cleanUp(ids: [ID!]!, team: String): CleanupResult!
   completeCliStep(fileResults: [FileUploadResultInput!], outputs: CliTaskOutputsInput!, stepId: String!, team: String): CompleteCliStepResult!
+
+  """Drop the previous version of a release that has been cut over."""
+  completeRelease(input: ReleaseEnvironmentInput!, team: String): ReleaseOperationResult!
   createBastion(input: CreateBastionInput!, team: String): BastionMutationResult!
   createCache(input: CreateCacheInput!, team: String): CacheMutationResult!
   createCertificate(input: CreateCertificateInput!, team: String): CertificateMutationResult!
@@ -1652,15 +1675,24 @@ type Mutation {
   createProject(input: CreateProjectInput!, team: String): ProjectMutationResult!
   createSecret(input: CreateSecretInput!, team: String): SecretMutationResult!
   createVersion(input: CreateVersionInput!, team: String): CreateVersionResult!
+
+  """Send all traffic to the new version of the release in progress."""
+  cutover(input: CutoverInput!, team: String): ReleaseOperationResult!
   deleteSecret(id: String!, team: String): SecretMutationResult!
   destroyBastion(slug: String!, team: String): BastionMutationResult!
   failCliStep(error: String!, stepId: String!, team: String): FailCliStepResult!
-  promoteBlueGreen(input: ActivationInput!, team: String): ActivationResult!
-  promoteCanary(input: ActivationInput!, team: String): ActivationResult!
-  promoteVersion(input: PromoteVersionInput!, team: String): PromoteVersionResult!
-  redeployVersion(input: RedeployVersionInput!, team: String): RedeployVersionResult!
+
+  """
+  Lift a build that already exists: another environment's live build, or a build by number.
+  """
+  liftBuild(input: LiftBuildInput!, team: String): LiftBuildResult!
+
+  """Apply the routing of the environment's live versions again."""
+  reapplyRouting(input: ReleaseEnvironmentInput!, team: String): ReleaseOperationResult!
   replaceEnvVars(input: SetEnvVarsInput!, team: String): EnvVarsMutationResult!
-  rollbackDeployment(input: ActivationInput!, team: String): ActivationResult!
+
+  """Make an earlier version of the environment live."""
+  rollback(input: RollbackInput!, team: String): ReleaseOperationResult!
 
   """
   Give a password service user a new password. IN_PLACE changes it on the same user now, and running instances fail to connect until they restart. STAGED (plans with Advanced Deployments) creates the user in the binding's other slot, which the next deploy switches to, while the current user keeps working. Returns a deploymentId to poll.
@@ -1678,8 +1710,10 @@ type Mutation {
     serviceUserId: String!
     team: String
   ): DatabaseMutationResult!
-  setCanary(input: ActivationInput!, team: String): ActivationResult!
   setEnvVars(input: SetEnvVarsInput!, team: String): EnvVarsMutationResult!
+
+  """Send a share of traffic to the new version of a canary release."""
+  shiftTraffic(input: ShiftTrafficInput!, team: String): ReleaseOperationResult!
   startBastionSession(slug: String!, team: String): StartBastionSessionResult!
   startCommandRun(command: [String!]!, environmentSlug: String!, function: String, projectId: String!, service: String!, team: String): StartCommandRunResult!
   startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!
@@ -1687,7 +1721,6 @@ type Mutation {
   startTeardown(input: StartTeardownInput!, team: String): StartTeardownResult!
   submitManifest(input: SubmitManifestInput!, team: String): SubmitManifestResult!
   triggerCertificateValidation(id: String!, team: String): CertificateMutationResult!
-  triggerReroute(input: TriggerRerouteInput!, team: String): TriggerRerouteResult!
   unsetEnvVars(input: UnsetEnvVarsInput!, team: String): EnvVarsMutationResult!
 
   """
@@ -1840,40 +1873,6 @@ type ProjectMutationResult {
   success: Boolean!
 }
 
-"""
-Set exactly one source: sourceEnvironmentId, buildNumber, or sourceVersionId for older CLIs.
-"""
-input PromoteVersionInput {
-  """Project-wide build number to promote"""
-  buildNumber: Int
-
-  """Environment whose live version is promoted"""
-  sourceEnvironmentId: String
-
-  """Deployed version ID to promote from"""
-  sourceVersionId: String
-
-  """Target environment ID to promote to"""
-  targetEnvironmentId: String!
-}
-
-type PromoteVersionResult {
-  message: String
-
-  """New version ID in the target environment"""
-  newVersionId: String
-
-  """New version number in the target environment"""
-  newVersionNumber: Int
-
-  """Promotion record ID"""
-  promotionId: String
-  success: Boolean!
-
-  """YAML snapshot from the source version (for passing to startDeployment)"""
-  yamlSnapshot: String
-}
-
 type Query {
   bastion(slug: String, team: String): Bastion
   bastionPrivateKey(slug: String, team: String): BastionPrivateKeyResult!
@@ -1919,6 +1918,11 @@ type Query {
   project(id: String, slug: String, team: String): Project
   projects(team: String): [Project!]!
   releaseOutput(after: String, team: String, versionId: String!): ReleaseOutput!
+
+  """
+  The environment's live versions and the release in progress. Null before anything goes live.
+  """
+  releaseStatus(environment: String!, projectId: String!, team: String): ReleaseStatus
   resolveProject(input: ResolveProjectInput!): ResolveProjectResult!
   resolvedServiceEnv(environmentSlug: String!, projectId: String!, service: String!, team: String): ResolvedServiceEnv!
   secret(id: String!, team: String): Secret
@@ -1930,30 +1934,6 @@ type Query {
   versionRouteUrls(team: String, versionId: String!): [VersionRouteUrl!]!
   versionsByProject(environmentId: String!, projectId: String!, team: String): [Version!]!
   whoami: WhoAmIResponse!
-}
-
-input RedeployVersionInput {
-  """Environment slug whose live version is redeployed"""
-  environment: String!
-
-  """Project ID"""
-  projectId: String!
-}
-
-type RedeployVersionResult {
-  message: String
-
-  """New version ID in the environment"""
-  newVersionId: String
-
-  """The build's number, shared with the version it redeploys"""
-  newVersionNumber: Int
-  success: Boolean!
-
-  """
-  Configuration of the redeployed version (for passing to startDeployment)
-  """
-  yamlSnapshot: String
 }
 
 type RegionalCertificate {
@@ -1975,6 +1955,21 @@ type RegionalCertificate {
   validationAttempts: Float!
 }
 
+input ReleaseEnvironmentInput {
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+}
+
+type ReleaseOperationResult {
+  """Deployment ID to poll"""
+  deploymentId: String
+  message: String
+  success: Boolean!
+}
+
 """
 A page of a version's release and post-deploy command output, oldest first
 """
@@ -1991,6 +1986,48 @@ type ReleaseOutputLine {
   message: String!
   stepId: String
   timestamp: String!
+}
+
+"""A version's part in the environment's release"""
+enum ReleaseRole {
+  CANARY
+  LIVE
+  PREVIOUS
+  STAGED
+}
+
+"""
+Where the release in progress stands: staged at 0%, split across both versions, cut over with the previous version kept, or none.
+"""
+enum ReleaseState {
+  CUT_OVER
+  NONE
+  SPLIT
+  STAGED
+}
+
+type ReleaseStatus {
+  """When the current traffic split was applied"""
+  since: String!
+  state: ReleaseState!
+
+  """Deployment strategy the environment releases under"""
+  strategy: String!
+  versions: [ReleaseVersion!]!
+}
+
+type ReleaseVersion {
+  """When the version was lifted"""
+  createdAt: String!
+  number: Int!
+  role: ReleaseRole!
+
+  """The slot (a or b) the version is served from"""
+  slot: String
+  versionId: String!
+
+  """Share of traffic, 0 to 100"""
+  weight: Int!
 }
 
 type ResolutionErrorType {
@@ -2079,6 +2116,19 @@ type ResourceTypeGroup {
   displayName: String!
   resourceType: String!
   resources: [CloudResource!]!
+}
+
+input RollbackInput {
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+
+  """
+  Version to make live. Defaults to the version that was live before the environment's current one.
+  """
+  versionId: String
 }
 
 type RoutingPathEntryType {
@@ -2177,6 +2227,20 @@ input SetEnvVarsInput {
   """
   service: String
   variables: [EnvVarInput!]!
+}
+
+input ShiftTrafficInput {
+  """Also complete the release, dropping the previous version. Only at 100."""
+  complete: Boolean
+
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Share of traffic, 0 to 100, the new version takes"""
+  percent: Int!
+
+  """Project ID"""
+  projectId: String!
 }
 
 type StartBastionSessionResult {
@@ -2303,27 +2367,6 @@ type TeardownResource {
   resourceId: String
   resourceType: String!
   status: String!
-}
-
-input TriggerRerouteInput {
-  """The full gantry.yml configuration (used to identify project)"""
-  config: JSON!
-
-  """Environment name to reroute (e.g., "dev", "production")"""
-  environment: String!
-}
-
-type TriggerRerouteResult {
-  """Deployment ID for polling"""
-  deploymentId: String
-  message: String
-  success: Boolean!
-
-  """Version ID of the live version"""
-  versionId: String
-
-  """Version number of the live version"""
-  versionNumber: Float
 }
 
 input UnsetEnvVarsInput {

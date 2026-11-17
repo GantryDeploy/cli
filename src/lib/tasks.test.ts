@@ -1311,7 +1311,7 @@ describe('object-upload task flow', () => {
 
     it('needs the project files when there is nothing to copy', async () => {
       await expect(executeCliTask(objectUpload(), { cwd: '/srv/shop' })).rejects.toThrow(
-        "This step needs the project files, and a promote doesn't stage them"
+        "This step needs the project files, and a lift of an existing build doesn't stage them"
       )
     })
   })
@@ -1450,7 +1450,7 @@ describe('artifact-upload task flow', () => {
 
     it('needs the project files when there is nothing to copy', async () => {
       await expect(executeCliTask(artifactUpload(), { cwd: '/srv/shop' })).rejects.toThrow(
-        "This step needs the project files, and a promote doesn't stage them"
+        "This step needs the project files, and a lift of an existing build doesn't stage them"
       )
     })
   })
@@ -1512,7 +1512,7 @@ describe('container-push from a build in another region or cloud account', () =>
 
   it('pushes no local image during a promote', async () => {
     await expect(executeCliTask(containerPush(target), { cwd: '/srv/shop' })).rejects.toThrow(
-      "This step needs the project files, and a promote doesn't stage them"
+      "This step needs the project files, and a lift of an existing build doesn't stage them"
     )
     expect(spawnCalls).toEqual([])
   })

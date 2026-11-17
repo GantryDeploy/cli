@@ -18,7 +18,7 @@ Use the CLI locally or in CI with a `gantry.yml` configuration file.
 
 - **Check and inspect** a config before anything is deployed - validate it, see the composed result after blueprints and variables resolve, and see which services and routes a deploy would produce.
 - **Deploy** - build each service, upload what changed, provision the infrastructure the config asks for, and route traffic to the new version.
-- **Control releases** - promote a version between environments, roll back, or shift traffic gradually.
+- **Control releases** - ship a build from one environment to another, roll back, or shift traffic gradually.
 - **Manage infrastructure** - networks, clusters, databases, caches, filesystems, load balancers, domains, secrets.
 - **Access running services** - run a one-off command in a live service, or open a local tunnel to a database or cache through a bastion, so nothing private needs a public address.
 
@@ -94,6 +94,36 @@ vendor/*
 ```
 
 `.git` and the `.gantry` staging directory are never copied.
+
+## Releases
+
+`gantry lift <env>` builds the project and ships it. Two flags ship a build that already exists instead, with the configuration it was built with:
+
+```sh
+# Ship staging's live build to production
+gantry lift production --from staging
+
+# Ship production's live build again, for example after `gantry env set`
+gantry lift production --from production
+
+# Ship build 12
+gantry lift production --build 12
+```
+
+Under the `standard` deployment strategy a lift goes live at once. Under `blue-green` and `canary` it is staged at 0% next to the live version, and `gantry deploy` moves traffic:
+
+| Command | What it does |
+|---|---|
+| `gantry deploy status <env>` | Shows the live version, the staged or canary version, their traffic and the next step |
+| `gantry deploy shift <env> --percent <n>` | Sends n% of traffic to the new version (`canary` only). 100 is a cutover |
+| `gantry deploy cutover <env>` | Sends all traffic to the new version. The previous version stays ready |
+| `gantry deploy abort <env>` | Sends all traffic back to the version live before the release |
+| `gantry deploy complete <env>` | Drops the previous version after a cutover |
+| `gantry rollback <env> [--version <id>]` | Makes an earlier version live, by default the one live before the current one |
+
+`--complete` on `cutover`, or on `shift --percent 100`, completes the release in the same step. `cutover`, `shift` and `abort` act on the release in progress and take no version. During a canary split, `rollback` only accepts the live version; abort the release first.
+
+Each command waits until the change is applied and exits non-zero if it fails, is cancelled, or is skipped because a newer deployment replaced it. An edge can take a while to apply: after 30 minutes the command stops waiting and prints how to check the deployment, which keeps running.
 
 ## Database users
 

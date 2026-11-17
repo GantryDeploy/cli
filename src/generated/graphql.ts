@@ -2,17 +2,6 @@
 type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
 /** Internal type. DO NOT USE DIRECTLY. */
 export type Incremental<T> = T | { [P in keyof T]?: P extends ' $fragmentName' | '__typename' ? T[P] : never };
-export type ActivationInput = {
-  /** Environment slug (e.g. "production") */
-  environment: string;
-  /** Project ID */
-  projectId: string;
-  /** Target version (rollback/promote) or canary version (canary) */
-  versionId?: string | null | undefined;
-  /** Canary weight, 0–100 */
-  weight?: number | null | undefined;
-};
-
 export type ArtifactUploadCliOutputsInput = {
   bucketName: string;
   objectKey: string;
@@ -428,6 +417,15 @@ export type CreateSecretInput = {
   name: string;
 };
 
+export type CutoverInput = {
+  /** Also complete the release, dropping the previous version */
+  complete?: boolean | null | undefined;
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Project ID */
+  projectId: string;
+};
+
 /** Database engine type */
 export type DatabaseEngineEnum =
   | 'MARIADB'
@@ -556,6 +554,18 @@ export type IntRangeInput = {
   min: number;
 };
 
+/** Set exactly one source: from or buildNumber. */
+export type LiftBuildInput = {
+  /** Project build number to lift */
+  buildNumber?: number | null | undefined;
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Environment slug whose live build is lifted */
+  from?: string | null | undefined;
+  /** Project ID */
+  projectId: string;
+};
+
 /** Status of a load balancer */
 export type LoadBalancerStatusEnum =
   | 'ACTIVE'
@@ -595,30 +605,41 @@ export type PostDeployState =
   | 'SKIPPED'
   | 'STARTED';
 
-/** Set exactly one source: sourceEnvironmentId, buildNumber, or sourceVersionId for older CLIs. */
-export type PromoteVersionInput = {
-  /** Project-wide build number to promote */
-  buildNumber?: number | null | undefined;
-  /** Environment whose live version is promoted */
-  sourceEnvironmentId?: string | null | undefined;
-  /** Deployed version ID to promote from */
-  sourceVersionId?: string | null | undefined;
-  /** Target environment ID to promote to */
-  targetEnvironmentId: string;
-};
-
-export type RedeployVersionInput = {
-  /** Environment slug whose live version is redeployed */
+export type ReleaseEnvironmentInput = {
+  /** Environment slug (e.g. "production") */
   environment: string;
   /** Project ID */
   projectId: string;
 };
+
+/** A version's part in the environment's release */
+export type ReleaseRole =
+  | 'CANARY'
+  | 'LIVE'
+  | 'PREVIOUS'
+  | 'STAGED';
+
+/** Where the release in progress stands: staged at 0%, split across both versions, cut over with the previous version kept, or none. */
+export type ReleaseState =
+  | 'CUT_OVER'
+  | 'NONE'
+  | 'SPLIT'
+  | 'STAGED';
 
 export type ResolveProjectInput = {
   environment?: string | null | undefined;
   projectId: string;
   variables?: Array<VariableOverrideInput> | null | undefined;
   yaml: string;
+};
+
+export type RollbackInput = {
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Project ID */
+  projectId: string;
+  /** Version to make live. Defaults to the version that was live before the environment's current one. */
+  versionId?: string | null | undefined;
 };
 
 export type SecretKeyValueInput = {
@@ -639,6 +660,17 @@ export type SetEnvVarsInput = {
   /** ENVIRONMENT only: a service name, for an override that applies to that service only */
   service?: string | null | undefined;
   variables: Array<EnvVarInput>;
+};
+
+export type ShiftTrafficInput = {
+  /** Also complete the release, dropping the previous version. Only at 100. */
+  complete?: boolean | null | undefined;
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Share of traffic, 0 to 100, the new version takes */
+  percent: number;
+  /** Project ID */
+  projectId: string;
 };
 
 export type StartTeardownInput = {
@@ -713,48 +745,6 @@ export type VariableOverrideInput = {
   name: string;
   value: string;
 };
-
-export type GetActivationDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetActivationDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null } | null };
-
-export type AbortCanaryMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type AbortCanaryMutation = { abortCanary: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type PromoteBlueGreenMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type PromoteBlueGreenMutation = { promoteBlueGreen: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type PromoteCanaryMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type PromoteCanaryMutation = { promoteCanary: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type RollbackDeploymentMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type RollbackDeploymentMutation = { rollbackDeployment: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type SetCanaryMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type SetCanaryMutation = { setCanary: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type GetCachesQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -925,6 +915,56 @@ export type GetDatabaseOperationQueryVariables = Exact<{
 
 
 export type GetDatabaseOperationQuery = { deployment: { status: DeploymentStatus, lastMessage: string | null } | null };
+
+export type ReleaseStatusQueryVariables = Exact<{
+  projectId: string;
+  environment: string;
+}>;
+
+
+export type ReleaseStatusQuery = { releaseStatus: { strategy: string, state: ReleaseState, since: string, versions: Array<{ versionId: string, number: number, role: ReleaseRole, weight: number, createdAt: string }> } | null };
+
+export type CutoverMutationVariables = Exact<{
+  input: CutoverInput;
+}>;
+
+
+export type CutoverMutation = { cutover: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type ShiftTrafficMutationVariables = Exact<{
+  input: ShiftTrafficInput;
+}>;
+
+
+export type ShiftTrafficMutation = { shiftTraffic: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type AbortReleaseMutationVariables = Exact<{
+  input: ReleaseEnvironmentInput;
+}>;
+
+
+export type AbortReleaseMutation = { abortRelease: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type CompleteReleaseMutationVariables = Exact<{
+  input: ReleaseEnvironmentInput;
+}>;
+
+
+export type CompleteReleaseMutation = { completeRelease: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type RollbackMutationVariables = Exact<{
+  input: RollbackInput;
+}>;
+
+
+export type RollbackMutation = { rollback: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type ReapplyRoutingMutationVariables = Exact<{
+  input: ReleaseEnvironmentInput;
+}>;
+
+
+export type ReapplyRoutingMutation = { reapplyRouting: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type GetDeploymentQueryVariables = Exact<{
   id: string;
@@ -1142,42 +1182,6 @@ export type CreateProjectMutationVariables = Exact<{
 
 
 export type CreateProjectMutation = { createProject: { success: boolean, message: string | null, project: { id: string, name: string, slug: string, tag: string | null, cloudProvider: string | null, createdAt: string } | null } };
-
-export type PromoteVersionMutationVariables = Exact<{
-  input: PromoteVersionInput;
-}>;
-
-
-export type PromoteVersionMutation = { promoteVersion: { success: boolean, message: string | null, promotionId: string | null, newVersionId: string | null, newVersionNumber: number | null, yamlSnapshot: string | null } };
-
-export type GetPromoteTargetEnvironmentsQueryVariables = Exact<{
-  projectId: string;
-}>;
-
-
-export type GetPromoteTargetEnvironmentsQuery = { environments: Array<{ id: string, name: string, slug: string }> };
-
-export type RedeployVersionMutationVariables = Exact<{
-  input: RedeployVersionInput;
-}>;
-
-
-export type RedeployVersionMutation = { redeployVersion: { success: boolean, message: string | null, newVersionId: string | null, newVersionNumber: number | null, yamlSnapshot: string | null } };
-
-export type TriggerRerouteMutationVariables = Exact<{
-  config: Record<string, unknown>;
-  environment: string;
-}>;
-
-
-export type TriggerRerouteMutation = { triggerReroute: { success: boolean, message: string | null, deploymentId: string | null, versionId: string | null, versionNumber: number | null } };
-
-export type GetRerouteDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetRerouteDeploymentQuery = { deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, environmentName: string | null, serviceName: string | null } | null };
 
 export type StartCommandRunMutationVariables = Exact<{
   projectId: string;
@@ -1435,6 +1439,13 @@ export type GetCloudRegionChoicesQueryVariables = Exact<{
 
 export type GetCloudRegionChoicesQuery = { cloudRegions: Array<{ code: string, name: string }> };
 
+export type LiftBuildMutationVariables = Exact<{
+  input: LiftBuildInput;
+}>;
+
+
+export type LiftBuildMutation = { liftBuild: { success: boolean, message: string | null, versionId: string | null, versionNumber: number | null, yamlSnapshot: string | null } };
+
 export type ReleaseOutputQueryVariables = Exact<{
   versionId: string;
   after?: string | null | undefined;
@@ -1442,6 +1453,13 @@ export type ReleaseOutputQueryVariables = Exact<{
 
 
 export type ReleaseOutputQuery = { releaseOutput: { cursor: string | null, lines: Array<{ message: string, deploymentId: string }> } };
+
+export type GetReleaseDeploymentQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetReleaseDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null } | null };
 
 export type ResolveProjectQueryVariables = Exact<{
   input: ResolveProjectInput;

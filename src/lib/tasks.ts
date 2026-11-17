@@ -55,7 +55,7 @@ type PresignedUpload = NonNullable<
 >['store'][number]
 
 export interface TaskContext {
-  /** The staged project files. A promote has none: it only copies builds that already exist. */
+  /** The staged project files. A lift of an existing build has none: it only copies builds that already exist. */
   stagingDir?: string
   cwd: string
   force?: boolean
@@ -69,7 +69,9 @@ export interface TaskResult {
 
 function requireStagingDir(context: TaskContext): string {
   if (context.stagingDir === undefined) {
-    throw new Error("This step needs the project files, and a promote doesn't stage them")
+    throw new Error(
+      "This step needs the project files, and a lift of an existing build doesn't stage them"
+    )
   }
   return context.stagingDir
 }

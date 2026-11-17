@@ -2,13 +2,13 @@ import { readFileSync } from 'fs'
 
 import { Command } from 'commander'
 
-import { registerActivationCommands } from './commands/activation'
 import { registerBastionsCommand } from './commands/bastions'
 import { registerCachesCommand } from './commands/caches'
 import { registerCleanupCommand } from './commands/cleanup'
 import { registerCloudsCommand } from './commands/clouds'
 import { registerClustersCommand } from './commands/clusters'
 import { registerDatabasesCommand } from './commands/databases'
+import { registerDeployCommand, registerRollbackCommand } from './commands/deploy'
 import { registerDeploymentsCommand } from './commands/deployments'
 import { registerDomainsCommand } from './commands/domains'
 import { registerEnvCommand } from './commands/env'
@@ -21,10 +21,7 @@ import { registerLogsCommand } from './commands/logs'
 import { registerNetworksCommand } from './commands/networks'
 import { registerPreviewCommand } from './commands/preview'
 import { registerProjectsCommand } from './commands/projects'
-import { registerPromoteCommand } from './commands/promote'
-import { registerRedeployCommand } from './commands/redeploy'
 import { registerRegionsCommand } from './commands/regions'
-import { registerRerouteCommand } from './commands/reroute'
 import { registerResolveCommand } from './commands/resolve'
 import { registerRunCommand } from './commands/run'
 import { registerSecretsCommand } from './commands/secrets'
@@ -78,15 +75,13 @@ registerLogsCommand(program)
 registerDatabasesCommand(program)
 registerFilesystemsCommand(program)
 registerLiftCommand(program)
+registerRollbackCommand(program)
+registerDeployCommand(program)
 registerCleanupCommand(program)
 registerPreviewCommand(program)
 registerResolveCommand(program)
 registerValidateCommand(program)
-registerPromoteCommand(program)
-registerRedeployCommand(program)
 registerRegionsCommand(program)
-registerRerouteCommand(program)
-registerActivationCommands(program)
 registerSecretsCommand(program)
 registerVersionsCommand(program)
 registerDeploymentsCommand(program)

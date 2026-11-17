@@ -590,12 +590,12 @@ describe('lift command', () => {
     )
   })
 
-  it('stops waiting on routing when its deployment disappears', async () => {
+  it('exits non-zero when the routing deployment disappears', async () => {
     handlers.GetRoutingDeployment = () => ({ deployment: null })
 
-    await lift(['production'])
+    await expect(lift(['production'])).rejects.toThrow(ExitError)
 
-    expect(mocks.printError).not.toHaveBeenCalled()
+    expect(mocks.printError).toHaveBeenCalledWith('Routing deployment dep_r not found.')
     expect(calls('VersionRouteUrls')).toHaveLength(0)
   })
 
@@ -645,6 +645,67 @@ describe('lift command', () => {
     await expect(lift(['production'])).rejects.toThrow(ExitError)
 
     expect(mocks.printError).toHaveBeenCalledWith('Failed to start deployment')
+  })
+
+  describe('a build that already exists', () => {
+    const snapshot = JSON.stringify({ type: 'project', id: 'proj_1', environments: {} })
+
+    beforeEach(() => {
+      handlers.LiftBuild = () => ({
+        liftBuild: { success: true, versionId: 'ver_9', versionNumber: 12, yamlSnapshot: snapshot },
+      })
+      handlers.StartVersionDeployment = () => ({
+        startDeployment: { success: true, deploymentIds: ['dep_1'], versionId: 'ver_9' },
+      })
+    })
+
+    it.each([
+      [['--from', 'staging'], { from: 'staging' }],
+      [['--from', 'production'], { from: 'production' }],
+      [['--build', 'v12'], { buildNumber: 12 }],
+      [['--build', '12'], { buildNumber: 12 }],
+    ])('lifts %j without building or reading the local config', async (flags, source) => {
+      await lift(['production', ...flags])
+
+      expect(calls('LiftBuild')[0]?.[1]).toEqual({
+        input: { projectId: 'proj_1', environment: 'production', ...source },
+      })
+      expect(calls('StartVersionDeployment')[0]?.[1]).toMatchObject({
+        environment: 'production',
+        versionId: 'ver_9',
+        config: JSON.parse(snapshot) as unknown,
+      })
+      expect(mocks.resolveYaml).not.toHaveBeenCalled()
+      expect(calls('CreateVersion')).toHaveLength(0)
+      expect(mocks.printError).not.toHaveBeenCalled()
+    })
+
+    it('exits with the API message when the build cannot be lifted', async () => {
+      handlers.LiftBuild = () => ({
+        liftBuild: { success: false, message: 'staging has no live version to lift.' },
+      })
+
+      await expect(lift(['production', '--from', 'staging'])).rejects.toThrow(ExitError)
+
+      expect(mocks.printError).toHaveBeenCalledWith('staging has no live version to lift.')
+      expect(calls('StartVersionDeployment')).toHaveLength(0)
+    })
+
+    it.each([
+      [['--from', 'staging', '--build', '12'], '--from and --build cannot be used together.'],
+      [['--build', 'latest'], '--build must be a build number, such as 12 or v12.'],
+      [['--build', 'v0'], '--build must be a build number, such as 12 or v12.'],
+      [['--from', 'staging', '--force'], '--force cannot be used with --from.'],
+      [
+        ['--build', '12', '--file', 'other.yml', '--var', 'php=8.4'],
+        '--file, --var cannot be used with --build.',
+      ],
+    ])('refuses %j before calling the API', async (flags, message) => {
+      await expect(lift(['production', ...flags])).rejects.toThrow(ExitError)
+
+      expect(mocks.printError).toHaveBeenCalledWith(message)
+      expect(mocks.graphqlRequest).not.toHaveBeenCalled()
+    })
   })
 
   it('cancels every deployment on the first Ctrl+C and exits 130 on the second', async () => {
@@ -1373,13 +1434,22 @@ describe('lift command', () => {
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
-  it('settles on a cancelled routing deployment without fetching URLs', async () => {
-    handlers.GetRoutingDeployment = () => ({ deployment: { id: 'dep_r', status: 'CANCELLED' } })
+  it.each([
+    ['CANCELLED', 'Routing was cancelled'],
+    ['SKIPPED', 'Routing was skipped - A newer deployment already replaced this one.'],
+  ])('exits non-zero on a %s routing deployment without fetching URLs', async (status, error) => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_r',
+        status,
+        lastMessage: status === 'SKIPPED' ? 'A newer deployment already replaced this one.' : null,
+      },
+    })
 
-    await lift(['production'])
+    await expect(lift(['production'])).rejects.toThrow(ExitError)
 
     expect(calls('VersionRouteUrls')).toHaveLength(0)
-    expect(mocks.printError).not.toHaveBeenCalled()
+    expect(mocks.printError).toHaveBeenCalledWith(error)
   })
 
   it('retries routing polls and tolerates failed URL and DNS lookups', async () => {

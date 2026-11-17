@@ -16,6 +16,7 @@ import { buildLiveUrlLines } from './live-urls'
 import type { VersionRouteUrl } from './live-urls'
 import { printHeading } from './output'
 import { followReleaseOutput } from './release-output'
+import { RELEASE_TIMEOUT_MS } from './release-poll'
 import { sanitizeTerminal } from './sanitize'
 
 const ROUTING_DEPLOYMENT_QUERY = /* GraphQL */ `
@@ -149,9 +150,16 @@ export async function waitForRouting(params: {
     if (deploymentId === routingDeploymentId) writeOutput(sanitizeTerminal(line))
   })
 
+  const routingStart = Date.now()
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
   while (true) {
     await sleep()
+
+    if (Date.now() - routingStart > RELEASE_TIMEOUT_MS) {
+      throw new Error(
+        `Routing is still running after 30 minutes. It keeps running; check it with \`gantry deployments show ${routingDeploymentId}\`.`
+      )
+    }
 
     if (isCancelling()) {
       setTitle('Configure routing: Cancelled')
@@ -171,10 +179,7 @@ export async function waitForRouting(params: {
       continue
     }
 
-    if (!deployment) {
-      setTitle('Configure routing: Not found')
-      return {}
-    }
+    if (!deployment) throw new Error(`Routing deployment ${routingDeploymentId} not found.`)
 
     // Once routing settles, read every remaining page before printing the result.
     const pages = isTerminalStatus(deployment.status) ? MAX_DRAIN_PAGES : 1
@@ -211,10 +216,8 @@ export async function waitForRouting(params: {
           : `Routing failed${message}`
       )
     }
-    if (deployment.status !== 'COMPLETE') {
-      setTitle(sanitizeTerminal(`Configure routing: ${deployment.status.toUpperCase()}`))
-      return {}
-    }
+    if (deployment.status === 'CANCELLED') throw new Error(`Routing was cancelled${message}`)
+    if (deployment.status === 'SKIPPED') throw new Error(`Routing was skipped${message}`)
 
     const routing = await liveRoutes(versionId)
     const urlCount = routing.routeUrls?.length ?? 0

@@ -168,7 +168,7 @@ describe('env command', () => {
   })
 
   describe('set', () => {
-    it('sends each KEY=value and suggests a redeploy', async () => {
+    it('sends each KEY=value and suggests lifting the live build again', async () => {
       mocks.graphqlRequest.mockResolvedValueOnce({
         setEnvVars: changes(['FEATURE_CHECKOUT_V2'], ['LOG_LEVEL']),
       })
@@ -185,7 +185,7 @@ describe('env command', () => {
         },
       })
       expect(logged()).toContain('staging: added FEATURE_CHECKOUT_V2; changed LOG_LEVEL.')
-      expect(logged()).toContain('Run `gantry redeploy staging` to apply it now.')
+      expect(logged()).toContain('Run `gantry lift staging --from staging` to apply it now.')
     })
 
     it('merges --from-file with arguments, arguments winning', async () => {

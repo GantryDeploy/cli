@@ -15,7 +15,7 @@ import { isTerminalStatus } from './deployment-status'
 import { buildLiveUrlLines } from './live-urls'
 import type { VersionRouteUrl } from './live-urls'
 import { printHeading } from './output'
-import { followReleaseOutput } from './release-output'
+import { MAX_DRAIN_PAGES, followReleaseOutput } from './release-output'
 import { RELEASE_TIMEOUT_MS } from './release-poll'
 import { sanitizeTerminal } from './sanitize'
 
@@ -58,9 +58,6 @@ const VERSION_DNS_RECORDS_QUERY = /* GraphQL */ `
     }
   }
 `
-
-/** Bounds the final read of post-deploy output, at 1000 log rows a page. */
-const MAX_DRAIN_PAGES = 50
 
 // Measured from when every service finishes, not from the start of the deploy.
 const ROUTING_DISCOVERY_TIMEOUT_MS = 2 * 60 * 1000

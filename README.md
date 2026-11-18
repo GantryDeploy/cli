@@ -123,7 +123,7 @@ Under the `standard` deployment strategy a lift goes live at once. Under `blue-g
 
 `--complete` on `cutover`, or on `shift --percent 100`, completes the release in the same step. `cutover`, `shift` and `abort` act on the release in progress and take no version. During a canary split, `rollback` only accepts the live version; abort the release first.
 
-Each command waits until the change is applied and exits non-zero if it fails, is cancelled, or is skipped because a newer deployment replaced it. An edge can take a while to apply: after 30 minutes the command stops waiting and prints how to check the deployment, which keeps running.
+Each command waits until the change is applied and exits non-zero if it fails, is cancelled, or is skipped because a newer deployment replaced it. The first time a version takes all traffic (`cutover`, `shift --percent 100`, or a `rollback` to a version that never had it), its `post_deploy` commands run once and the command prints their output; a failure leaves the version live and exits non-zero. An edge can take a while to apply: after 30 minutes the command stops waiting and prints how to check the deployment, which keeps running.
 
 ## Database users
 

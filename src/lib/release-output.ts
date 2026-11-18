@@ -21,6 +21,9 @@ export const RELEASE_OUTPUT_QUERY = /* GraphQL */ `
 type Step = NonNullable<DeploymentsByVersionQuery['deploymentsByVersion'][number]['steps']>[number]
 type Deployments = readonly { steps?: readonly Pick<Step, 'stepType' | 'status'>[] | null }[]
 
+/** Bounds the final read of release output, at 1000 log rows a page. */
+export const MAX_DRAIN_PAGES = 50
+
 const COMMAND_STEPS = new Set(['release', 'post-deploy'])
 const FINISHED = new Set(['COMPLETE', 'FAILED', 'CANCELLED'])
 

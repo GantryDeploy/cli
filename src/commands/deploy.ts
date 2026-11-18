@@ -147,11 +147,19 @@ async function runOperation(params: {
         },
         {
           title: 'Apply',
+          // Keeps every post-deploy command line on screen beneath the task.
+          rendererOptions: { outputBar: Infinity, persistentOutput: true },
           task: async (ctx, task) => {
             if (!ctx.deploymentId) throw new Error('The operation started no deployment')
-            await waitForRelease(ctx.deploymentId, (title) => {
-              task.title = title
-            })
+            await waitForRelease(
+              ctx.deploymentId,
+              (title) => {
+                task.title = title
+              },
+              (line) => {
+                task.output = line
+              }
+            )
           },
         },
       ],

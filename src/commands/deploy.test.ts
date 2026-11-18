@@ -216,6 +216,7 @@ describe('deploy status', () => {
     strategy: 'blue-green',
     state: 'STAGED' as const,
     since: '2026-11-14T09:12:00.000Z',
+    holdExpiresAt: null,
     versions: [
       {
         versionId: 'q7mx2v',
@@ -251,6 +252,19 @@ describe('deploy status', () => {
     expect(statusLines('production', { ...stagedBlueGreen, state, strategy }).at(-1)).toBe(
       `  next:     ${next}`
     )
+  })
+
+  it.each([
+    ['STAGED' as const, 'rolls back'],
+    ['CUT_OVER' as const, 'completes'],
+  ])('shows when a held %s release %s on its own', (state, outcome) => {
+    const lines = statusLines('production', {
+      ...stagedBlueGreen,
+      state,
+      holdExpiresAt: '2026-11-30T15:40:00.000Z',
+    })
+
+    expect(lines.at(-2)).toBe(`  hold:     ${outcome} at 2026-11-30 15:40 UTC`)
   })
 
   it('suggests nothing without a release in progress', () => {

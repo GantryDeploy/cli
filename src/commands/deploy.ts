@@ -34,6 +34,7 @@ const RELEASE_STATUS_QUERY = /* GraphQL */ `
       strategy
       state
       since
+      holdExpiresAt
       versions {
         versionId
         number
@@ -204,6 +205,10 @@ export function statusLines(environment: string, status: ReleaseStatusResult): s
     lines.push(
       `  ${role.padEnd(9)} ${`v${String(version.number)}`.padEnd(6)} ${`${String(version.weight)}%`.padStart(4)}   ${when}`
     )
+  }
+  if (status.holdExpiresAt) {
+    const outcome = status.state === 'STAGED' ? 'rolls back' : 'completes'
+    lines.push(`  ${'hold:'.padEnd(9)} ${outcome} at ${formatTime(status.holdExpiresAt)}`)
   }
   if (status.state !== 'NONE') {
     lines.push(`  ${'next:'.padEnd(9)} ${NEXT_STEP[status.state](environment, status.strategy)}`)

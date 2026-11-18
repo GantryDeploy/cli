@@ -114,7 +114,7 @@ Under the `standard` deployment strategy a lift goes live at once. Under `blue-g
 
 | Command | What it does |
 |---|---|
-| `gantry deploy status <env>` | Shows the live version, the staged or canary version, their traffic and the next step |
+| `gantry deploy status <env>` | Shows the live version, the staged or canary version, their traffic, when a held release times out, and the next step |
 | `gantry deploy shift <env> --percent <n>` | Sends n% of traffic to the new version (`canary` only). 100 is a cutover |
 | `gantry deploy cutover <env>` | Sends all traffic to the new version. The previous version stays ready |
 | `gantry deploy abort <env>` | Sends all traffic back to the version live before the release |

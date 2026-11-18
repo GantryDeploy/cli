@@ -922,7 +922,7 @@ export type ReleaseStatusQueryVariables = Exact<{
 }>;
 
 
-export type ReleaseStatusQuery = { releaseStatus: { strategy: string, state: ReleaseState, since: string, versions: Array<{ versionId: string, number: number, role: ReleaseRole, weight: number, createdAt: string }> } | null };
+export type ReleaseStatusQuery = { releaseStatus: { strategy: string, state: ReleaseState, since: string, holdExpiresAt: string | null, versions: Array<{ versionId: string, number: number, role: ReleaseRole, weight: number, createdAt: string }> } | null };
 
 export type CutoverMutationVariables = Exact<{
   input: CutoverInput;

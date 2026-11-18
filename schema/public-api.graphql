@@ -2007,6 +2007,11 @@ enum ReleaseState {
 }
 
 type ReleaseStatus {
+  """
+  When the hold on the release in progress times out, for compute that holds a release between steps. At the cutover hold the release then rolls back; at the complete hold it completes.
+  """
+  holdExpiresAt: String
+
   """When the current traffic split was applied"""
   since: String!
   state: ReleaseState!

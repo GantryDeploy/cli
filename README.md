@@ -119,7 +119,7 @@ Under the `standard` deployment strategy a lift goes live at once. Under `blue-g
 | `gantry deploy cutover <env>` | Sends all traffic to the new version. The previous version stays ready |
 | `gantry deploy abort <env>` | Sends all traffic back to the version live before the release |
 | `gantry deploy complete <env>` | Drops the previous version after a cutover |
-| `gantry rollback <env> [--version <id>]` | Makes an earlier version live, by default the one live before the current one |
+| `gantry rollback <env> [--version <id>]` | Makes an earlier version live, by default the latest earlier one with an older build |
 
 `--complete` on `cutover`, or on `shift --percent 100`, completes the release in the same step. `cutover`, `shift` and `abort` act on the release in progress and take no version. During a canary split, `rollback` only accepts the live version; abort the release first.
 

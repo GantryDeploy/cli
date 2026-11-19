@@ -229,7 +229,7 @@ export function registerRollbackCommand(program: Command): void {
     .description('Make an earlier version of the environment live')
     .option(
       '--version <versionId>',
-      'ID of the version to make live (defaults to the version live before the current one)'
+      'ID of the version to make live (defaults to the latest earlier version with an older build)'
     )
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-v, --verbose', 'Emit a log line per state change')

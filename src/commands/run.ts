@@ -13,6 +13,7 @@ import type {
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { printError } from '../lib/output'
 import { loadProjectIdentity, resolveEnvironmentSlug } from '../lib/project-identity'
 
@@ -207,7 +208,7 @@ async function invokeLambda(invocation: LambdaInvocation): Promise<number> {
 
 /** Runs one command in a service's live runtime and exits with its result. */
 export function registerRunCommand(program: Command): void {
-  program
+  const run = program
     .command('run')
     .description("Run a one-off command in a service's live runtime")
     .usage('[options] <service> -- <command...>')
@@ -222,13 +223,22 @@ export function registerRunCommand(program: Command): void {
         '',
         'Options go before the service name. Anything after it is passed to the command.',
         '',
-        'A container service runs the full command:',
-        '  gantry run --env production web -- php artisan migrate --force',
-        '',
-        "A serverless service's console function adds its own entry point, so pass only the arguments:",
-        '  gantry run --env production web -- migrate --force',
+        "A serverless service's console function adds its own entry point, so pass it only the arguments.",
       ].join('\n')
     )
+
+  addExamples(run, [
+    {
+      command: 'gantry run --env production web -- php artisan migrate --force',
+      description: 'Run the full command in a container service',
+    },
+    {
+      command: 'gantry run --env production web -- migrate --force',
+      description: "Pass only the arguments to a serverless service's console function",
+    },
+  ])
+
+  run
     .passThroughOptions()
     .action(async (service: string, command: string[], options: RunOptions, cmd: Command) => {
       // passThroughOptions can keep the `--` separator as the first operand.

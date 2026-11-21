@@ -257,7 +257,8 @@ export function existingBuildSource(options: LiftOptions): LiftSource | null | {
 
 export function registerLiftCommand(program: Command): void {
   program
-    .command('lift <environment>')
+    .command('lift')
+    .argument('<environment>', 'Environment name')
     .description(
       'Deploy a project to an environment, or with --from or --build, a build that already exists'
     )

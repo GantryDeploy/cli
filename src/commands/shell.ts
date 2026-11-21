@@ -10,6 +10,7 @@ import type {
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { printError } from '../lib/output'
 import { loadProjectIdentity, resolveEnvironmentSlug } from '../lib/project-identity'
 import {
@@ -89,7 +90,7 @@ function attach(session: AwsShellSession): Promise<number | null> {
 
 /** Opens an interactive session on a running instance of a service's live version. */
 export function registerShellCommand(program: Command): void {
-  program
+  const shell = program
     .command('shell')
     .description("Open an interactive shell on a running instance of a service's live version")
     .usage('[options] <service> [-- <command...>]')
@@ -107,13 +108,20 @@ export function registerShellCommand(program: Command): void {
         '',
         'Options go before the service name.',
         '',
-        '  gantry shell --env production web',
-        '  gantry shell --env production web -- bash',
-        '',
         'Container services only. A session runs as root and closes after 20 idle minutes.',
         `It needs AWS's ${SESSION_PLUGIN} installed: ${PLUGIN_INSTALL_URL}`,
       ].join('\n')
     )
+
+  addExamples(shell, [
+    {
+      command: 'gantry shell --env production web',
+      description: 'Open /bin/sh on the web service',
+    },
+    { command: 'gantry shell --env production web -- bash', description: 'Open bash instead' },
+  ])
+
+  shell
     .passThroughOptions()
     .action(async (service: string, command: string[], options: ShellOptions, cmd: Command) => {
       const remoteCommand = command[0] === '--' ? command.slice(1) : command

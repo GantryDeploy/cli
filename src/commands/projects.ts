@@ -120,7 +120,8 @@ export function registerProjectsCommand(program: Command): void {
     })
 
   projectsCmd
-    .command('show <idOrSlug>')
+    .command('show')
+    .argument('<idOrSlug>', 'Project ID or slug')
     .description('Show project details')
     .action(async (idOrSlug: string) => {
       try {

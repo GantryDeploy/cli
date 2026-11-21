@@ -70,7 +70,8 @@ export function registerDeploymentsCommand(program: Command): void {
   const deploymentsCmd = program.command('deployments').description('Manage deployments')
 
   deploymentsCmd
-    .command('show <id>')
+    .command('show')
+    .argument('<id>', 'Deployment ID')
     .description('Show deployment details')
     .action(async (id: string) => {
       try {
@@ -165,7 +166,8 @@ export function registerDeploymentsCommand(program: Command): void {
     })
 
   deploymentsCmd
-    .command('cancel <id>')
+    .command('cancel')
+    .argument('<id>', 'Deployment ID')
     .description('Cancel a deployment')
     .action(async (id: string) => {
       try {

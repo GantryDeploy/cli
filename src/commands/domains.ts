@@ -272,7 +272,8 @@ export function registerDomainsCommand(program: Command): void {
     )
 
   domainsCmd
-    .command('request-cert [domainId]')
+    .command('request-cert')
+    .argument('[domainId]', 'Domain ID (prompts to pick one when omitted)')
     .description('Request a certificate for an existing domain')
     .option('--cloud <id>', 'Cloud account ID')
     .option('--primary-domain <fqdn>', 'Primary domain name (defaults to domain name)')

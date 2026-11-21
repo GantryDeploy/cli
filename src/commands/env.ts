@@ -290,7 +290,8 @@ export function registerEnvCommand(program: Command): void {
 
   withScopeOptions(
     envCmd
-      .command('get [key]')
+      .command('get')
+      .argument('[key]', 'Variable to print (lists every variable when omitted)')
       .description('List the variables at a scope, or print one value')
       .option(
         '--resolved',
@@ -338,7 +339,8 @@ export function registerEnvCommand(program: Command): void {
 
   withScopeOptions(
     envCmd
-      .command('set [assignments...]')
+      .command('set')
+      .argument('[assignments...]', 'KEY=value pairs to set')
       .description('Add or change variables: gantry env set --env staging LOG_LEVEL=debug TZ=UTC')
       .option('--from-file <path>', 'Read KEY=value lines from a file, or - for stdin')
   ).action(
@@ -375,27 +377,30 @@ export function registerEnvCommand(program: Command): void {
     }
   )
 
-  withScopeOptions(envCmd.command('unset <keys...>').description('Remove variables')).action(
-    async (keys: string[], options: ScopeOptions, command: Command) => {
-      try {
-        const scope = resolveScope(options, command)
-        const data = await graphqlRequest<UnsetEnvVarsMutation, UnsetEnvVarsMutationVariables>(
-          UNSET_ENV_VARS_MUTATION,
-          { input: { ...scope.target, keys } }
-        )
-        const result = data.unsetEnvVars
-        if (!result.success) fail(result.message ?? 'Failed to remove variables.')
-        const missing = keys.filter((key) => !result.removed.includes(key))
-        if (missing.length > 0) {
-          console.log(sanitizeTerminal(`Not set for ${scope.label}: ${missing.join(', ')}`))
-        }
-        printChanges(scope, result)
-      } catch (error) {
-        printError(formatApiError(error))
-        process.exit(1)
+  withScopeOptions(
+    envCmd
+      .command('unset')
+      .description('Remove variables')
+      .argument('<keys...>', 'Names of the variables to remove')
+  ).action(async (keys: string[], options: ScopeOptions, command: Command) => {
+    try {
+      const scope = resolveScope(options, command)
+      const data = await graphqlRequest<UnsetEnvVarsMutation, UnsetEnvVarsMutationVariables>(
+        UNSET_ENV_VARS_MUTATION,
+        { input: { ...scope.target, keys } }
+      )
+      const result = data.unsetEnvVars
+      if (!result.success) fail(result.message ?? 'Failed to remove variables.')
+      const missing = keys.filter((key) => !result.removed.includes(key))
+      if (missing.length > 0) {
+        console.log(sanitizeTerminal(`Not set for ${scope.label}: ${missing.join(', ')}`))
       }
+      printChanges(scope, result)
+    } catch (error) {
+      printError(formatApiError(error))
+      process.exit(1)
     }
-  )
+  })
 
   withScopeOptions(
     envCmd

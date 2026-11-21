@@ -17,7 +17,8 @@ interface PreviewOptions {
 
 export function registerPreviewCommand(program: Command): void {
   program
-    .command('preview <environment>')
+    .command('preview')
+    .argument('<environment>', 'Environment name')
     .description('Show what deploying to an environment would produce')
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-f, --file <path>', 'Path to gantry.yml (defaults to ./gantry.yml)')

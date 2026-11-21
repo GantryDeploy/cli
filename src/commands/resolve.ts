@@ -18,7 +18,8 @@ interface ResolveOptions {
 
 export function registerResolveCommand(program: Command): void {
   program
-    .command('resolve <environment>')
+    .command('resolve')
+    .argument('<environment>', 'Environment name')
     .description('Render the composed gantry.yml for an environment')
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-f, --file <path>', 'Path to gantry.yml (defaults to ./gantry.yml)')

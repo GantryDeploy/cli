@@ -225,7 +225,8 @@ async function cutover(input: EnvironmentInput & { complete?: boolean }): Promis
 
 export function registerRollbackCommand(program: Command): void {
   program
-    .command('rollback <environment>')
+    .command('rollback')
+    .argument('<environment>', 'Environment name')
     .description('Make an earlier version of the environment live')
     .option(
       '--version <versionId>',
@@ -264,7 +265,8 @@ export function registerDeployCommand(program: Command): void {
     .description('Move traffic during a blue-green or canary release')
 
   deploy
-    .command('status <environment>')
+    .command('status')
+    .argument('<environment>', 'Environment name')
     .description('Show the live versions and the release in progress')
     .option('-C, --cwd <directory>', 'Change working directory')
     .action(async (environment: string, options: ReleaseOptions, command: Command) => {
@@ -285,7 +287,8 @@ export function registerDeployCommand(program: Command): void {
     })
 
   deploy
-    .command('cutover <environment>')
+    .command('cutover')
+    .argument('<environment>', 'Environment name')
     .description('Send all traffic to the new version of the release in progress')
     .option('--complete', 'Also complete the release, dropping the previous version')
     .option('-C, --cwd <directory>', 'Change working directory')
@@ -310,7 +313,8 @@ export function registerDeployCommand(program: Command): void {
     )
 
   deploy
-    .command('shift <environment>')
+    .command('shift')
+    .argument('<environment>', 'Environment name')
     .description('Send a share of traffic to the new version of a canary release')
     .requiredOption('--percent <percent>', 'Share of traffic, 0 to 100, the new version takes')
     .option('--complete', 'Also complete the release, dropping the previous version (only at 100)')
@@ -352,7 +356,8 @@ export function registerDeployCommand(program: Command): void {
     )
 
   deploy
-    .command('abort <environment>')
+    .command('abort')
+    .argument('<environment>', 'Environment name')
     .description('Send all traffic back to the version live before the release')
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-v, --verbose', 'Emit a log line per state change')
@@ -372,7 +377,8 @@ export function registerDeployCommand(program: Command): void {
     })
 
   deploy
-    .command('complete <environment>')
+    .command('complete')
+    .argument('<environment>', 'Environment name')
     .description('Drop the previous version of a release that has been cut over')
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-v, --verbose', 'Emit a log line per state change')
@@ -392,7 +398,8 @@ export function registerDeployCommand(program: Command): void {
     })
 
   deploy
-    .command('reapply <environment>', { hidden: true })
+    .command('reapply', { hidden: true })
+    .argument('<environment>', 'Environment name')
     .description("Apply the routing of the environment's live versions again")
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-v, --verbose', 'Emit a log line per state change')

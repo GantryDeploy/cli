@@ -190,7 +190,8 @@ export function registerBastionsCommand(program: Command): void {
     })
 
   bastionsCmd
-    .command('ssh [slug]')
+    .command('ssh')
+    .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Connect to a bastion host via SSH')
     .option('-u, --user <user>', "SSH username (defaults to the bastion's user)")
     .action(async (slug: string | undefined, options: { user?: string }) => {
@@ -268,7 +269,8 @@ export function registerBastionsCommand(program: Command): void {
     })
 
   bastionsCmd
-    .command('key [slug]')
+    .command('key')
+    .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Display the SSH private key for a bastion host')
     .option('-o, --output <path>', 'Write the key to a new file (mode 0600) instead of stdout')
     .action(async (slug: string | undefined, options: { output?: string }) => {
@@ -339,7 +341,8 @@ export function registerBastionsCommand(program: Command): void {
     })
 
   bastionsCmd
-    .command('proxy <slug>')
+    .command('proxy')
+    .argument('<slug>', 'Bastion slug')
     .description(
       "Connect stdin and stdout to a private bastion's SSH port, for use as an ssh ProxyCommand"
     )
@@ -397,7 +400,8 @@ export function registerBastionsCommand(program: Command): void {
     })
 
   bastionsCmd
-    .command('destroy [slug]')
+    .command('destroy')
+    .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Destroy a bastion host')
     .action(async (slug: string | undefined) => {
       try {

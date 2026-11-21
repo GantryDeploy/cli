@@ -224,7 +224,8 @@ export function registerSecretsCommand(program: Command): void {
     })
 
   secretsCmd
-    .command('show <id>')
+    .command('show')
+    .argument('<id>', 'Secret ID')
     .description('Show secret details')
     .action(async (id: string) => {
       try {
@@ -332,7 +333,8 @@ export function registerSecretsCommand(program: Command): void {
     )
 
   secretsCmd
-    .command('update [id]')
+    .command('update')
+    .argument('[id]', 'Secret ID (prompts to pick one when omitted)')
     .description(
       'Update a secret. Values given with --set or --from-file replace ALL existing keys; keys you omit are removed.'
     )
@@ -414,7 +416,8 @@ export function registerSecretsCommand(program: Command): void {
     )
 
   secretsCmd
-    .command('delete [id]')
+    .command('delete')
+    .argument('[id]', 'Secret ID (prompts to pick one when omitted)')
     .description('Delete a secret')
     .action(async (id: string | undefined) => {
       try {

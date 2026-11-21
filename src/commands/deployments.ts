@@ -105,7 +105,7 @@ export function registerDeploymentsCommand(program: Command): void {
     .description('List deployments for a version')
     .option('--version <id>', 'Version ID')
     .option('--project <id>', 'Project ID (used to find version interactively)')
-    .option('--env <environment>', 'Environment name (used to find version interactively)')
+    .option('-e, --env <environment>', 'Environment name (used to find version interactively)')
     .action(async (options: { version?: string; project?: string; env?: string }) => {
       try {
         let versionId = options.version

@@ -40,7 +40,7 @@ const SERVICE_LOGS = /* GraphQL */ `
 `
 
 interface LogsOptions extends LogQueryOptions {
-  env?: string
+  env: string
   function?: string
   cwd?: string
 }
@@ -52,14 +52,14 @@ export function registerLogsCommand(program: Command): void {
       .command('logs')
       .description("Show a service's runtime logs")
       .argument('<service>', 'Service name (e.g. "web")')
-      .option('--env <environment>', 'Environment name', 'dev')
+      .requiredOption('-e, --env <environment>', 'Environment name')
       .option('--function <name>', 'Function of a service with a functions: map (e.g. "worker")')
       .option('--cwd <path>', 'Working directory containing gantry.yml')
   ).action(async (service: string, options: LogsOptions, cmd: Command) => {
     // The global `-C, --cwd` comes before the subcommand, so check it as well.
     const cwd = globalCwd(cmd) ?? options.cwd
     const identity = loadProjectIdentity(cwd ? path.resolve(cwd) : process.cwd())
-    const environmentSlug = resolveEnvironmentSlug(identity, options.env ?? 'dev')
+    const environmentSlug = resolveEnvironmentSlug(identity, options.env)
 
     await streamLogs(
       async (cursor) =>

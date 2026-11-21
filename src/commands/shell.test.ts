@@ -118,10 +118,12 @@ describe('shell command', () => {
     const program = new Command().enablePositionalOptions()
     program.exitOverride()
     registerShellCommand(program)
-    const error: unknown = await program.parseAsync(['node', 'gantry', 'shell', ...args]).then(
-      () => undefined,
-      (caught: unknown) => caught
-    )
+    const error: unknown = await program
+      .parseAsync(['node', 'gantry', 'shell', '--env', 'dev', ...args])
+      .then(
+        () => undefined,
+        (caught: unknown) => caught
+      )
     if (!(error instanceof ExitError)) throw new Error('expected the command to exit')
     return error
   }

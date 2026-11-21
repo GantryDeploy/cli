@@ -56,7 +56,7 @@ describe('logs command', () => {
     const program = new Command()
     program.exitOverride()
     registerLogsCommand(program)
-    return program.parseAsync(['node', 'gantry', 'logs', ...args]).then(
+    return program.parseAsync(['node', 'gantry', 'logs', '--env', 'dev', ...args]).then(
       () => {
         throw new Error('expected the command to exit')
       },

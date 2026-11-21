@@ -138,7 +138,7 @@ function withScopeOptions(command: Command): Command {
     .addOption(new Option('--cloud <id>', 'Every environment on a cloud account'))
     .addOption(new Option('--network <id>', 'Every environment on a network'))
     .addOption(new Option('--project', "Every environment of gantry.yml's project"))
-    .addOption(new Option('--env <environment>', "One environment of gantry.yml's project"))
+    .addOption(new Option('-e, --env <environment>', "One environment of gantry.yml's project"))
     .addOption(new Option('--service <name>', 'With --env: one service in that environment'))
 }
 

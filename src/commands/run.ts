@@ -95,7 +95,7 @@ interface RunTarget {
 }
 
 interface RunOptions {
-  env?: string
+  env: string
   function?: string
   cwd?: string
 }
@@ -214,7 +214,7 @@ export function registerRunCommand(program: Command): void {
     .usage('[options] <service> -- <command...>')
     .argument('<service>', 'Service name (e.g. "web")')
     .argument('[command...]', 'Command to run, after "--"')
-    .option('--env <environment>', 'Environment name', 'dev')
+    .requiredOption('-e, --env <environment>', 'Environment name')
     .option('--function <name>', "Function to target (default: the service's console function)")
     .option('--cwd <path>', 'Working directory containing gantry.yml')
     .addHelpText(
@@ -255,7 +255,7 @@ export function registerRunCommand(program: Command): void {
       const identity = loadProjectIdentity(workingDir)
       const target: RunTarget = {
         projectId: identity.id,
-        environmentSlug: resolveEnvironmentSlug(identity, options.env ?? 'dev'),
+        environmentSlug: resolveEnvironmentSlug(identity, options.env),
         service,
       }
 

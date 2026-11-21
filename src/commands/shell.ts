@@ -55,7 +55,7 @@ const SESSION_ERROR_MESSAGE = 'There was an error while opening the session.'
 type AwsShellSession = NonNullable<StartShellSessionMutation['startShellSession']['aws']>
 
 interface ShellOptions {
-  env?: string
+  env: string
   instance?: string
   cwd?: string
 }
@@ -96,7 +96,7 @@ export function registerShellCommand(program: Command): void {
     .usage('[options] <service> [-- <command...>]')
     .argument('<service>', 'Service name (e.g. "web")')
     .argument('[command...]', 'Interactive command to run instead of /bin/sh, after "--"')
-    .option('--env <environment>', 'Environment name', 'dev')
+    .requiredOption('-e, --env <environment>', 'Environment name')
     .option(
       '--instance <id>',
       'Instance to attach to (default: the first one that accepts sessions)'
@@ -145,7 +145,7 @@ export function registerShellCommand(program: Command): void {
           START_SHELL_SESSION,
           {
             projectId: identity.id,
-            environmentSlug: resolveEnvironmentSlug(identity, options.env ?? 'dev'),
+            environmentSlug: resolveEnvironmentSlug(identity, options.env),
             service,
             instance: options.instance,
             command: remoteCommand.length > 0 ? joinCommand(remoteCommand) : undefined,

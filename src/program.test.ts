@@ -37,6 +37,33 @@ describe('buildProgram', () => {
     ])
   })
 
+  it.each([['run'], ['shell'], ['logs']])('refuses %s without an environment', async (name) => {
+    const program = buildProgram()
+    let error = ''
+    subcommand(program, name)
+      .exitOverride()
+      .configureOutput({ writeErr: (text) => (error += text) })
+
+    await expect(program.parseAsync(['node', 'gantry', name, 'web'])).rejects.toMatchObject({
+      code: 'commander.missingMandatoryOptionValue',
+    })
+    expect(error).toContain("required option '-e, --env <environment>' not specified")
+  })
+
+  it.each([
+    ['run'],
+    ['shell'],
+    ['logs'],
+    ['versions', 'list'],
+    ['deployments', 'list'],
+    ['validate'],
+    ['env', 'get'],
+  ])('takes the environment as -e, --env on %s', (...path) => {
+    const option = subcommand(buildProgram(), ...path).options.find((o) => o.long === '--env')
+
+    expect(option?.flags).toBe('-e, --env <environment>')
+  })
+
   it('records the examples declared on run', () => {
     expect(
       commandExamples(subcommand(buildProgram(), 'run')).map((example) => example.command)

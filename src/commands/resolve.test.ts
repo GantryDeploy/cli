@@ -99,11 +99,11 @@ describe('resolve command', () => {
     expect(stderrText()).toBe('✓ 0 variables resolved\n\n')
   })
 
-  it('writes to --output instead of stdout', async () => {
+  it('writes to --output instead of stdout, starting with the line that points editors at the schema', async () => {
     await resolve(['production', '-o', 'resolved.yml'])
 
     expect(fs.readFileSync(path.join(workingDir, 'resolved.yml'), 'utf-8')).toBe(
-      'services:\n  web:\n    type: http\n'
+      '# yaml-language-server: $schema=https://schema.gantrydeploy.com/gantry.yml/v1.json\nservices:\n  web:\n    type: http\n'
     )
     expect(stdout).not.toHaveBeenCalled()
     expect(stderrText()).toContain(

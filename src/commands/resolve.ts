@@ -8,6 +8,7 @@ import { globalCwd } from '../lib/command-options'
 import { printError } from '../lib/output'
 import { findConfigPath } from '../lib/project-identity'
 import { formatProvenanceTable, parseCliVarFlags, resolveYaml } from '../lib/resolve-yaml'
+import { SCHEMA_HEADER } from '../lib/schema-header'
 
 interface ResolveOptions {
   cwd?: string
@@ -99,7 +100,7 @@ export function registerResolveCommand(program: Command): void {
       if (options.output) {
         const outPath = path.resolve(workingDir, options.output)
         try {
-          fs.writeFileSync(outPath, yamlOut, 'utf-8')
+          fs.writeFileSync(outPath, `${SCHEMA_HEADER}\n${yamlOut}`, 'utf-8')
           process.stderr.write(`Wrote resolved YAML to ${outPath}\n`)
         } catch (error) {
           printError(

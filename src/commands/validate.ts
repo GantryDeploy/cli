@@ -3,6 +3,7 @@ import * as path from 'path'
 import type { Command } from 'commander'
 
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { printError, printSuccess } from '../lib/output'
 import { exitWithResolutionErrors, findConfigPath } from '../lib/project-identity'
 import { parseCliVarFlags, resolveAllEnvironments, resolveYaml } from '../lib/resolve-yaml'
@@ -15,7 +16,7 @@ interface ValidateOptions {
 }
 
 export function registerValidateCommand(program: Command): void {
-  program
+  const validateCmd = program
     .command('validate')
     .description('Validate gantry.yml and exit non-zero if it is invalid')
     .option('-C, --cwd <directory>', 'Change working directory')
@@ -80,4 +81,12 @@ export function registerValidateCommand(program: Command): void {
           : `${String(result.environments.length)} environments`
       printSuccess(`${fileLabel} is valid (${summary})`)
     })
+
+  addExamples(validateCmd, [
+    { command: 'gantry validate', description: 'Check ./gantry.yml' },
+    {
+      command: 'gantry validate --env production --var image_tag=1.4.2',
+      description: 'Check only production, with a variable overridden',
+    },
+  ])
 }

@@ -7,6 +7,7 @@ import type { Command } from 'commander'
 import type { VerifyLoginQuery, VerifyLoginQueryVariables } from '../generated/graphql'
 import { AuthenticationError, GantryApiError, graphqlRequest } from '../lib/client'
 import { credentialsPath } from '../lib/config'
+import { addExamples } from '../lib/examples'
 import { printError, printSuccess } from '../lib/output'
 import { readStdin } from '../lib/stdin'
 
@@ -43,7 +44,7 @@ async function readToken(options: LoginOptions): Promise<string> {
 }
 
 export function registerLoginCommand(program: Command): void {
-  program
+  const loginCmd = program
     .command('login')
     .description('Save a Gantry API token for this machine')
     .option(
@@ -104,4 +105,12 @@ export function registerLoginCommand(program: Command): void {
         )
       }
     })
+
+  addExamples(loginCmd, [
+    { command: 'gantry login', description: 'Save a token, typed at the prompt' },
+    {
+      command: 'gantry login --token-stdin < gantry-token.txt',
+      description: 'Read the token from a file or a pipe, such as in CI',
+    },
+  ])
 }

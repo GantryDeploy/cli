@@ -12,6 +12,7 @@ import type {
   GetDeploymentVersionsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { selectEnvironment, selectProject } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -69,7 +70,7 @@ const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
 export function registerDeploymentsCommand(program: Command): void {
   const deploymentsCmd = program.command('deployments').description('Manage deployments')
 
-  deploymentsCmd
+  const showCmd = deploymentsCmd
     .command('show')
     .argument('<id>', 'Deployment ID')
     .description('Show deployment details')
@@ -100,7 +101,7 @@ export function registerDeploymentsCommand(program: Command): void {
       }
     })
 
-  deploymentsCmd
+  const listCmd = deploymentsCmd
     .command('list')
     .description('List deployments for a version')
     .option('--version <id>', 'Version ID')
@@ -165,7 +166,7 @@ export function registerDeploymentsCommand(program: Command): void {
       }
     })
 
-  deploymentsCmd
+  const cancelCmd = deploymentsCmd
     .command('cancel')
     .argument('<id>', 'Deployment ID')
     .description('Cancel a deployment')
@@ -188,4 +189,28 @@ export function registerDeploymentsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(deploymentsCmd, [
+    {
+      command: 'gantry deployments list --version v3hz7k',
+      description: "List a version's deployments",
+    },
+    { command: 'gantry deployments show d5mr8t', description: "Show a deployment's steps" },
+  ])
+  addExamples(showCmd, [
+    { command: 'gantry deployments show d5mr8t', description: "Show a deployment's steps" },
+  ])
+  addExamples(listCmd, [
+    {
+      command: 'gantry deployments list --version v3hz7k',
+      description: "List a version's deployments",
+    },
+    {
+      command: 'gantry deployments list --project p9ue62 --env staging',
+      description: 'Pick the version from a project environment',
+    },
+  ])
+  addExamples(cancelCmd, [
+    { command: 'gantry deployments cancel d5mr8t', description: 'Cancel a deployment in progress' },
+  ])
 }

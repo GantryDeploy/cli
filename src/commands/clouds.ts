@@ -2,6 +2,7 @@ import type { Command } from 'commander'
 
 import type { GetCloudsQuery, GetCloudsQueryVariables } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { createTable, formatDate, printError } from '../lib/output'
 
 const CLOUDS_QUERY = /* GraphQL */ `
@@ -18,7 +19,7 @@ const CLOUDS_QUERY = /* GraphQL */ `
 export function registerCloudsCommand(program: Command): void {
   const cloudsCmd = program.command('clouds').description('Manage cloud accounts')
 
-  cloudsCmd
+  const listCmd = cloudsCmd
     .command('list')
     .description('List all cloud accounts')
     .action(async () => {
@@ -50,4 +51,11 @@ export function registerCloudsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(cloudsCmd, [
+    { command: 'gantry clouds list', description: "List the team's cloud accounts" },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry clouds list', description: "List the team's cloud accounts" },
+  ])
 }

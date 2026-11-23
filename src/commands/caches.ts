@@ -26,6 +26,7 @@ import {
   toAwsCacheDeploymentMode,
 } from '../lib/clouds/aws'
 import { getDefaultPort, normalizeEngine, toCacheEngineEnum } from '../lib/engine'
+import { addExamples } from '../lib/examples'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -144,7 +145,7 @@ async function findCache(slugOrId: string): Promise<Cache | undefined> {
 export function registerCachesCommand(program: Command): void {
   const cachesCmd = program.command('caches').description('Manage caches')
 
-  cachesCmd
+  const listCmd = cachesCmd
     .command('list')
     .description('List all caches')
     .action(async () => {
@@ -179,7 +180,7 @@ export function registerCachesCommand(program: Command): void {
       }
     })
 
-  cachesCmd
+  const enginesCmd = cachesCmd
     .command('engines')
     .description('List the cache engines a cloud offers')
     .option('--cloud <id>', 'Cloud account ID')
@@ -218,7 +219,7 @@ export function registerCachesCommand(program: Command): void {
       }
     })
 
-  cachesCmd
+  const engineVersionsCmd = cachesCmd
     .command('engine-versions')
     .description('List the cache engine versions a cloud offers')
     .option('--cloud <id>', 'Cloud account ID')
@@ -259,7 +260,7 @@ export function registerCachesCommand(program: Command): void {
       }
     )
 
-  cachesCmd
+  const sizesCmd = cachesCmd
     .command('sizes')
     .description('List the cache sizes a cloud offers')
     .option('--cloud <id>', 'Cloud account ID')
@@ -297,7 +298,7 @@ export function registerCachesCommand(program: Command): void {
       }
     })
 
-  cachesCmd
+  const createCmd = cachesCmd
     .command('create')
     .description('Create a new cache')
     .option('--cloud <id>', 'Cloud account ID')
@@ -460,7 +461,7 @@ export function registerCachesCommand(program: Command): void {
       }
     )
 
-  cachesCmd
+  const tunnelCmd = cachesCmd
     .command('tunnel')
     .description('Create a local tunnel to a cache')
     .argument('[slug]', 'Cache slug')
@@ -593,4 +594,43 @@ export function registerCachesCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(cachesCmd, [
+    { command: 'gantry caches list', description: "List the team's caches" },
+    { command: 'gantry caches tunnel sessions', description: 'Open a local tunnel to a cache' },
+  ])
+  addExamples(listCmd, [{ command: 'gantry caches list', description: "List the team's caches" }])
+  addExamples(enginesCmd, [
+    {
+      command: 'gantry caches engines --cloud c4xp9w',
+      description: 'List the cache engines a cloud offers',
+    },
+  ])
+  addExamples(engineVersionsCmd, [
+    {
+      command: 'gantry caches engine-versions --cloud c4xp9w --engine valkey',
+      description: 'List the Valkey versions a cloud offers',
+    },
+  ])
+  addExamples(sizesCmd, [
+    {
+      command: 'gantry caches sizes --cloud c4xp9w --engine valkey --region us-east-1',
+      description: 'List the Valkey sizes in one region',
+    },
+  ])
+  addExamples(createCmd, [
+    { command: 'gantry caches create', description: 'Create a cache, prompting for each setting' },
+    {
+      command:
+        'gantry caches create --cloud c4xp9w --network n8kd2q --name Sessions --engine valkey --size cache.t4g.micro --backup-days 7',
+      description: 'Create a Valkey cache that keeps a week of backups',
+    },
+  ])
+  addExamples(tunnelCmd, [
+    { command: 'gantry caches tunnel sessions', description: 'Open a local tunnel to a cache' },
+    {
+      command: 'gantry caches tunnel sessions --port 6380 --bastion ops-bastion',
+      description: 'Tunnel through a chosen bastion on a chosen local port',
+    },
+  ])
 }

@@ -44,6 +44,7 @@ import {
 import { buildDatabaseUpdate, type DatabaseUpdateOptions } from '../lib/database-update'
 import { isTerminalStatus } from '../lib/deployment-status'
 import { getDefaultPort, normalizeEngine, toDatabaseEngineEnum } from '../lib/engine'
+import { addExamples } from '../lib/examples'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { streamLogs, withLogQueryOptions } from '../lib/log-stream'
 import type { LogQueryOptions } from '../lib/log-stream'
@@ -343,7 +344,7 @@ async function findDatabase(slugOrId: string): Promise<Database | undefined> {
 export function registerDatabasesCommand(program: Command): void {
   const dbCmd = program.command('databases').alias('db').description('Manage databases')
 
-  dbCmd
+  const listCmd = dbCmd
     .command('list')
     .description('List all databases')
     .action(async () => {
@@ -380,7 +381,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const enginesCmd = dbCmd
     .command('engines')
     .description('List the database engines a cloud offers')
     .option('--cloud <id>', 'Cloud account ID')
@@ -419,7 +420,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const engineVersionsCmd = dbCmd
     .command('engine-versions')
     .description('List the database engine versions a cloud offers')
     .option('--cloud <id>', 'Cloud account ID')
@@ -464,7 +465,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const sizesCmd = dbCmd
     .command('sizes')
     .description('List the database server sizes a cloud offers')
     .option('--cloud <id>', 'Cloud account ID')
@@ -499,7 +500,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const createCmd = dbCmd
     .command('create')
     .description('Create a new database')
     .option('--cloud <id>', 'Cloud account ID')
@@ -685,7 +686,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     )
 
-  dbCmd
+  const credentialsCmd = dbCmd
     .command('credentials')
     .description('Get master credentials for a database')
     .argument('[slug]', 'Database slug')
@@ -755,7 +756,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const usersCmd = dbCmd
     .command('users')
     .description('List the database users Gantry created for services on a server')
     .argument('<server>', 'Database server slug')
@@ -794,7 +795,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const adoptCmd = dbCmd
     .command('adopt')
     .description(
       "Move an existing database's objects to Gantry's owner role so services can bind it"
@@ -833,7 +834,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const rotateUserCmd = dbCmd
     .command('rotate-user')
     .description('Give a password service database user a new password')
     .argument('<server>', 'Database server slug')
@@ -906,7 +907,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     )
 
-  dbCmd
+  const updateCmd = dbCmd
     .command('update')
     .description('Change a database server. Setting changes apply right away.')
     .argument('<server>', 'Database server slug')
@@ -985,7 +986,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  dbCmd
+  const tunnelCmd = dbCmd
     .command('tunnel')
     .description('Create a local tunnel to a database server')
     .argument('[slug]', 'Database slug')
@@ -1194,7 +1195,7 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
-  withLogQueryOptions(
+  const logsCmd = withLogQueryOptions(
     dbCmd
       .command('logs')
       .description("Show a database's engine logs")
@@ -1223,4 +1224,98 @@ export function registerDatabasesCommand(program: Command): void {
       `No log lines for ${slug} in the last ${options.since}.`
     )
   })
+
+  addExamples(dbCmd, [
+    { command: 'gantry db list', description: "List the team's databases" },
+    {
+      command: 'gantry db tunnel main-db',
+      description: 'Open a local tunnel to a database server',
+    },
+  ])
+  addExamples(listCmd, [{ command: 'gantry db list', description: "List the team's databases" }])
+  addExamples(enginesCmd, [
+    {
+      command: 'gantry db engines --cloud c4xp9w',
+      description: 'List the database engines a cloud offers',
+    },
+  ])
+  addExamples(engineVersionsCmd, [
+    {
+      command: 'gantry db engine-versions --cloud c4xp9w --engine postgresql --aws-flavor aurora',
+      description: 'On AWS, list the Aurora PostgreSQL versions',
+    },
+  ])
+  addExamples(sizesCmd, [
+    {
+      command:
+        'gantry db sizes --cloud c4xp9w --engine postgresql --region us-east-1 --aws-flavor rds',
+      description: 'On AWS, list the RDS PostgreSQL sizes in one region',
+    },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry db create',
+      description: 'Create a database server, prompting for each setting',
+    },
+    {
+      command:
+        'gantry db create --cloud c4xp9w --network n8kd2q --name "Main DB" --engine postgresql --size db.t4g.medium --storage 50',
+      description: 'Create a PostgreSQL server with 50 GB of storage',
+    },
+  ])
+  addExamples(credentialsCmd, [
+    {
+      command: 'gantry db credentials main-db',
+      description: 'Print the master credentials of a server',
+    },
+  ])
+  addExamples(usersCmd, [
+    {
+      command: 'gantry db users main-db',
+      description: 'List the service users Gantry created on a server',
+    },
+  ])
+  addExamples(adoptCmd, [
+    {
+      command: 'gantry db adopt main-db storefront',
+      description: "Give Gantry's owner role an existing database so services can bind it",
+    },
+  ])
+  addExamples(rotateUserCmd, [
+    {
+      command: 'gantry db rotate-user main-db g_web_3f9a0c1e',
+      description: "Give a service's database user a new password",
+    },
+    {
+      command: 'gantry db rotate-user main-db g_web_3f9a0c1e --staged',
+      description: 'Create a second user that the next deploy switches to',
+    },
+  ])
+  addExamples(updateCmd, [
+    { command: 'gantry db update main-db --storage 100', description: 'Grow storage to 100 GB' },
+    {
+      command: 'gantry db update main-db --backup-days 14 --high-availability',
+      description: 'Keep two weeks of backups and add a standby copy',
+    },
+  ])
+  addExamples(tunnelCmd, [
+    {
+      command: 'gantry db tunnel main-db',
+      description: 'Open a local tunnel to a database server',
+    },
+    {
+      command: 'gantry db tunnel main-db --port 15432 --bastion ops-bastion',
+      description: 'Tunnel through a chosen bastion on a chosen local port',
+    },
+  ])
+  addExamples(logsCmd, [
+    {
+      command: 'gantry db logs main-db',
+      description: "Show the last hour of a server's engine logs",
+    },
+    {
+      command: 'gantry db logs main-db --since 2d --grep deadlock',
+      description: 'Find deadlocks in the last two days',
+    },
+  ])
 }

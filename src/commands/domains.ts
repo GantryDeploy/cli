@@ -24,6 +24,7 @@ import {
   rootDomainErrorMessage,
   validateRootDomain,
 } from '../lib/domain-validation'
+import { addExamples } from '../lib/examples'
 import { fetchRegions, resolveCloud, selectDomain } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -115,7 +116,7 @@ function exitIfInvalidCertDomain(value: string): void {
 export function registerDomainsCommand(program: Command): void {
   const domainsCmd = program.command('domains').description('Manage domains and certificates')
 
-  domainsCmd
+  const listCmd = domainsCmd
     .command('list')
     .description('List all domains')
     .action(async () => {
@@ -143,7 +144,7 @@ export function registerDomainsCommand(program: Command): void {
       }
     })
 
-  domainsCmd
+  const createCmd = domainsCmd
     .command('create')
     .description('Create a new domain')
     .option('--name <fqdn>', 'Domain name (e.g., example.com)')
@@ -271,7 +272,7 @@ export function registerDomainsCommand(program: Command): void {
       }
     )
 
-  domainsCmd
+  const requestCertCmd = domainsCmd
     .command('request-cert')
     .argument('[domainId]', 'Domain ID (prompts to pick one when omitted)')
     .description('Request a certificate for an existing domain')
@@ -378,4 +379,32 @@ export function registerDomainsCommand(program: Command): void {
         }
       }
     )
+
+  addExamples(domainsCmd, [
+    { command: 'gantry domains list', description: "List the team's domains" },
+    {
+      command: 'gantry domains create --name example.com',
+      description: 'Add a domain',
+    },
+  ])
+  addExamples(listCmd, [{ command: 'gantry domains list', description: "List the team's domains" }])
+  addExamples(createCmd, [
+    { command: 'gantry domains create --name example.com', description: 'Add a domain' },
+    {
+      command:
+        'gantry domains create --name example.com --request-cert --cloud c4xp9w --additional-domains www.example.com',
+      description: 'Add a domain and request a certificate that also covers www',
+    },
+  ])
+  addExamples(requestCertCmd, [
+    {
+      command: 'gantry domains request-cert k7dm3s --cloud c4xp9w',
+      description: 'Request a certificate for a domain',
+    },
+    {
+      command:
+        'gantry domains request-cert k7dm3s --cloud c4xp9w --primary-domain example.com --additional-domains "www.example.com,api.example.com"',
+      description: 'Cover more names with one certificate',
+    },
+  ])
 }

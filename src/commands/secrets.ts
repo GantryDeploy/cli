@@ -18,6 +18,7 @@ import type {
   UpdateSecretMutationVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { resolveCloud, selectSecret } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { redact, sanitizeTerminal } from '../lib/sanitize'
@@ -182,7 +183,7 @@ async function confirmKeyRemoval(removedKeys: string[], yes: boolean): Promise<b
 export function registerSecretsCommand(program: Command): void {
   const secretsCmd = program.command('secrets').description('Manage secrets')
 
-  secretsCmd
+  const listCmd = secretsCmd
     .command('list')
     .description('List secrets')
     .option('--cloud <id>', 'Filter by cloud account ID')
@@ -223,7 +224,7 @@ export function registerSecretsCommand(program: Command): void {
       }
     })
 
-  secretsCmd
+  const showCmd = secretsCmd
     .command('show')
     .argument('<id>', 'Secret ID')
     .description('Show secret details')
@@ -250,7 +251,7 @@ export function registerSecretsCommand(program: Command): void {
       }
     })
 
-  secretsCmd
+  const createCmd = secretsCmd
     .command('create')
     .description('Create a new secret')
     .option('--cloud <id>', 'Cloud account ID')
@@ -332,7 +333,7 @@ export function registerSecretsCommand(program: Command): void {
       }
     )
 
-  secretsCmd
+  const updateCmd = secretsCmd
     .command('update')
     .argument('[id]', 'Secret ID (prompts to pick one when omitted)')
     .description(
@@ -415,7 +416,7 @@ export function registerSecretsCommand(program: Command): void {
       }
     )
 
-  secretsCmd
+  const deleteCmd = secretsCmd
     .command('delete')
     .argument('[id]', 'Secret ID (prompts to pick one when omitted)')
     .description('Delete a secret')
@@ -440,4 +441,44 @@ export function registerSecretsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(secretsCmd, [
+    { command: 'gantry secrets list', description: "List the team's secrets" },
+    {
+      command: 'gantry secrets create --cloud c4xp9w --name stripe --from-file stripe.env',
+      description: 'Create a secret from a file',
+    },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry secrets list', description: "List the team's secrets" },
+    {
+      command: 'gantry secrets list --cloud c4xp9w',
+      description: 'List the secrets on one cloud account',
+    },
+  ])
+  addExamples(showCmd, [{ command: 'gantry secrets show s2wf6n', description: 'Show a secret' }])
+  addExamples(createCmd, [
+    {
+      command: 'gantry secrets create --cloud c4xp9w --name stripe --from-file stripe.env',
+      description: 'Create a secret from KEY=value lines in a file',
+    },
+    {
+      command:
+        'gantry secrets create --cloud c4xp9w --name mailer --description "SMTP login" --from-file -',
+      description: 'Read the values from stdin',
+    },
+  ])
+  addExamples(updateCmd, [
+    {
+      command: 'gantry secrets update s2wf6n --from-file stripe.env',
+      description: "Replace all of a secret's keys with the ones in a file",
+    },
+    {
+      command: 'gantry secrets update s2wf6n --description "Stripe live keys"',
+      description: 'Change only the description',
+    },
+  ])
+  addExamples(deleteCmd, [
+    { command: 'gantry secrets delete s2wf6n', description: 'Delete a secret' },
+  ])
 }

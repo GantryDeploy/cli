@@ -3,6 +3,7 @@ import * as path from 'path'
 import type { Command } from 'commander'
 
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { createTable, printError, renderTree, styledCell } from '../lib/output'
 import type { TreeNode } from '../lib/output'
 import { exitWithResolutionErrors, findConfigPath } from '../lib/project-identity'
@@ -16,7 +17,7 @@ interface PreviewOptions {
 }
 
 export function registerPreviewCommand(program: Command): void {
-  program
+  const previewCmd = program
     .command('preview')
     .argument('<environment>', 'Environment name')
     .description('Show what deploying to an environment would produce')
@@ -104,4 +105,15 @@ export function registerPreviewCommand(program: Command): void {
 
       console.log()
     })
+
+  addExamples(previewCmd, [
+    {
+      command: 'gantry preview production',
+      description: 'Show what deploying to production would change',
+    },
+    {
+      command: 'gantry preview staging --file deploy/gantry.yml --var image_tag=1.4.2',
+      description: 'Preview another gantry.yml with a variable overridden',
+    },
+  ])
 }

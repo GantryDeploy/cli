@@ -72,4 +72,25 @@ describe('buildProgram', () => {
       'gantry run --env production web -- migrate --force',
     ])
   })
+
+  it('gives every command --help lists at least one example that starts with gantry', () => {
+    const visible = (command: Command): Command[] => {
+      const listed = new Set(command.createHelp().visibleCommands(command))
+      return command.commands
+        .filter((child) => listed.has(child))
+        .flatMap((child) => [child, ...visible(child)])
+    }
+    const pathOf = (command: Command): string =>
+      command.parent ? `${pathOf(command.parent)} ${command.name()}` : command.name()
+
+    const missing = visible(buildProgram()).flatMap((command) => {
+      const examples = commandExamples(command)
+      if (examples.length === 0) return [`${pathOf(command)}: no examples`]
+      return examples
+        .filter((example) => !example.command.startsWith('gantry '))
+        .map((example) => `${pathOf(command)}: ${example.command}`)
+    })
+
+    expect(missing).toEqual([])
+  })
 })

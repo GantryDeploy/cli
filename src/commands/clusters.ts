@@ -12,6 +12,7 @@ import type {
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, isAws, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import { awsClusterSettings, awsOption } from '../lib/clouds/aws'
+import { addExamples } from '../lib/examples'
 import { resolveCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -64,7 +65,7 @@ const CREATE_CLUSTER_MUTATION = /* GraphQL */ `
 export function registerClustersCommand(program: Command): void {
   const clustersCmd = program.command('clusters').description('Manage clusters')
 
-  clustersCmd
+  const listCmd = clustersCmd
     .command('list')
     .description('List all clusters')
     .action(async () => {
@@ -102,7 +103,7 @@ export function registerClustersCommand(program: Command): void {
       }
     })
 
-  clustersCmd
+  const typesCmd = clustersCmd
     .command('types')
     .description('List available cluster types')
     .option('--cloud <id>', 'Cloud account ID')
@@ -133,7 +134,7 @@ export function registerClustersCommand(program: Command): void {
       }
     })
 
-  clustersCmd
+  const createCmd = clustersCmd
     .command('create')
     .description('Create a new cluster')
     .option('--cloud <id>', 'Cloud account ID')
@@ -235,4 +236,37 @@ export function registerClustersCommand(program: Command): void {
         }
       }
     )
+
+  addExamples(clustersCmd, [
+    { command: 'gantry clusters list', description: "List the team's clusters" },
+    {
+      command: 'gantry clusters create',
+      description: 'Create a cluster, prompting for each setting',
+    },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry clusters list', description: "List the team's clusters" },
+  ])
+  addExamples(typesCmd, [
+    {
+      command: 'gantry clusters types --cloud c4xp9w',
+      description: 'List the cluster types a cloud offers',
+    },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry clusters create',
+      description: 'Create a cluster, prompting for each setting',
+    },
+    {
+      command:
+        'gantry clusters create --cloud c4xp9w --network n8kd2q --region us-east-1 --name Production',
+      description: 'Create a cluster on a network',
+    },
+    {
+      command:
+        'gantry clusters create --cloud c4xp9w --network n8kd2q --region us-east-1 --name Workers --aws-capacity-provider fargate-spot',
+      description: 'On AWS, run the containers on Fargate Spot',
+    },
+  ])
 }

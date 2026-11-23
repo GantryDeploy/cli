@@ -19,6 +19,7 @@ import {
 } from '../lib/bastion-prompts'
 import { privateBastionTransport } from '../lib/bastion-transports'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -156,7 +157,7 @@ function isFileExistsError(error: unknown): boolean {
 export function registerBastionsCommand(program: Command): void {
   const bastionsCmd = program.command('bastions').description('Manage bastion hosts')
 
-  bastionsCmd
+  const listCmd = bastionsCmd
     .command('list')
     .description('List all bastion hosts')
     .action(async () => {
@@ -189,7 +190,7 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
+  const sshCmd = bastionsCmd
     .command('ssh')
     .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Connect to a bastion host via SSH')
@@ -268,7 +269,7 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
+  const keyCmd = bastionsCmd
     .command('key')
     .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Display the SSH private key for a bastion host')
@@ -340,7 +341,7 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
+  const proxyCmd = bastionsCmd
     .command('proxy')
     .argument('<slug>', 'Bastion slug')
     .description(
@@ -360,7 +361,7 @@ export function registerBastionsCommand(program: Command): void {
       process.exit(exitCode)
     })
 
-  bastionsCmd
+  const createCmd = bastionsCmd
     .command('create')
     .description('Create a new bastion host')
     .option('--cloud <id>', 'Cloud account ID')
@@ -399,7 +400,7 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
+  const destroyCmd = bastionsCmd
     .command('destroy')
     .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Destroy a bastion host')
@@ -438,4 +439,45 @@ export function registerBastionsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(bastionsCmd, [
+    { command: 'gantry bastions list', description: "List the team's bastion hosts" },
+    { command: 'gantry bastions ssh ops-bastion', description: 'Connect to a bastion over SSH' },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry bastions list', description: "List the team's bastion hosts" },
+  ])
+  addExamples(sshCmd, [
+    { command: 'gantry bastions ssh', description: 'Pick a bastion and connect to it' },
+    {
+      command: 'gantry bastions ssh ops-bastion --user ubuntu',
+      description: 'Connect to a bastion as a different user',
+    },
+  ])
+  addExamples(keyCmd, [
+    {
+      command: 'gantry bastions key ops-bastion --output ~/.ssh/ops-bastion.pem',
+      description: "Save a bastion's private key to a new file",
+    },
+  ])
+  addExamples(proxyCmd, [
+    {
+      command: 'gantry bastions proxy ops-bastion',
+      description: "Relay a private bastion's SSH port, as an ssh ProxyCommand runs it",
+    },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry bastions create',
+      description: 'Create a bastion, prompting for each setting',
+    },
+    {
+      command:
+        'gantry bastions create --cloud c4xp9w --network n8kd2q --name "Ops bastion" --public --allow-cidr 203.0.113.0/24',
+      description: 'Create a public bastion that takes SSH from one office range',
+    },
+  ])
+  addExamples(destroyCmd, [
+    { command: 'gantry bastions destroy ops-bastion', description: 'Destroy a bastion host' },
+  ])
 }

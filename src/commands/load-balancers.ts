@@ -13,6 +13,7 @@ import type {
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import { awsOption } from '../lib/clouds/aws'
+import { addExamples } from '../lib/examples'
 import { resolveCloud, selectNetwork, selectRegion } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -80,7 +81,7 @@ const CREATE_LOAD_BALANCER_MUTATION = /* GraphQL */ `
 export function registerLoadBalancersCommand(program: Command): void {
   const lbCmd = program.command('load-balancers').alias('lb').description('Manage load balancers')
 
-  lbCmd
+  const listCmd = lbCmd
     .command('list')
     .description('List all load balancers')
     .action(async () => {
@@ -119,7 +120,7 @@ export function registerLoadBalancersCommand(program: Command): void {
       }
     })
 
-  lbCmd
+  const typesCmd = lbCmd
     .command('types')
     .description('List available load balancer types')
     .option('--cloud <id>', 'Cloud account ID')
@@ -157,7 +158,7 @@ export function registerLoadBalancersCommand(program: Command): void {
       }
     })
 
-  lbCmd
+  const createCmd = lbCmd
     .command('create')
     .description('Create a new load balancer')
     .option('--cloud <id>', 'Cloud account ID')
@@ -269,4 +270,32 @@ export function registerLoadBalancersCommand(program: Command): void {
         }
       }
     )
+
+  addExamples(lbCmd, [
+    { command: 'gantry lb list', description: "List the team's load balancers" },
+    {
+      command: 'gantry lb types --cloud c4xp9w',
+      description: 'List the load balancer types a cloud offers',
+    },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry lb list', description: "List the team's load balancers" },
+  ])
+  addExamples(typesCmd, [
+    {
+      command: 'gantry lb types --cloud c4xp9w',
+      description: 'List the load balancer types a cloud offers',
+    },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry lb create',
+      description: 'Create a load balancer, prompting for each setting',
+    },
+    {
+      command:
+        'gantry lb create --cloud c4xp9w --type APPLICATION --network n8kd2q --region us-east-1 --name "Public web"',
+      description: 'Create an application load balancer on a network',
+    },
+  ])
 }

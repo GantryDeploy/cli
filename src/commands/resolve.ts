@@ -5,6 +5,7 @@ import type { Command } from 'commander'
 import { stringify as stringifyYaml } from 'yaml'
 
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { printError } from '../lib/output'
 import { findConfigPath } from '../lib/project-identity'
 import { formatProvenanceTable, parseCliVarFlags, resolveYaml } from '../lib/resolve-yaml'
@@ -18,7 +19,7 @@ interface ResolveOptions {
 }
 
 export function registerResolveCommand(program: Command): void {
-  program
+  const resolveCmd = program
     .command('resolve')
     .argument('<environment>', 'Environment name')
     .description('Render the composed gantry.yml for an environment')
@@ -112,4 +113,15 @@ export function registerResolveCommand(program: Command): void {
         process.stdout.write(yamlOut)
       }
     })
+
+  addExamples(resolveCmd, [
+    {
+      command: 'gantry resolve production',
+      description: 'Print the gantry.yml production deploys, with blueprints and profiles applied',
+    },
+    {
+      command: 'gantry resolve staging --output resolved.yml --var image_tag=1.4.2',
+      description: 'Write it to a file with a variable overridden',
+    },
+  ])
 }

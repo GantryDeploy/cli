@@ -2,6 +2,7 @@ import type { Command } from 'commander'
 
 import type { GetVersionsQuery, GetVersionsQueryVariables } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { selectEnvironment, selectProject } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError } from '../lib/output'
 
@@ -19,7 +20,7 @@ const VERSIONS_QUERY = /* GraphQL */ `
 export function registerVersionsCommand(program: Command): void {
   const versionsCmd = program.command('versions').description('Manage versions')
 
-  versionsCmd
+  const listCmd = versionsCmd
     .command('list')
     .description('List versions for a project and environment')
     .option('--project <id>', 'Project ID')
@@ -62,4 +63,21 @@ export function registerVersionsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(versionsCmd, [
+    {
+      command: 'gantry versions list --project p9ue62 --env production',
+      description: "List production's versions",
+    },
+  ])
+  addExamples(listCmd, [
+    {
+      command: 'gantry versions list --project p9ue62 --env production',
+      description: "List production's versions",
+    },
+    {
+      command: 'gantry versions list',
+      description: 'Pick the project and environment at the prompt',
+    },
+  ])
 }

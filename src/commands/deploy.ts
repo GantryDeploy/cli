@@ -22,6 +22,7 @@ import type {
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from '../lib/listr'
 import { printError } from '../lib/output'
 import { loadProjectIdentity } from '../lib/project-identity'
@@ -224,7 +225,7 @@ async function cutover(input: EnvironmentInput & { complete?: boolean }): Promis
 }
 
 export function registerRollbackCommand(program: Command): void {
-  program
+  const rollbackCmd = program
     .command('rollback')
     .argument('<environment>', 'Environment name')
     .description('Make an earlier version of the environment live')
@@ -257,6 +258,17 @@ export function registerRollbackCommand(program: Command): void {
         })
       }
     )
+
+  addExamples(rollbackCmd, [
+    {
+      command: 'gantry rollback production',
+      description: 'Make the previous version of production live again',
+    },
+    {
+      command: 'gantry rollback production --version v3hz7k',
+      description: 'Make a chosen version live (see "gantry versions list")',
+    },
+  ])
 }
 
 export function registerDeployCommand(program: Command): void {
@@ -264,7 +276,7 @@ export function registerDeployCommand(program: Command): void {
     .command('deploy')
     .description('Move traffic during a blue-green or canary release')
 
-  deploy
+  const statusCmd = deploy
     .command('status')
     .argument('<environment>', 'Environment name')
     .description('Show the live versions and the release in progress')
@@ -286,7 +298,7 @@ export function registerDeployCommand(program: Command): void {
       }
     })
 
-  deploy
+  const cutoverCmd = deploy
     .command('cutover')
     .argument('<environment>', 'Environment name')
     .description('Send all traffic to the new version of the release in progress')
@@ -312,7 +324,7 @@ export function registerDeployCommand(program: Command): void {
       }
     )
 
-  deploy
+  const shiftCmd = deploy
     .command('shift')
     .argument('<environment>', 'Environment name')
     .description('Send a share of traffic to the new version of a canary release')
@@ -355,7 +367,7 @@ export function registerDeployCommand(program: Command): void {
       }
     )
 
-  deploy
+  const abortCmd = deploy
     .command('abort')
     .argument('<environment>', 'Environment name')
     .description('Send all traffic back to the version live before the release')
@@ -376,7 +388,7 @@ export function registerDeployCommand(program: Command): void {
       })
     })
 
-  deploy
+  const completeCmd = deploy
     .command('complete')
     .argument('<environment>', 'Environment name')
     .description('Drop the previous version of a release that has been cut over')
@@ -417,4 +429,50 @@ export function registerDeployCommand(program: Command): void {
           ).reapplyRouting,
       })
     })
+
+  addExamples(deploy, [
+    { command: 'gantry deploy status production', description: 'Show the release in progress' },
+    {
+      command: 'gantry deploy cutover production',
+      description: 'Send all traffic to the new version',
+    },
+  ])
+  addExamples(statusCmd, [
+    {
+      command: 'gantry deploy status production',
+      description: 'Show the live versions and the release in progress',
+    },
+  ])
+  addExamples(cutoverCmd, [
+    {
+      command: 'gantry deploy cutover production',
+      description: 'Send all traffic to the new version',
+    },
+    {
+      command: 'gantry deploy cutover production --complete',
+      description: 'Cut over and drop the previous version in one step',
+    },
+  ])
+  addExamples(shiftCmd, [
+    {
+      command: 'gantry deploy shift production --percent 25',
+      description: 'Send a quarter of the traffic to the new version',
+    },
+    {
+      command: 'gantry deploy shift production --percent 100 --complete',
+      description: 'Send all traffic and drop the previous version',
+    },
+  ])
+  addExamples(abortCmd, [
+    {
+      command: 'gantry deploy abort production',
+      description: 'Send all traffic back to the version live before the release',
+    },
+  ])
+  addExamples(completeCmd, [
+    {
+      command: 'gantry deploy complete production',
+      description: 'Drop the previous version once the new one is taking all traffic',
+    },
+  ])
 }

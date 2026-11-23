@@ -5,6 +5,7 @@ import type { Command } from 'commander'
 import type { ServiceLogsQuery, ServiceLogsQueryVariables } from '../generated/graphql'
 import { graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { streamLogs, withLogQueryOptions } from '../lib/log-stream'
 import type { LogQueryOptions } from '../lib/log-stream'
 import { loadProjectIdentity, resolveEnvironmentSlug } from '../lib/project-identity'
@@ -47,7 +48,7 @@ interface LogsOptions extends LogQueryOptions {
 
 /** The API reads the logs with its own cloud access, so the CLI needs no cloud credentials. */
 export function registerLogsCommand(program: Command): void {
-  withLogQueryOptions(
+  const logsCmd = withLogQueryOptions(
     program
       .command('logs')
       .description("Show a service's runtime logs")
@@ -79,4 +80,19 @@ export function registerLogsCommand(program: Command): void {
       `No log lines for ${service} in ${environmentSlug} in the last ${options.since}.`
     )
   })
+
+  addExamples(logsCmd, [
+    {
+      command: 'gantry logs web --env production',
+      description: 'Show the last hour of the web service logs',
+    },
+    {
+      command: 'gantry logs web --env production --since 30m --grep error --refresh',
+      description: 'Follow errors from the last 30 minutes',
+    },
+    {
+      command: 'gantry logs api --env staging --function worker',
+      description: 'Show the logs of one function of a service',
+    },
+  ])
 }

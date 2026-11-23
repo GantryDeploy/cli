@@ -23,6 +23,7 @@ import type {
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { globalCwd } from '../lib/command-options'
 import { DotenvError, formatDotenv, parseAssignment, parseDotenv } from '../lib/dotenv'
+import { addExamples } from '../lib/examples'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { loadProjectIdentity, resolveEnvironmentSlug } from '../lib/project-identity'
 import { redact, sanitizeTerminal } from '../lib/sanitize'
@@ -288,7 +289,7 @@ export function registerEnvCommand(program: Command): void {
       'Manage environment variables kept outside gantry.yml. Each command takes one scope: --env, --project, --network, --cloud or --team-wide.'
     )
 
-  withScopeOptions(
+  const getCmd = withScopeOptions(
     envCmd
       .command('get')
       .argument('[key]', 'Variable to print (lists every variable when omitted)')
@@ -337,7 +338,7 @@ export function registerEnvCommand(program: Command): void {
     }
   )
 
-  withScopeOptions(
+  const setCmd = withScopeOptions(
     envCmd
       .command('set')
       .argument('[assignments...]', 'KEY=value pairs to set')
@@ -377,7 +378,7 @@ export function registerEnvCommand(program: Command): void {
     }
   )
 
-  withScopeOptions(
+  const unsetCmd = withScopeOptions(
     envCmd
       .command('unset')
       .description('Remove variables')
@@ -402,7 +403,7 @@ export function registerEnvCommand(program: Command): void {
     }
   })
 
-  withScopeOptions(
+  const pullCmd = withScopeOptions(
     envCmd
       .command('pull')
       .description('Write the variables at a scope to a .env file')
@@ -431,7 +432,7 @@ export function registerEnvCommand(program: Command): void {
     }
   })
 
-  withScopeOptions(
+  const pushCmd = withScopeOptions(
     envCmd
       .command('push')
       .description(
@@ -477,4 +478,56 @@ export function registerEnvCommand(program: Command): void {
       process.exit(1)
     }
   })
+
+  addExamples(envCmd, [
+    { command: 'gantry env get --env staging', description: 'List the variables of staging' },
+    {
+      command: 'gantry env set --env staging LOG_LEVEL=debug',
+      description: 'Set a variable on staging',
+    },
+  ])
+  addExamples(getCmd, [
+    { command: 'gantry env get --env staging', description: 'List the variables of staging' },
+    { command: 'gantry env get --project APP_URL', description: 'Print one project-wide value' },
+    {
+      command: 'gantry env get --env production --service web --resolved',
+      description: 'Show every variable the live web service runs with, and where each came from',
+    },
+  ])
+  addExamples(setCmd, [
+    {
+      command: 'gantry env set --env staging LOG_LEVEL=debug TZ=UTC',
+      description: 'Set two variables on staging',
+    },
+    {
+      command: 'gantry env set --team-wide --from-file shared.env',
+      description: 'Set variables for every project from a file',
+    },
+  ])
+  addExamples(unsetCmd, [
+    {
+      command: 'gantry env unset --env staging LOG_LEVEL',
+      description: 'Remove a variable from staging',
+    },
+  ])
+  addExamples(pullCmd, [
+    {
+      command: 'gantry env pull --env staging',
+      description: 'Write the variables of staging to .env.staging',
+    },
+    {
+      command: 'gantry env pull --project --file .env.shared --force',
+      description: 'Overwrite a chosen file with the project-wide variables',
+    },
+  ])
+  addExamples(pushCmd, [
+    {
+      command: 'gantry env push --env staging',
+      description: 'Make staging hold exactly the variables in .env.staging',
+    },
+    {
+      command: 'gantry env push --env staging --file .env.ci --yes',
+      description: 'Push from a chosen file without the prompt, such as in CI',
+    },
+  ])
 }

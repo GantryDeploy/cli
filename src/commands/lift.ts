@@ -31,6 +31,7 @@ import {
 } from '../lib/deployment-poll'
 import type { VersionDeployment } from '../lib/deployment-poll'
 import { isTerminalStatus } from '../lib/deployment-status'
+import { addExamples } from '../lib/examples'
 import { buildDockerBuildArgs, runDocker } from '../lib/exec'
 import { liftExistingBuild, parseBuildNumber } from '../lib/lift-build'
 import type { LiftSource } from '../lib/lift-build'
@@ -256,7 +257,7 @@ export function existingBuildSource(options: LiftOptions): LiftSource | null | {
 }
 
 export function registerLiftCommand(program: Command): void {
-  program
+  const liftCmd = program
     .command('lift')
     .argument('<environment>', 'Environment name')
     .description(
@@ -808,4 +809,17 @@ export function registerLiftCommand(program: Command): void {
         removeStagingDir(workingDir)
       }
     })
+
+  addExamples(liftCmd, [
+    { command: 'gantry lift staging', description: 'Build the project and deploy it to staging' },
+    {
+      command: 'gantry lift production --from staging',
+      description: 'Deploy the build live on staging to production',
+    },
+    { command: 'gantry lift production --build 12', description: 'Deploy build 12 to production' },
+    {
+      command: 'gantry lift staging --var image_tag=1.4.2 --verbose',
+      description: 'Override a variable and log each state change, such as in CI',
+    },
+  ])
 }

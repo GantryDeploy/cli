@@ -8,6 +8,7 @@ import type {
   GetCleanupItemsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { createTable, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 import { isInteractive } from '../lib/terminal'
@@ -100,7 +101,7 @@ async function confirmCleanup(items: CleanupItem[], yes: boolean): Promise<boole
 }
 
 export function registerCleanupCommand(program: Command): void {
-  program
+  const cleanupCmd = program
     .command('cleanup')
     .description('Remove infrastructure no live version uses, such as previous routing')
     .option('-y, --yes', 'Skip the confirmation prompt')
@@ -130,4 +131,12 @@ export function registerCleanupCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(cleanupCmd, [
+    {
+      command: 'gantry cleanup',
+      description: 'List unused infrastructure and confirm its removal',
+    },
+    { command: 'gantry cleanup --yes', description: 'Remove it without the prompt, such as in CI' },
+  ])
 }

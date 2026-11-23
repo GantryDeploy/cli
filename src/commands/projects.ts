@@ -14,6 +14,7 @@ import type {
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { CLOUD_PROVIDER_LABELS, toCloudProvider } from '../lib/clouds'
+import { addExamples } from '../lib/examples'
 import { createTable, formatDate, printError, printSuccess, styledCell } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -83,7 +84,7 @@ async function findProject(idOrSlug: string): Promise<GetProjectQuery['project']
 export function registerProjectsCommand(program: Command): void {
   const projectsCmd = program.command('projects').description('Manage projects')
 
-  projectsCmd
+  const listCmd = projectsCmd
     .command('list')
     .description('List projects')
     .action(async () => {
@@ -119,7 +120,7 @@ export function registerProjectsCommand(program: Command): void {
       }
     })
 
-  projectsCmd
+  const showCmd = projectsCmd
     .command('show')
     .argument('<idOrSlug>', 'Project ID or slug')
     .description('Show project details')
@@ -167,7 +168,7 @@ export function registerProjectsCommand(program: Command): void {
       }
     })
 
-  projectsCmd
+  const createCmd = projectsCmd
     .command('create')
     .description('Create a new project')
     .option('--name <name>', 'Project name')
@@ -229,4 +230,25 @@ export function registerProjectsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(projectsCmd, [
+    { command: 'gantry projects list', description: "List the team's projects" },
+    { command: 'gantry projects show storefront', description: 'Show a project' },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry projects list', description: "List the team's projects" },
+  ])
+  addExamples(showCmd, [
+    { command: 'gantry projects show storefront', description: 'Show a project by its slug' },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry projects create',
+      description: 'Create a project, prompting for each setting',
+    },
+    {
+      command: 'gantry projects create --name Storefront --cloud-provider aws',
+      description: 'Create a project on a chosen cloud provider',
+    },
+  ])
 }

@@ -12,6 +12,7 @@ import type {
   TeardownPreviewQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { printError } from '../lib/output'
 import { loadProjectIdentity, resolveEnvironmentSlug } from '../lib/project-identity'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -113,7 +114,7 @@ async function promptForPhraseWithTimeout(phrase: string, expiresAt: Date): Prom
 }
 
 export function registerTeardownCommand(program: Command): void {
-  program
+  const teardownCmd = program
     .command('teardown')
     .description('Tear down all infrastructure for an environment')
     .argument('<environment>', 'Environment name to tear down (e.g., "staging")')
@@ -216,4 +217,11 @@ export function registerTeardownCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(teardownCmd, [
+    {
+      command: 'gantry teardown staging',
+      description: 'Remove all infrastructure of the staging environment',
+    },
+  ])
 }

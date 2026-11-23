@@ -10,6 +10,7 @@ import type {
   GetEnvironmentsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import {
   resolveCloud,
   selectNetwork,
@@ -65,7 +66,7 @@ const CREATE_ENVIRONMENT_MUTATION = /* GraphQL */ `
 export function registerEnvironmentsCommand(program: Command): void {
   const envsCmd = program.command('envs').alias('environments').description('Manage environments')
 
-  envsCmd
+  const listCmd = envsCmd
     .command('list')
     .description('List all environments')
     .option('-p, --project <id>', 'Filter by project ID')
@@ -114,7 +115,7 @@ export function registerEnvironmentsCommand(program: Command): void {
       }
     })
 
-  envsCmd
+  const createCmd = envsCmd
     .command('create')
     .description('Create a new environment')
     .option('--project <id>', 'Project ID')
@@ -202,4 +203,30 @@ export function registerEnvironmentsCommand(program: Command): void {
         }
       }
     )
+
+  addExamples(envsCmd, [
+    { command: 'gantry envs list', description: "List the team's environments" },
+    {
+      command: 'gantry envs create',
+      description: 'Create an environment, prompting for each setting',
+    },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry envs list', description: "List the team's environments" },
+    {
+      command: 'gantry envs list --project p9ue62',
+      description: "List one project's environments",
+    },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry envs create',
+      description: 'Create an environment, prompting for each setting',
+    },
+    {
+      command:
+        'gantry envs create --project p9ue62 --cloud c4xp9w --network n8kd2q --region us-east-1 --name Production --production',
+      description: 'Create a production environment on a network',
+    },
+  ])
 }

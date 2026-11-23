@@ -51,7 +51,7 @@ export function registerVersionsCommand(program: Command): void {
         for (const version of versions) {
           table.push([
             version.id,
-            String(version.number),
+            version.number === null ? '-' : String(version.number),
             version.gitRef ?? '-',
             formatDate(version.createdAt),
           ])

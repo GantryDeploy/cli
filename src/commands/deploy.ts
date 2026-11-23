@@ -28,6 +28,7 @@ import { printError } from '../lib/output'
 import { loadProjectIdentity } from '../lib/project-identity'
 import { waitForRelease } from '../lib/release-poll'
 import { sanitizeTerminal } from '../lib/sanitize'
+import { versionTag } from '../lib/version-tag'
 
 const RELEASE_STATUS_QUERY = /* GraphQL */ `
   query ReleaseStatus($projectId: String!, $environment: String!) {
@@ -204,7 +205,7 @@ export function statusLines(environment: string, status: ReleaseStatusResult): s
         ? `since ${formatTime(status.since)}`
         : `lifted ${formatTime(version.createdAt)}`
     lines.push(
-      `  ${role.padEnd(9)} ${`v${String(version.number)}`.padEnd(6)} ${`${String(version.weight)}%`.padStart(4)}   ${when}`
+      `  ${role.padEnd(9)} ${versionTag(version.versionId, version.number).padEnd(6)} ${`${String(version.weight)}%`.padStart(4)}   ${when}`
     )
   }
   if (status.holdExpiresAt) {

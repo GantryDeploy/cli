@@ -16,6 +16,7 @@ import { addExamples } from '../lib/examples'
 import { selectEnvironment, selectProject } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
+import { versionTag } from '../lib/version-tag'
 
 const DEPLOYMENT_QUERY = /* GraphQL */ `
   query GetDeployment($id: String!) {
@@ -127,7 +128,7 @@ export function registerDeploymentsCommand(program: Command): void {
           versionId = await select({
             message: 'Select a version:',
             choices: versionsData.versionsByProject.map((v) => ({
-              name: `v${String(v.number)}${v.gitRef ? ` (${v.gitRef})` : ''}`,
+              name: `${versionTag(v.id, v.number)}${v.gitRef ? ` (${v.gitRef})` : ''}`,
               value: v.id,
             })),
           })

@@ -10,6 +10,7 @@ import { resolveRenderer, shouldUseFallbackRenderer, type CliRenderer } from './
 import { printError } from './output'
 import { loadProjectIdentity } from './project-identity'
 import { sanitizeTerminal } from './sanitize'
+import { versionTag } from './version-tag'
 
 const LIFT_BUILD_MUTATION = /* GraphQL */ `
   mutation LiftBuild($input: LiftBuildInput!) {
@@ -68,7 +69,7 @@ export async function liftExistingBuild(params: {
             ctx.yamlSnapshot = liftBuild.yamlSnapshot ?? undefined
             ctx.environmentSlug = environment.toLowerCase()
             task.title = sanitizeTerminal(
-              `Lift build (v${String(liftBuild.versionNumber)} → ${environment})`
+              `Lift build (${versionTag(liftBuild.versionId, liftBuild.versionNumber)} → ${environment})`
             )
           },
         },

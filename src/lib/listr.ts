@@ -4,7 +4,7 @@
  * runtime choice has to name this union as its type argument:
  * `new Listr<Ctx, CliRenderer>(...)`.
  */
-export type CliRenderer = 'default' | 'simple' | 'verbose'
+export type CliRenderer = 'default' | 'simple' | 'verbose' | 'silent'
 
 export function resolveRenderer(verbose: boolean): CliRenderer {
   if (verbose) return 'verbose'

@@ -262,12 +262,20 @@ async function printResolved(scope: Scope, key: string | undefined): Promise<voi
     }
   )
   const { versionNumber, variables } = data.resolvedServiceEnv
+  // A preview's versions have no number.
+  const version = versionNumber === null ? 'the live version' : `version ${String(versionNumber)}`
   const rows = key === undefined ? variables : variables.filter((v) => v.key === key)
   if (key !== undefined && rows.length === 0) {
-    fail(`${key} is not set for ${scope.label} in version ${String(versionNumber)}.`)
+    fail(`${key} is not set for ${scope.label} in ${version}.`)
   }
 
-  console.log(sanitizeTerminal(`${scope.label}, live version ${String(versionNumber)}`))
+  console.log(
+    sanitizeTerminal(
+      versionNumber === null
+        ? `${scope.label}, live version`
+        : `${scope.label}, live version ${String(versionNumber)}`
+    )
+  )
   const table = createTable({ head: ['Key', 'Value', 'From', 'Overrides'] })
   for (const variable of rows) {
     table.push([

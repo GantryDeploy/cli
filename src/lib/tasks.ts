@@ -147,7 +147,7 @@ async function executeLocalBuild(
     workingDir,
     dockerTarget,
     namedBuildName,
-    versionNumber,
+    versionTag,
     projectId,
     projectSlug,
   } = inputs
@@ -166,7 +166,7 @@ async function executeLocalBuild(
   if (dockerfile) {
     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty build name is invalid and should fall back to the service name
     const tagName = namedBuildName || serviceName
-    const localTag = `${projectId}-${projectSlug}-${tagName}:v${String(versionNumber)}`
+    const localTag = `${projectId}-${projectSlug}-${tagName}:${versionTag}`
     if (!inputs.architecture) {
       throw new Error(`The build step for ${serviceName} has no CPU architecture`)
     }

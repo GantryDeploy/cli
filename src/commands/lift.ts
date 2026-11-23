@@ -10,6 +10,7 @@ import type {
   CreateVersionMutationVariables,
   DeploymentsByVersionQuery,
   DeploymentsByVersionQueryVariables,
+  ResolveProjectQuery,
   StartLiftDeploymentMutation,
   StartLiftDeploymentMutationVariables,
 } from '../generated/graphql'
@@ -51,6 +52,7 @@ import {
   getStagingDirPath,
   removeStagingDir,
 } from '../lib/tasks'
+import { versionTag } from '../lib/version-tag'
 import type { NamedBuildConfig } from '../types'
 
 import { cleanupHint, fetchCleanupItems } from './cleanup'
@@ -117,7 +119,7 @@ const START_DEPLOYMENT_MUTATION = /* GraphQL */ `
 
 type StartedDeployment = NonNullable<StartLiftDeploymentMutation['startDeployment']['deployment']>
 
-interface LiftOptions extends DeployCommandOptions {
+export interface LiftOptions extends DeployCommandOptions {
   cwd?: string
   file?: string
   force?: boolean
@@ -132,7 +134,8 @@ interface LiftOptions extends DeployCommandOptions {
 interface LiftContext {
   deploymentIds: string[]
   versionId?: string
-  versionNumber?: number
+  /** `v12`, or the version id on a preview environment. */
+  versionTag?: string
   projectId?: string
   projectSlug?: string
   builtImageTags?: Map<string, string>
@@ -256,18 +259,9 @@ export function existingBuildSource(options: LiftOptions): LiftSource | null | {
   return { buildNumber }
 }
 
-export function registerLiftCommand(program: Command): void {
-  const liftCmd = program
-    .command('lift')
-    .argument('<environment>', 'Environment name')
-    .description(
-      'Deploy a project to an environment, or with --from or --build, a build that already exists'
-    )
-    .option(
-      '--from <environment>',
-      "Deploy that environment's live build instead of building (the same environment deploys its live build again)"
-    )
-    .option('--build <number>', 'Deploy the build with this number, such as 12 or v12')
+/** The flags of a lift that builds the working directory, shared by `lift` and `preview lift`. */
+export function addLiftOptions(command: Command): Command {
+  return command
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-f, --file <path>', 'Path to gantry.yml (defaults to ./gantry.yml)')
     .option('--force', 'Force re-upload all files, bypassing deduplication')
@@ -283,532 +277,68 @@ export function registerLiftCommand(program: Command): void {
       (value: string, prev: string[] | undefined) => (prev ? [...prev, value] : [value]),
       []
     )
-    .action(async (environment: string, options: LiftOptions, command: Command) => {
-      const cwd = globalCwd(command) ?? options.cwd
-      const workingDir = cwd ? path.resolve(cwd) : process.cwd()
+}
 
-      const source = existingBuildSource(options)
-      if (source !== null) {
-        if ('refused' in source) {
-          printError(source.refused)
-          process.exit(1)
-        }
-        await liftExistingBuild({ environment, source, workingDir, options })
-        return
-      }
+export function registerLiftCommand(program: Command): void {
+  const liftCmd = addLiftOptions(
+    program
+      .command('lift')
+      .argument('<environment>', 'Environment name')
+      .description(
+        'Deploy a project to an environment, or with --from or --build, a build that already exists'
+      )
+      .option(
+        '--from <environment>',
+        "Deploy that environment's live build instead of building (the same environment deploys its live build again)"
+      )
+      .option('--build <number>', 'Deploy the build with this number, such as 12 or v12')
+  ).action(async (environment: string, options: LiftOptions, command: Command) => {
+    const cwd = globalCwd(command) ?? options.cwd
+    const workingDir = cwd ? path.resolve(cwd) : process.cwd()
 
-      // `--file` moves only where the config is read from; the working directory is still what ships.
-      const yamlPath = options.file
-        ? path.resolve(workingDir, options.file)
-        : findConfigPath(workingDir)
-
-      if (!yamlPath || !fs.existsSync(yamlPath)) {
-        printError(`No gantry.yml or gantry.yaml found in ${workingDir}`)
+    const source = existingBuildSource(options)
+    if (source !== null) {
+      if ('refused' in source) {
+        printError(source.refused)
         process.exit(1)
       }
+      await liftExistingBuild({ environment, source, workingDir, options })
+      return
+    }
 
-      let cliVariables: Record<string, string>
-      try {
-        cliVariables = parseCliVarFlags(options.var)
-      } catch (error) {
-        printError(error instanceof Error ? error.message : 'Failed to parse --var flags')
-        process.exit(1)
-      }
+    // `--file` moves only where the config is read from; the working directory is still what ships.
+    const yamlPath = options.file
+      ? path.resolve(workingDir, options.file)
+      : findConfigPath(workingDir)
 
-      const resolveResult = await resolveYaml({ yamlPath, environment, cliVariables })
-      if (!resolveResult.ok) {
-        for (const err of resolveResult.errors) {
-          const pathLabel = err.path ? ` (at ${err.path})` : ''
-          printError(`${err.message}${pathLabel}`)
-          if (err.suggestion) {
-            process.stderr.write(`  hint: ${err.suggestion}\n`)
-          }
-        }
-        process.exit(1)
-      }
-      const rawConfig = resolveResult.config
-      const plannedBuilds = resolveResult.plan.builds
-      let config: LiftConfig
-      try {
-        config = readLiftConfig(rawConfig)
-      } catch (error) {
-        printError(error instanceof Error ? error.message : 'Failed to read the resolved config')
-        process.exit(1)
-      }
+    if (!yamlPath || !fs.existsSync(yamlPath)) {
+      printError(`No gantry.yml or gantry.yaml found in ${workingDir}`)
+      process.exit(1)
+    }
 
-      // Find the environment in the YAML
-      const envKey = environment.toLowerCase()
-      const envConfig = config.environments[envKey]
+    let cliVariables: Record<string, string>
+    try {
+      cliVariables = parseCliVarFlags(options.var)
+    } catch (error) {
+      printError(error instanceof Error ? error.message : 'Failed to parse --var flags')
+      process.exit(1)
+    }
 
-      if (!envConfig) {
-        // Try to find a case-insensitive match
-        const availableEnvs = Object.keys(config.environments)
-        const matchingEnv = availableEnvs.find((e) => e.toLowerCase() === envKey)
-
-        if (matchingEnv) {
-          printError(`Environment '${environment}' not found. Did you mean '${matchingEnv}'?`)
-        } else {
-          printError(
-            `Environment '${environment}' not found in gantry.yml. Available: ${availableEnvs.join(', ')}`
-          )
-        }
-        process.exit(1)
-      }
-
-      const stagingDir = getStagingDirPath(workingDir)
-      let cancelling = false
-      let deploymentIds: string[] = []
-
-      const handleSigint = async () => {
-        if (cancelling) {
-          process.exit(130)
-        }
-
-        cancelling = true
-        console.log('\nCancelling deployment...')
-
-        for (const id of deploymentIds) {
-          await cancelDeployment(id)
+    const resolveResult = await resolveYaml({ yamlPath, environment, cliVariables })
+    if (!resolveResult.ok) {
+      for (const err of resolveResult.errors) {
+        const pathLabel = err.path ? ` (at ${err.path})` : ''
+        printError(`${err.message}${pathLabel}`)
+        if (err.suggestion) {
+          process.stderr.write(`  hint: ${err.suggestion}\n`)
         }
       }
-
-      const onSigint = () => {
-        void handleSigint()
-      }
-      process.on('SIGINT', onSigint)
-
-      const setupCommands = config.setup?.commands
-
-      try {
-        const tasks = new Listr<LiftContext, CliRenderer>(
-          [
-            {
-              title: 'Prepare staging directory',
-              task: () => {
-                cleanStagingDir(workingDir)
-              },
-            },
-
-            {
-              title: 'Copy project files',
-              task: (_ctx, task) => {
-                // Projects that ship untracked-but-required files (e.g. WordPress core) set `use_gitignore: false`.
-                const envBlocked = copyToStagingDir(workingDir, config.setup?.use_gitignore ?? true)
-                if (envBlocked.length > 0) {
-                  task.title = sanitizeTerminal(envBlockedTitle(envBlocked))
-                }
-              },
-            },
-
-            {
-              title: 'Create version',
-              task: async (ctx, task) => {
-                const result = await graphqlRequest<
-                  CreateVersionMutation,
-                  CreateVersionMutationVariables
-                >(CREATE_VERSION_MUTATION, {
-                  config: rawConfig,
-                  environment,
-                })
-
-                const { createVersion } = result
-
-                if (!createVersion.success || !createVersion.versionId) {
-                  throw new Error(
-                    sanitizeTerminal(createVersion.message ?? 'Failed to create version')
-                  )
-                }
-                if (
-                  createVersion.versionNumber === null ||
-                  createVersion.projectId === null ||
-                  !createVersion.projectSlug
-                ) {
-                  throw new Error('Failed to create version')
-                }
-
-                ctx.versionId = createVersion.versionId
-                ctx.versionNumber = createVersion.versionNumber
-                ctx.projectId = createVersion.projectId
-                ctx.projectSlug = createVersion.projectSlug
-                task.title = `Create version (v${String(createVersion.versionNumber)})`
-              },
-            },
-
-            {
-              title: 'Run setup commands',
-              enabled: () => !!setupCommands,
-              task: async (_ctx, task) => {
-                if (!setupCommands) return
-                const setupDir = config.setup?.working_dir
-                  ? path.join(stagingDir, config.setup.working_dir)
-                  : stagingDir
-                await runBuildInDir(setupDir, setupCommands, (step, total, cmd) => {
-                  task.title = `Run setup commands (${String(step)}/${String(total)}: ${cmd})`
-                })
-                task.title = 'Run setup commands'
-              },
-            },
-
-            {
-              title: 'Build Docker images',
-              enabled: () => Object.keys(config.setup?.builds ?? {}).length > 0,
-              task: async (ctx, task) => {
-                const builds = config.setup?.builds
-                if (!builds) throw new Error('Build step started without builds')
-                const sorted = topoSortBuilds(builds)
-                const total = sorted.length
-                const { projectId, projectSlug, versionNumber } = ctx
-                if (
-                  projectId === undefined ||
-                  projectSlug === undefined ||
-                  versionNumber === undefined
-                ) {
-                  throw new Error('Cannot tag Docker images before the version is created')
-                }
-
-                ctx.builtImageTags = new Map()
-
-                for (let i = 0; i < sorted.length; i++) {
-                  const [buildName, buildConfig] = sorted[i]
-                  task.title = `Build Docker images (${String(i + 1)}/${String(total)}: ${buildName})`
-
-                  const localTag = `${projectId}-${projectSlug}-${buildName}:v${String(versionNumber)}`
-                  const buildDir = buildConfig.working_dir
-                    ? path.join(stagingDir, buildConfig.working_dir)
-                    : stagingDir
-
-                  const architecture = plannedBuilds.find(
-                    (planned) => planned.name === buildName
-                  )?.architecture
-                  if (!architecture) {
-                    throw new Error(`The deployment plan has no CPU architecture for ${buildName}`)
-                  }
-
-                  const dockerArgs = buildDockerBuildArgs({
-                    tag: localTag,
-                    dockerfile: buildConfig.dockerfile,
-                    architecture,
-                    target: buildConfig.docker_target,
-                    buildArgs: buildConfig.args,
-                  })
-
-                  await runDocker(dockerArgs, { cwd: buildDir })
-                  ctx.builtImageTags.set(buildName, localTag)
-                }
-
-                task.title = `Build Docker images (${String(total)} built)`
-              },
-            },
-
-            {
-              title: 'Start deployment',
-              task: async (ctx, task) => {
-                const startResult = await graphqlRequest<
-                  StartLiftDeploymentMutation,
-                  StartLiftDeploymentMutationVariables
-                >(START_DEPLOYMENT_MUTATION, {
-                  environment,
-                  config: rawConfig,
-                  versionId: ctx.versionId,
-                  options: {
-                    deleteStale: options.delete === true,
-                    force: options.force === true,
-                    ...deployCommandSkips(options),
-                  },
-                })
-
-                const { startDeployment } = startResult
-
-                if (!startDeployment.success || !startDeployment.deployment) {
-                  throw new Error(
-                    sanitizeTerminal(startDeployment.message ?? 'Failed to start deployment')
-                  )
-                }
-
-                ctx.primaryDeployment = startDeployment.deployment
-                ctx.deploymentIds = startDeployment.deploymentIds ?? [startDeployment.deployment.id]
-                ctx.versionId = startDeployment.versionId ?? undefined
-                deploymentIds = ctx.deploymentIds
-
-                const dep = startDeployment.deployment
-                const info: string[] = []
-                if (dep.projectName) info.push(`Project: ${dep.projectName}`)
-                if (dep.environmentName) info.push(`Environment: ${dep.environmentName}`)
-                info.push(`Services: ${String(ctx.deploymentIds.length)}`)
-
-                task.title = sanitizeTerminal(`Deployment started (${info.join(', ')})`)
-              },
-            },
-
-            {
-              title: 'Targets',
-              task: async (ctx, task) => {
-                if (!ctx.versionId) {
-                  task.title = 'Targets: Skipped (no version ID)'
-                  return
-                }
-
-                const subtasks = serviceDeploymentSubtasks<LiftContext>({
-                  versionId: ctx.versionId,
-                  deploymentIds: ctx.deploymentIds,
-                  names: await serviceDeploymentNames(ctx.versionId),
-                  taskContext: {
-                    stagingDir,
-                    cwd: workingDir,
-                    force: options.force,
-                    delete: options.delete,
-                  },
-                  isCancelling: () => cancelling,
-                  onFailure: (subCtx, failure) => {
-                    subCtx.failedServices = subCtx.failedServices ?? []
-                    subCtx.failedServices.push(failure)
-                  },
-                })
-
-                // exitOnError: false lets every service finish when a sibling fails; failed subtasks still throw, so they render ✖.
-                return task.newListr(subtasks, { concurrent: true, exitOnError: false })
-              },
-            },
-
-            {
-              title: 'Configure routing',
-              // Keeps every post-deploy command line on screen beneath the task.
-              rendererOptions: { outputBar: Infinity, persistentOutput: true },
-              skip: (ctx) => {
-                if (!ctx.versionId) return true
-                if (ctx.failedServices && ctx.failedServices.length > 0) {
-                  const n = ctx.failedServices.length
-                  return `${String(n)} service${n === 1 ? '' : 's'} failed, routing not applied`
-                }
-                return false
-              },
-              task: async (ctx, task) => {
-                if (!ctx.versionId) throw new Error('Routing started without a version ID')
-                const routing = await waitForRouting({
-                  versionId: ctx.versionId,
-                  isCancelling: () => cancelling,
-                  postDeployAsync: options.postDeployAsync === true,
-                  setTitle: (title) => {
-                    task.title = title
-                  },
-                  writeOutput: (line) => {
-                    task.output = line
-                  },
-                })
-                ctx.routeUrls = routing.routeUrls
-                ctx.dnsRecords = routing.dnsRecords
-              },
-            },
-
-            {
-              title: 'Cleanup',
-              skip: (ctx) => {
-                if (!ctx.versionId) return true
-                if (ctx.failedServices && ctx.failedServices.length > 0) {
-                  const n = ctx.failedServices.length
-                  return `${String(n)} service${n === 1 ? '' : 's'} failed, nothing to clean up`
-                }
-                return false
-              },
-              task: async (ctx, task) => {
-                if (!ctx.versionId) throw new Error('Cleanup started without a version ID')
-
-                if (!options.waitForCleanup) {
-                  // The new version is already live, so by default teardown finishes in the background.
-                  let backgroundCount = 0
-                  try {
-                    const result = await graphqlRequest<
-                      DeploymentsByVersionQuery,
-                      DeploymentsByVersionQueryVariables
-                    >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId: ctx.versionId })
-                    backgroundCount = result.deploymentsByVersion.filter(
-                      (d) => d.deploymentType === 'teardown'
-                    ).length
-                  } catch {
-                    // The count is informational; on failure, report none.
-                  }
-
-                  task.title =
-                    backgroundCount > 0
-                      ? `Cleanup: ${String(backgroundCount)} teardown${backgroundCount === 1 ? '' : 's'} running in background (use --wait-for-cleanup to block)`
-                      : 'Cleanup: Nothing to clean up'
-                  return
-                }
-
-                const CLEANUP_DISCOVERY_TIMEOUT_MS = 30_000
-                const startTime = Date.now()
-                let teardownDeployments: VersionDeployment[] = []
-
-                while (teardownDeployments.length === 0) {
-                  await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-
-                  if (cancelling) {
-                    task.title = 'Cleanup: Cancelled'
-                    return
-                  }
-
-                  // Teardowns exist before routing completes, so a short wait is enough.
-                  if (Date.now() - startTime > CLEANUP_DISCOVERY_TIMEOUT_MS) {
-                    task.title = 'Cleanup: Nothing to clean up'
-                    return
-                  }
-
-                  try {
-                    const result = await graphqlRequest<
-                      DeploymentsByVersionQuery,
-                      DeploymentsByVersionQueryVariables
-                    >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId: ctx.versionId })
-
-                    teardownDeployments = result.deploymentsByVersion.filter(
-                      (d) => d.deploymentType === 'teardown'
-                    )
-                  } catch {
-                    // Transient: the next poll retries.
-                  }
-                }
-
-                const cleanupNameMap = new Map<string, string>()
-                for (const dep of teardownDeployments) {
-                  if (dep.serviceName) {
-                    cleanupNameMap.set(dep.id, sanitizeTerminal(dep.serviceName))
-                  }
-                }
-
-                const titleUpdaters = new Map<string, (title: string) => void>()
-                const resolvers = new Map<string, () => void>()
-                const completedCleanups = new Set<string>()
-
-                const subtasks = teardownDeployments.map((dep) => ({
-                  title: `${cleanupNameMap.get(dep.id) ?? dep.id}: Pending`,
-                  task: async (_ctx: LiftContext, subtask: { title: string }) => {
-                    titleUpdaters.set(dep.id, (title: string) => {
-                      subtask.title = sanitizeTerminal(title)
-                    })
-
-                    return new Promise<void>((resolve) => {
-                      resolvers.set(dep.id, resolve)
-                    })
-                  },
-                }))
-
-                const pollCleanup = async () => {
-                  const { versionId } = ctx
-                  if (!versionId) return
-                  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
-                  while (true) {
-                    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-
-                    if (cancelling) {
-                      for (const [id, resolve] of resolvers) {
-                        if (!completedCleanups.has(id)) {
-                          const updateTitle = titleUpdaters.get(id)
-                          if (updateTitle) updateTitle(`${cleanupNameMap.get(id) ?? id}: Cancelled`)
-                          completedCleanups.add(id)
-                          resolve()
-                        }
-                      }
-                      return
-                    }
-
-                    try {
-                      const result = await graphqlRequest<
-                        DeploymentsByVersionQuery,
-                        DeploymentsByVersionQueryVariables
-                      >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId })
-
-                      const currentTeardowns = result.deploymentsByVersion.filter(
-                        (d) => d.deploymentType === 'teardown'
-                      )
-
-                      for (const deployment of currentTeardowns) {
-                        const id = deployment.id
-                        const updateTitle = titleUpdaters.get(id)
-
-                        if (!updateTitle || completedCleanups.has(id)) continue
-
-                        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty serviceName should fall back to the deployment id for display
-                        const targetLabel = cleanupNameMap.get(id) || deployment.serviceName || id
-                        const message = deployment.lastMessage
-                          ? ` - ${sanitizeTerminal(deployment.lastMessage)}`
-                          : ''
-
-                        if (isTerminalStatus(deployment.status)) {
-                          const normalized = deployment.status
-                          if (normalized === 'COMPLETE') {
-                            updateTitle(`${targetLabel}: Complete`)
-                          } else if (normalized === 'FAILED') {
-                            updateTitle(`${targetLabel}: Failed${message}`)
-                          } else {
-                            updateTitle(`${targetLabel}: ${deployment.status}`)
-                          }
-                          completedCleanups.add(id)
-                          resolvers.get(id)?.()
-                        } else {
-                          updateTitle(`${targetLabel}: ${deployment.status}${message}`)
-                        }
-                      }
-
-                      const allDone = teardownDeployments.every((d) => completedCleanups.has(d.id))
-                      if (allDone) return
-                    } catch {
-                      // Transient: the next poll retries.
-                    }
-                  }
-                }
-
-                void pollCleanup()
-
-                return task.newListr(subtasks, { concurrent: true })
-              },
-            },
-          ],
-          {
-            exitOnError: true,
-            renderer: resolveRenderer(options.verbose ?? false),
-            fallbackRenderer: 'simple',
-            fallbackRendererCondition: shouldUseFallbackRenderer,
-            rendererOptions: {
-              collapseSubtasks: false,
-            },
-          }
-        )
-
-        const finalCtx = await tasks.run({
-          deploymentIds: [],
-          versionId: undefined,
-          versionNumber: undefined,
-          projectId: undefined,
-          projectSlug: undefined,
-          builtImageTags: undefined,
-          primaryDeployment: undefined,
-        })
-
-        printRoutingSummary(finalCtx)
-        await printCleanupHint()
-
-        if (finalCtx.failedServices && finalCtx.failedServices.length > 0) {
-          const n = finalCtx.failedServices.length
-          const total = finalCtx.deploymentIds.length
-          const noun = total === 1 ? '' : 's'
-          printError(
-            `Deployment failed: ${String(n)} of ${String(total)} service${noun} did not succeed`
-          )
-          process.exitCode = 1
-        }
-      } catch (error) {
-        const errorMessage = formatApiError(error)
-        // Listr has already rendered its own errors.
-        if (!errorMessage.includes('Listr')) {
-          printError(errorMessage)
-        }
-        process.removeListener('SIGINT', onSigint)
-        removeStagingDir(workingDir)
-        process.exit(1)
-      } finally {
-        process.removeListener('SIGINT', onSigint)
-        removeStagingDir(workingDir)
-      }
-    })
+      process.exit(1)
+    }
+    const rawConfig = resolveResult.config
+    const plannedBuilds = resolveResult.plan.builds
+    await runLift({ environment, rawConfig, plannedBuilds, workingDir, options })
+  })
 
   addExamples(liftCmd, [
     { command: 'gantry lift staging', description: 'Build the project and deploy it to staging' },
@@ -822,4 +352,497 @@ export function registerLiftCommand(program: Command): void {
       description: 'Override a variable and log each state change, such as in CI',
     },
   ])
+}
+
+export type PlannedBuilds =
+  ResolveProjectQuery['resolveProject']['environments'][number]['plan']['builds']
+
+export interface RunLiftArgs {
+  environment: string
+  rawConfig: Record<string, unknown>
+  plannedBuilds: PlannedBuilds
+  workingDir: string
+  options: LiftOptions
+  /** Print nothing but errors, so the caller can print one JSON result. */
+  quiet?: boolean
+}
+
+/**
+ * Build the working directory and deploy it to `environment` with a config the API has already
+ * resolved. Shared by `gantry lift` and `gantry preview lift`.
+ */
+export async function runLift(args: RunLiftArgs): Promise<void> {
+  const { environment, rawConfig, plannedBuilds, workingDir, options, quiet = false } = args
+  let config: LiftConfig
+  try {
+    config = readLiftConfig(rawConfig)
+  } catch (error) {
+    printError(error instanceof Error ? error.message : 'Failed to read the resolved config')
+    process.exit(1)
+  }
+
+  // Find the environment in the YAML
+  const envKey = environment.toLowerCase()
+  const envConfig = config.environments[envKey]
+
+  if (!envConfig) {
+    // Try to find a case-insensitive match
+    const availableEnvs = Object.keys(config.environments)
+    const matchingEnv = availableEnvs.find((e) => e.toLowerCase() === envKey)
+
+    if (matchingEnv) {
+      printError(`Environment '${environment}' not found. Did you mean '${matchingEnv}'?`)
+    } else {
+      printError(
+        `Environment '${environment}' not found in gantry.yml. Available: ${availableEnvs.join(', ')}`
+      )
+    }
+    process.exit(1)
+  }
+
+  const stagingDir = getStagingDirPath(workingDir)
+  let cancelling = false
+  let deploymentIds: string[] = []
+
+  const handleSigint = async () => {
+    if (cancelling) {
+      process.exit(130)
+    }
+
+    cancelling = true
+    console.log('\nCancelling deployment...')
+
+    for (const id of deploymentIds) {
+      await cancelDeployment(id)
+    }
+  }
+
+  const onSigint = () => {
+    void handleSigint()
+  }
+  process.on('SIGINT', onSigint)
+
+  const setupCommands = config.setup?.commands
+
+  try {
+    const tasks = new Listr<LiftContext, CliRenderer>(
+      [
+        {
+          title: 'Prepare staging directory',
+          task: () => {
+            cleanStagingDir(workingDir)
+          },
+        },
+
+        {
+          title: 'Copy project files',
+          task: (_ctx, task) => {
+            // Projects that ship untracked-but-required files (e.g. WordPress core) set `use_gitignore: false`.
+            const envBlocked = copyToStagingDir(workingDir, config.setup?.use_gitignore ?? true)
+            if (envBlocked.length > 0) {
+              task.title = sanitizeTerminal(envBlockedTitle(envBlocked))
+            }
+          },
+        },
+
+        {
+          title: 'Create version',
+          task: async (ctx, task) => {
+            const result = await graphqlRequest<
+              CreateVersionMutation,
+              CreateVersionMutationVariables
+            >(CREATE_VERSION_MUTATION, {
+              config: rawConfig,
+              environment,
+            })
+
+            const { createVersion } = result
+
+            if (!createVersion.success || !createVersion.versionId) {
+              throw new Error(sanitizeTerminal(createVersion.message ?? 'Failed to create version'))
+            }
+            if (createVersion.projectId === null || !createVersion.projectSlug) {
+              throw new Error('Failed to create version')
+            }
+
+            ctx.versionId = createVersion.versionId
+            ctx.versionTag = versionTag(createVersion.versionId, createVersion.versionNumber)
+            ctx.projectId = createVersion.projectId
+            ctx.projectSlug = createVersion.projectSlug
+            task.title = `Create version (${ctx.versionTag})`
+          },
+        },
+
+        {
+          title: 'Run setup commands',
+          enabled: () => !!setupCommands,
+          task: async (_ctx, task) => {
+            if (!setupCommands) return
+            const setupDir = config.setup?.working_dir
+              ? path.join(stagingDir, config.setup.working_dir)
+              : stagingDir
+            await runBuildInDir(setupDir, setupCommands, (step, total, cmd) => {
+              task.title = `Run setup commands (${String(step)}/${String(total)}: ${cmd})`
+            })
+            task.title = 'Run setup commands'
+          },
+        },
+
+        {
+          title: 'Build Docker images',
+          enabled: () => Object.keys(config.setup?.builds ?? {}).length > 0,
+          task: async (ctx, task) => {
+            const builds = config.setup?.builds
+            if (!builds) throw new Error('Build step started without builds')
+            const sorted = topoSortBuilds(builds)
+            const total = sorted.length
+            const { projectId, projectSlug, versionTag: tag } = ctx
+            if (projectId === undefined || projectSlug === undefined || tag === undefined) {
+              throw new Error('Cannot tag Docker images before the version is created')
+            }
+
+            ctx.builtImageTags = new Map()
+
+            for (let i = 0; i < sorted.length; i++) {
+              const [buildName, buildConfig] = sorted[i]
+              task.title = `Build Docker images (${String(i + 1)}/${String(total)}: ${buildName})`
+
+              const localTag = `${projectId}-${projectSlug}-${buildName}:${tag}`
+              const buildDir = buildConfig.working_dir
+                ? path.join(stagingDir, buildConfig.working_dir)
+                : stagingDir
+
+              const architecture = plannedBuilds.find(
+                (planned) => planned.name === buildName
+              )?.architecture
+              if (!architecture) {
+                throw new Error(`The deployment plan has no CPU architecture for ${buildName}`)
+              }
+
+              const dockerArgs = buildDockerBuildArgs({
+                tag: localTag,
+                dockerfile: buildConfig.dockerfile,
+                architecture,
+                target: buildConfig.docker_target,
+                buildArgs: buildConfig.args,
+              })
+
+              await runDocker(dockerArgs, { cwd: buildDir })
+              ctx.builtImageTags.set(buildName, localTag)
+            }
+
+            task.title = `Build Docker images (${String(total)} built)`
+          },
+        },
+
+        {
+          title: 'Start deployment',
+          task: async (ctx, task) => {
+            const startResult = await graphqlRequest<
+              StartLiftDeploymentMutation,
+              StartLiftDeploymentMutationVariables
+            >(START_DEPLOYMENT_MUTATION, {
+              environment,
+              config: rawConfig,
+              versionId: ctx.versionId,
+              options: {
+                deleteStale: options.delete === true,
+                force: options.force === true,
+                ...deployCommandSkips(options),
+              },
+            })
+
+            const { startDeployment } = startResult
+
+            if (!startDeployment.success || !startDeployment.deployment) {
+              throw new Error(
+                sanitizeTerminal(startDeployment.message ?? 'Failed to start deployment')
+              )
+            }
+
+            ctx.primaryDeployment = startDeployment.deployment
+            ctx.deploymentIds = startDeployment.deploymentIds ?? [startDeployment.deployment.id]
+            ctx.versionId = startDeployment.versionId ?? undefined
+            deploymentIds = ctx.deploymentIds
+
+            const dep = startDeployment.deployment
+            const info: string[] = []
+            if (dep.projectName) info.push(`Project: ${dep.projectName}`)
+            if (dep.environmentName) info.push(`Environment: ${dep.environmentName}`)
+            info.push(`Services: ${String(ctx.deploymentIds.length)}`)
+
+            task.title = sanitizeTerminal(`Deployment started (${info.join(', ')})`)
+          },
+        },
+
+        {
+          title: 'Targets',
+          task: async (ctx, task) => {
+            if (!ctx.versionId) {
+              task.title = 'Targets: Skipped (no version ID)'
+              return
+            }
+
+            const subtasks = serviceDeploymentSubtasks<LiftContext>({
+              versionId: ctx.versionId,
+              deploymentIds: ctx.deploymentIds,
+              names: await serviceDeploymentNames(ctx.versionId),
+              taskContext: {
+                stagingDir,
+                cwd: workingDir,
+                force: options.force,
+                delete: options.delete,
+              },
+              isCancelling: () => cancelling,
+              onFailure: (subCtx, failure) => {
+                subCtx.failedServices = subCtx.failedServices ?? []
+                subCtx.failedServices.push(failure)
+              },
+            })
+
+            // exitOnError: false lets every service finish when a sibling fails; failed subtasks still throw, so they render ✖.
+            return task.newListr(subtasks, { concurrent: true, exitOnError: false })
+          },
+        },
+
+        {
+          title: 'Configure routing',
+          // Keeps every post-deploy command line on screen beneath the task.
+          rendererOptions: { outputBar: Infinity, persistentOutput: true },
+          skip: (ctx) => {
+            if (!ctx.versionId) return true
+            if (ctx.failedServices && ctx.failedServices.length > 0) {
+              const n = ctx.failedServices.length
+              return `${String(n)} service${n === 1 ? '' : 's'} failed, routing not applied`
+            }
+            return false
+          },
+          task: async (ctx, task) => {
+            if (!ctx.versionId) throw new Error('Routing started without a version ID')
+            const routing = await waitForRouting({
+              versionId: ctx.versionId,
+              isCancelling: () => cancelling,
+              postDeployAsync: options.postDeployAsync === true,
+              setTitle: (title) => {
+                task.title = title
+              },
+              writeOutput: (line) => {
+                task.output = line
+              },
+            })
+            ctx.routeUrls = routing.routeUrls
+            ctx.dnsRecords = routing.dnsRecords
+          },
+        },
+
+        {
+          title: 'Cleanup',
+          skip: (ctx) => {
+            if (!ctx.versionId) return true
+            if (ctx.failedServices && ctx.failedServices.length > 0) {
+              const n = ctx.failedServices.length
+              return `${String(n)} service${n === 1 ? '' : 's'} failed, nothing to clean up`
+            }
+            return false
+          },
+          task: async (ctx, task) => {
+            if (!ctx.versionId) throw new Error('Cleanup started without a version ID')
+
+            if (!options.waitForCleanup) {
+              // The new version is already live, so by default teardown finishes in the background.
+              let backgroundCount = 0
+              try {
+                const result = await graphqlRequest<
+                  DeploymentsByVersionQuery,
+                  DeploymentsByVersionQueryVariables
+                >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId: ctx.versionId })
+                backgroundCount = result.deploymentsByVersion.filter(
+                  (d) => d.deploymentType === 'teardown'
+                ).length
+              } catch {
+                // The count is informational; on failure, report none.
+              }
+
+              task.title =
+                backgroundCount > 0
+                  ? `Cleanup: ${String(backgroundCount)} teardown${backgroundCount === 1 ? '' : 's'} running in background (use --wait-for-cleanup to block)`
+                  : 'Cleanup: Nothing to clean up'
+              return
+            }
+
+            const CLEANUP_DISCOVERY_TIMEOUT_MS = 30_000
+            const startTime = Date.now()
+            let teardownDeployments: VersionDeployment[] = []
+
+            while (teardownDeployments.length === 0) {
+              await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+
+              if (cancelling) {
+                task.title = 'Cleanup: Cancelled'
+                return
+              }
+
+              // Teardowns exist before routing completes, so a short wait is enough.
+              if (Date.now() - startTime > CLEANUP_DISCOVERY_TIMEOUT_MS) {
+                task.title = 'Cleanup: Nothing to clean up'
+                return
+              }
+
+              try {
+                const result = await graphqlRequest<
+                  DeploymentsByVersionQuery,
+                  DeploymentsByVersionQueryVariables
+                >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId: ctx.versionId })
+
+                teardownDeployments = result.deploymentsByVersion.filter(
+                  (d) => d.deploymentType === 'teardown'
+                )
+              } catch {
+                // Transient: the next poll retries.
+              }
+            }
+
+            const cleanupNameMap = new Map<string, string>()
+            for (const dep of teardownDeployments) {
+              if (dep.serviceName) {
+                cleanupNameMap.set(dep.id, sanitizeTerminal(dep.serviceName))
+              }
+            }
+
+            const titleUpdaters = new Map<string, (title: string) => void>()
+            const resolvers = new Map<string, () => void>()
+            const completedCleanups = new Set<string>()
+
+            const subtasks = teardownDeployments.map((dep) => ({
+              title: `${cleanupNameMap.get(dep.id) ?? dep.id}: Pending`,
+              task: async (_ctx: LiftContext, subtask: { title: string }) => {
+                titleUpdaters.set(dep.id, (title: string) => {
+                  subtask.title = sanitizeTerminal(title)
+                })
+
+                return new Promise<void>((resolve) => {
+                  resolvers.set(dep.id, resolve)
+                })
+              },
+            }))
+
+            const pollCleanup = async () => {
+              const { versionId } = ctx
+              if (!versionId) return
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
+              while (true) {
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+
+                if (cancelling) {
+                  for (const [id, resolve] of resolvers) {
+                    if (!completedCleanups.has(id)) {
+                      const updateTitle = titleUpdaters.get(id)
+                      if (updateTitle) updateTitle(`${cleanupNameMap.get(id) ?? id}: Cancelled`)
+                      completedCleanups.add(id)
+                      resolve()
+                    }
+                  }
+                  return
+                }
+
+                try {
+                  const result = await graphqlRequest<
+                    DeploymentsByVersionQuery,
+                    DeploymentsByVersionQueryVariables
+                  >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId })
+
+                  const currentTeardowns = result.deploymentsByVersion.filter(
+                    (d) => d.deploymentType === 'teardown'
+                  )
+
+                  for (const deployment of currentTeardowns) {
+                    const id = deployment.id
+                    const updateTitle = titleUpdaters.get(id)
+
+                    if (!updateTitle || completedCleanups.has(id)) continue
+
+                    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty serviceName should fall back to the deployment id for display
+                    const targetLabel = cleanupNameMap.get(id) || deployment.serviceName || id
+                    const message = deployment.lastMessage
+                      ? ` - ${sanitizeTerminal(deployment.lastMessage)}`
+                      : ''
+
+                    if (isTerminalStatus(deployment.status)) {
+                      const normalized = deployment.status
+                      if (normalized === 'COMPLETE') {
+                        updateTitle(`${targetLabel}: Complete`)
+                      } else if (normalized === 'FAILED') {
+                        updateTitle(`${targetLabel}: Failed${message}`)
+                      } else {
+                        updateTitle(`${targetLabel}: ${deployment.status}`)
+                      }
+                      completedCleanups.add(id)
+                      resolvers.get(id)?.()
+                    } else {
+                      updateTitle(`${targetLabel}: ${deployment.status}${message}`)
+                    }
+                  }
+
+                  const allDone = teardownDeployments.every((d) => completedCleanups.has(d.id))
+                  if (allDone) return
+                } catch {
+                  // Transient: the next poll retries.
+                }
+              }
+            }
+
+            void pollCleanup()
+
+            return task.newListr(subtasks, { concurrent: true })
+          },
+        },
+      ],
+      {
+        exitOnError: true,
+        renderer: quiet ? 'silent' : resolveRenderer(options.verbose ?? false),
+        fallbackRenderer: 'simple',
+        fallbackRendererCondition: shouldUseFallbackRenderer,
+        rendererOptions: {
+          collapseSubtasks: false,
+        },
+      }
+    )
+
+    const finalCtx = await tasks.run({
+      deploymentIds: [],
+      versionId: undefined,
+      versionTag: undefined,
+      projectId: undefined,
+      projectSlug: undefined,
+      builtImageTags: undefined,
+      primaryDeployment: undefined,
+    })
+
+    if (!quiet) {
+      printRoutingSummary(finalCtx)
+      await printCleanupHint()
+    }
+
+    if (finalCtx.failedServices && finalCtx.failedServices.length > 0) {
+      const n = finalCtx.failedServices.length
+      const total = finalCtx.deploymentIds.length
+      const noun = total === 1 ? '' : 's'
+      printError(
+        `Deployment failed: ${String(n)} of ${String(total)} service${noun} did not succeed`
+      )
+      process.exitCode = 1
+    }
+  } catch (error) {
+    const errorMessage = formatApiError(error)
+    // Listr has already rendered its own errors.
+    if (!errorMessage.includes('Listr')) {
+      printError(errorMessage)
+    }
+    process.removeListener('SIGINT', onSigint)
+    removeStagingDir(workingDir)
+    process.exit(1)
+  } finally {
+    process.removeListener('SIGINT', onSigint)
+    removeStagingDir(workingDir)
+  }
 }

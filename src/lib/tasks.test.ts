@@ -154,7 +154,7 @@ const localBuild = (overrides: Partial<LocalBuildInputs> = {}): LocalBuildInputs
   __typename: 'LocalBuildCliInputs',
   stepId: 'step-1',
   serviceName: 'api',
-  versionNumber: 3,
+  versionTag: 'v3',
   projectId: 'p9ue62',
   projectSlug: 'shop',
   buildCommands: null,

@@ -6,20 +6,23 @@ import { Command } from 'commander'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
 
+import { graphqlRequest } from '../lib/client'
 import { printError } from '../lib/output'
-import { resolveYaml } from '../lib/resolve-yaml'
-import type { ResolveYamlResult } from '../lib/resolve-yaml'
-import type { DeploymentPlan } from '../types'
 
-import { registerPreviewCommand } from './preview'
+import { runLift } from './lift'
+import { parseServicesFlag, previewSummary, readSourceRef, registerPreviewCommand } from './preview'
 
-vi.mock(import('../lib/resolve-yaml'), async (importOriginal) => ({
+vi.mock(import('../lib/client'), async (importOriginal) => ({
   ...(await importOriginal()),
-  resolveYaml: vi.fn(),
+  graphqlRequest: vi.fn(),
 }))
 vi.mock(import('../lib/output'), async (importOriginal) => ({
   ...(await importOriginal()),
   printError: vi.fn(),
+}))
+vi.mock(import('./lift'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  runLift: vi.fn(),
 }))
 
 class ExitError extends Error {
@@ -28,180 +31,207 @@ class ExitError extends Error {
   }
 }
 
-function withPlan(plan: DeploymentPlan): ResolveYamlResult {
-  return {
-    ok: true,
-    config: {},
-    sourceYaml: '',
-    resolvedYaml: '',
-    variableProvenance: {},
-    plan,
-  }
+const PROJECT_YAML = `type: project
+id: prj_7f3k2m
+services:
+  web:
+    type: http
+environments:
+  staging: {}
+previews:
+  frontend:
+    environment: staging
+    hostnames:
+      staging.example.com: \${preview}.preview.example.com
+`
+
+const preview = {
+  id: 'env_k3j9x2',
+  slug: 'frontend-pr-123',
+  template: 'frontend',
+  name: 'pr-123',
+  parentEnvironment: 'staging',
+  services: ['web'],
+  databases: 'shared',
+  urls: ['https://pr-123.preview.example.com'],
+  createdAt: '2026-11-23T09:00:00.000Z',
 }
 
-describe('preview command', () => {
-  let workingDir: string
-  let logSpy: MockInstance
+let workingDir: string
+let logs: string[]
+let exitSpy: MockInstance
 
-  async function preview(args: string[]) {
-    const program = new Command()
-    program.exitOverride()
-    registerPreviewCommand(program)
-    await program.parseAsync(['node', 'gantry', 'preview', ...args, '--cwd', workingDir])
-  }
+function run(...args: string[]): Promise<Command> {
+  const program = new Command().exitOverride()
+  registerPreviewCommand(program)
+  return program.parseAsync(['node', 'gantry', 'preview', ...args, '--cwd', workingDir])
+}
 
-  function output() {
-    return logSpy.mock.calls.map(([line]) => String(line ?? '')).join('\n')
-  }
+beforeEach(() => {
+  vi.clearAllMocks()
+  workingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-preview-'))
+  fs.writeFileSync(path.join(workingDir, 'gantry.yml'), PROJECT_YAML)
+  logs = []
+  vi.spyOn(console, 'log').mockImplementation((line: string) => {
+    logs.push(line)
+  })
+  exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+    throw new ExitError(code as number | undefined)
+  })
+})
 
-  beforeEach(() => {
-    workingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-preview-'))
-    fs.writeFileSync(path.join(workingDir, 'gantry.yml'), 'type: project\nid: p9ue62\n')
-    vi.mocked(resolveYaml).mockReset()
-    vi.mocked(printError).mockReset()
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-    vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    vi.spyOn(process, 'exit').mockImplementation((code) => {
-      throw new ExitError(code as number | undefined)
+afterEach(() => {
+  fs.rmSync(workingDir, { recursive: true, force: true })
+  exitSpy.mockRestore()
+})
+
+describe('gantry preview lift', () => {
+  it('creates or finds the preview, then deploys it with the config the API resolved', async () => {
+    vi.mocked(graphqlRequest).mockResolvedValue({
+      liftPreviewEnvironment: {
+        ok: true,
+        errors: [],
+        created: true,
+        preview,
+        resolved: {
+          environment: 'frontend-pr-123',
+          config: { environments: { 'frontend-pr-123': {} } },
+          plan: { builds: [] },
+        },
+      },
     })
-  })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-    fs.rmSync(workingDir, { recursive: true, force: true })
-  })
+    await run('lift', 'frontend', '--as', 'pr-123', '--services', 'web')
 
-  it('renders services and the routing tree with each path’s hop chain', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(
-      withPlan({
-        services: [
-          { name: 'web', type: 'http', deploymentType: 'lambda', source: 'build', cluster: null },
-          { name: 'api', type: 'http', deploymentType: 'ecs', source: 'build', cluster: 'main' },
-        ],
-        builds: [],
-        routing: [
-          {
-            domain: 'example.com',
-            entryType: 'cloudfront',
-            loadBalancer: 'edge-alb',
-            paths: [
-              {
-                path: '/api',
-                service: 'api',
-                deploymentType: 'ecs',
-                routeHops: ['cloudfront', 'alb', 'ecs'],
-              },
-              { path: '/', service: 'web', deploymentType: 'lambda', routeHops: [] },
-            ],
-          },
-        ],
+    expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toMatchObject({
+      input: {
+        projectId: 'prj_7f3k2m',
+        template: 'frontend',
+        name: 'pr-123',
+        services: ['web'],
+        yaml: PROJECT_YAML,
+      },
+    })
+    expect(logs[0]).toBe('Preview frontend as pr-123 (from staging)')
+    expect(vi.mocked(runLift)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: 'frontend-pr-123',
+        rawConfig: { environments: { 'frontend-pr-123': {} } },
+        workingDir,
+        quiet: false,
       })
     )
-
-    await preview(['production'])
-
-    const text = output()
-    expect(text).toContain('Deployment Preview\x1b[0m: production')
-    expect(text).toMatch(/web.*lambda.*build/)
-    expect(text).toMatch(/api.*ecs.*build.*main/)
-    expect(text).toContain('example.com\x1b[0m \x1b[2m[cloudfront (lb: edge-alb)]')
-    expect(text).toContain('CloudFront → ALB → ECS')
-    expect(text).toContain('└── \x1b[2mcloudfront\x1b[0m')
   })
 
-  it('says so when the environment has no routing', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [], builds: [] }))
-
-    await preview(['staging'])
-
-    expect(output()).toContain('No routing configured for this environment.')
-  })
-
-  it('prints resolution errors and exits', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue({
-      ok: false,
-      errors: [{ code: 'X', message: 'Environment not declared.', path: 'environments' }],
-    })
-
-    await expect(preview(['qa'])).rejects.toThrow(ExitError)
-    expect(printError).toHaveBeenCalledWith('Environment not declared. (at environments)')
-  })
-
-  it('exits when there is no config file', async () => {
-    fs.rmSync(path.join(workingDir, 'gantry.yml'))
-
-    await expect(preview(['production'])).rejects.toThrow(ExitError)
-    expect(resolveYaml).not.toHaveBeenCalled()
-  })
-
-  it('rejects a malformed --var', async () => {
-    await expect(preview(['production', '--var', 'nope'])).rejects.toThrow(ExitError)
-    expect(printError).toHaveBeenCalledWith('Invalid --var "nope". Expected key=value.')
-  })
-
-  it('reads the config from --file and passes --var through', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [], builds: [] }))
-
-    await preview(['production', '-f', 'alt.yml', '--var', 'a=b'])
-
-    expect(resolveYaml).toHaveBeenCalledWith({
-      yamlPath: path.join(workingDir, 'alt.yml'),
-      environment: 'production',
-      cliVariables: { a: 'b' },
-    })
-  })
-
-  it('honours the global --cwd and repeated --var flags', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(
-      withPlan({
-        services: [],
-        builds: [],
-        routing: [
+  it('prints the API refusal and deploys nothing', async () => {
+    vi.mocked(graphqlRequest).mockResolvedValue({
+      liftPreviewEnvironment: {
+        ok: false,
+        errors: [
           {
-            domain: 'shop.example.com',
-            entryType: 'cloudfront',
-            loadBalancer: null,
-            paths: [{ path: '/', service: 'web', deploymentType: 'lambda', routeHops: [] }],
+            code: 'PLAN_LIMIT_REACHED',
+            message: 'Your plan allows a maximum of 5 preview environments.',
+            path: 'previews',
+            suggestion: null,
           },
         ],
-      })
-    )
-    const program = new Command().option('-C, --cwd <directory>')
-    program.exitOverride()
-    registerPreviewCommand(program)
+        created: null,
+        preview: null,
+        resolved: null,
+      },
+    })
 
-    await program.parseAsync([
-      'node',
-      'gantry',
-      '-C',
-      workingDir,
-      'preview',
-      'production',
-      '--var',
-      'a=1',
-      '--var',
-      'b=2',
+    await expect(run('lift', 'frontend')).rejects.toThrow(ExitError)
+    expect(vi.mocked(printError)).toHaveBeenCalledWith(
+      'Your plan allows a maximum of 5 preview environments. (at previews)'
+    )
+    expect(vi.mocked(runLift)).not.toHaveBeenCalled()
+  })
+
+  it('prints only the preview as JSON with --json', async () => {
+    vi.mocked(graphqlRequest).mockResolvedValue({
+      liftPreviewEnvironment: {
+        ok: true,
+        errors: [],
+        created: false,
+        preview,
+        resolved: { environment: 'frontend-pr-123', config: {}, plan: { builds: [] } },
+      },
+    })
+
+    await run('lift', 'frontend', '--as', 'pr-123', '--json')
+
+    expect(vi.mocked(runLift)).toHaveBeenCalledWith(expect.objectContaining({ quiet: true }))
+    expect(logs).toHaveLength(1)
+    expect(JSON.parse(logs[0])).toMatchObject({ created: false, slug: 'frontend-pr-123' })
+  })
+})
+
+describe('gantry preview list', () => {
+  it('lists the previews of a template', async () => {
+    vi.mocked(graphqlRequest).mockResolvedValue({ previewEnvironments: [preview] })
+
+    await run('list', 'frontend')
+
+    expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({
+      projectId: 'prj_7f3k2m',
+      template: 'frontend',
+    })
+    expect(logs[0]).toContain('pr-123')
+    expect(logs[0]).toContain('https://pr-123.preview.example.com')
+  })
+
+  it('says so when there are none', async () => {
+    vi.mocked(graphqlRequest).mockResolvedValue({ previewEnvironments: [] })
+
+    await run('list')
+
+    expect(logs).toEqual(['No previews.'])
+  })
+})
+
+describe('gantry preview teardown', () => {
+  it('tears the preview down by template and name', async () => {
+    vi.mocked(graphqlRequest).mockResolvedValue({
+      teardownPreviewEnvironment: {
+        success: true,
+        message: 'Tearing down frontend-pr-123.',
+        teardownId: 'dep_7xq2mz',
+      },
+    })
+
+    await run('teardown', 'frontend', '--as', 'pr-123')
+
+    expect(vi.mocked(graphqlRequest).mock.calls[0][1]).toEqual({
+      input: { projectId: 'prj_7f3k2m', template: 'frontend', name: 'pr-123' },
+    })
+  })
+
+  it('needs --as', async () => {
+    await expect(run('teardown', 'frontend')).rejects.toThrow(/--as/)
+    expect(vi.mocked(graphqlRequest)).not.toHaveBeenCalled()
+  })
+})
+
+describe('preview helpers', () => {
+  it.each([
+    [undefined, undefined],
+    ['web', ['web']],
+    ['web, api,', ['web', 'api']],
+  ])('reads --services %s', (flag, services) => {
+    expect(parseServicesFlag(flag)).toEqual(services)
+  })
+
+  it('summarises a preview with its database and URLs', () => {
+    expect(previewSummary(preview)).toEqual([
+      'Preview frontend as pr-123 (from staging)',
+      '  services: web',
+      '  database: shared with staging',
+      '  https://pr-123.preview.example.com',
     ])
-
-    expect(resolveYaml).toHaveBeenCalledWith({
-      yamlPath: path.join(workingDir, 'gantry.yml'),
-      environment: 'production',
-      cliVariables: { a: '1', b: '2' },
-    })
-    expect(output()).toContain('shop.example.com\x1b[0m \x1b[2m[cloudfront]')
   })
 
-  it('defaults to the current directory', async () => {
-    vi.mocked(resolveYaml).mockResolvedValue(withPlan({ services: [], routing: [], builds: [] }))
-    vi.spyOn(process, 'cwd').mockReturnValue(workingDir)
-    const program = new Command()
-    program.exitOverride()
-    registerPreviewCommand(program)
-
-    await program.parseAsync(['node', 'gantry', 'preview', 'production'])
-
-    expect(resolveYaml).toHaveBeenCalledWith(
-      expect.objectContaining({ yamlPath: path.join(workingDir, 'gantry.yml') })
-    )
+  it('reads no source ref outside a git repository', () => {
+    expect(readSourceRef(workingDir)).toBeUndefined()
   })
 })

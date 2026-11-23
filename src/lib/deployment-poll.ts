@@ -33,7 +33,7 @@ const CLAIM_STEP_MUTATION = /* GraphQL */ `
           ... on LocalBuildCliInputs {
             stepId
             serviceName
-            versionNumber
+            versionTag
             projectId
             projectSlug
             buildCommands

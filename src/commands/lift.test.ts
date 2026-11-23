@@ -827,7 +827,7 @@ describe('lift command', () => {
     __typename: 'LocalBuildCliInputs',
     stepId: 'step_local-build',
     serviceName: 'web',
-    versionNumber: 3,
+    versionTag: 'v3',
     projectId: 'p9ue62',
     projectSlug: 'shop',
     buildCommands: ['npm run build'],
@@ -1280,8 +1280,26 @@ describe('lift command', () => {
     expect(args).toContain('NODE_ENV=production')
   })
 
+  it('tags the image with the version id on a preview, whose builds have no number', async () => {
+    withSetup({ builds: { api: { dockerfile: 'Dockerfile' } } })
+    handlers.CreateVersion = () => ({
+      createVersion: {
+        success: true,
+        versionId: 'kq3v9a',
+        message: null,
+        versionNumber: null,
+        projectId: 'p9ue62',
+        projectSlug: 'shop',
+      },
+    })
+
+    await lift(['production'])
+
+    const args = mocks.runDocker.mock.calls[0]?.[0] as string[]
+    expect(args[args.indexOf('-t') + 1]).toBe('p9ue62-shop-api:kq3v9a')
+  })
+
   it.each([
-    { versionNumber: null, projectId: 'p9ue62', projectSlug: 'shop' },
     { versionNumber: 3, projectId: null, projectSlug: 'shop' },
     { versionNumber: 3, projectId: 'p9ue62', projectSlug: null },
   ])(

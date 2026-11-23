@@ -121,6 +121,7 @@ const SOURCE_LABELS: Record<EnvVarSourceEnum, string> = {
   NETWORK: 'network',
   PROJECT: 'project',
   ENVIRONMENT: 'environment',
+  PARENT_ENVIRONMENT: 'parent environment',
   SERVICE_YAML: 'gantry.yml service',
   ENVIRONMENT_YAML: 'gantry.yml environment',
   SERVICE_OVERRIDE: 'service override',

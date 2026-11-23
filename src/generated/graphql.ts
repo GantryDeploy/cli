@@ -659,6 +659,8 @@ export type EnvVarSourceEnum =
   | 'ENVIRONMENT_YAML'
   /** Stored at the network scope */
   | 'NETWORK'
+  /** Copied from a preview's parent environment, by the template's inherit_env */
+  | 'PARENT_ENVIRONMENT'
   /** Stored at the project scope */
   | 'PROJECT'
   /** The service's `secrets` in gantry.yml */

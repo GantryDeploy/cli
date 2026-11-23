@@ -145,6 +145,12 @@ describe('env command', () => {
               overrides: ['SERVICE_YAML', 'PROJECT'],
             },
             { key: 'APP_PG_*', value: 'database app-pg', source: 'BINDING', overrides: [] },
+            {
+              key: 'MAIL_FROM',
+              value: 'noreply@example.com',
+              source: 'PARENT_ENVIRONMENT',
+              overrides: [],
+            },
           ],
         },
       })
@@ -159,6 +165,7 @@ describe('env command', () => {
       expect(logged()).toContain('staging/api, live version 12')
       expect(logged()).toContain('service override')
       expect(logged()).toContain('gantry.yml service, project')
+      expect(logged()).toContain('parent environment')
     })
 
     it('refuses --resolved without a service', async () => {

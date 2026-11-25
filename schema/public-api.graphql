@@ -4675,6 +4675,11 @@ type TeardownPreviewResult {
   """The resources the teardown would destroy."""
   resources: [TeardownResource!]!
 
+  """
+  The routing the environment uses. A teardown takes the environment out of all of it.
+  """
+  routing: [TeardownRouting!]!
+
   """JWT token to be passed to startTeardown - expires in 5 minutes"""
   teardownToken: String!
 
@@ -4695,6 +4700,47 @@ type TeardownResource {
 
   """State of the resource, such as `active` or `pending-removal`."""
   status: String!
+}
+
+"""Routing a teardown changes: one CDN, load balancer or gateway."""
+type TeardownRouting {
+  """What the teardown does to it."""
+  change: TeardownRoutingChangeEnum!
+
+  """What serves the routing."""
+  edge: TeardownRoutingEdgeEnum!
+
+  """A CDN or gateway's hostnames, or the load balancer's name."""
+  name: String!
+
+  """Other environments that keep routing through it."""
+  otherEnvironments: Int!
+}
+
+"""What a teardown does to routing the environment uses."""
+enum TeardownRoutingChangeEnum {
+  """
+  Nothing else routes through it. A CDN is removed with its DNS records; a load balancer drops its rules for the environment.
+  """
+  REMOVED
+
+  """Other environments still route through it, and keep their routes."""
+  UPDATED
+}
+
+"""What serves the routing a teardown changes."""
+enum TeardownRoutingEdgeEnum {
+  """A CDN, identified by its hostnames."""
+  CDN
+
+  """A hostname served directly by its service."""
+  DIRECT
+
+  """A gateway, identified by its hostnames."""
+  GATEWAY
+
+  """A load balancer, identified by its name."""
+  LOAD_BALANCER
 }
 
 """Env vars to remove from a scope"""

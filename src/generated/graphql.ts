@@ -947,6 +947,24 @@ export type TeardownPreviewEnvironmentInput = {
   template: string;
 };
 
+/** What a teardown does to routing the environment uses. */
+export type TeardownRoutingChangeEnum =
+  /** Nothing else routes through it. A CDN is removed with its DNS records; a load balancer drops its rules for the environment. */
+  | 'REMOVED'
+  /** Other environments still route through it, and keep their routes. */
+  | 'UPDATED';
+
+/** What serves the routing a teardown changes. */
+export type TeardownRoutingEdgeEnum =
+  /** A CDN, identified by its hostnames. */
+  | 'CDN'
+  /** A hostname served directly by its service. */
+  | 'DIRECT'
+  /** A gateway, identified by its hostnames. */
+  | 'GATEWAY'
+  /** A load balancer, identified by its name. */
+  | 'LOAD_BALANCER';
+
 /** Env vars to remove from a scope */
 export type UnsetEnvVarsInput = {
   /** Required for CLOUD_ACCOUNT */
@@ -1541,7 +1559,7 @@ export type TeardownPreviewQueryVariables = Exact<{
 }>;
 
 
-export type TeardownPreviewQuery = { teardownPreview: { environmentId: string, environmentName: string, totalResources: number, teardownToken: string, expiresAt: string, resources: Array<{ id: string, resourceType: string, resourceId: string | null, status: string }> } };
+export type TeardownPreviewQuery = { teardownPreview: { environmentId: string, environmentName: string, totalResources: number, teardownToken: string, expiresAt: string, resources: Array<{ id: string, resourceType: string, resourceId: string | null, status: string }>, routing: Array<{ edge: TeardownRoutingEdgeEnum, name: string, otherEnvironments: number, change: TeardownRoutingChangeEnum }> } };
 
 export type StartTeardownMutationVariables = Exact<{
   input: StartTeardownInput;

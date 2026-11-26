@@ -223,7 +223,7 @@ describe('shell command', () => {
 
   it('prints the API refusal and exits 1', async () => {
     const message =
-      "Interactive sessions are off for this service's running instances. Set enable_execute_command: true and redeploy."
+      "Interactive sessions are off for this service's running instances. Set shell: true and redeploy."
     mocks.graphqlRequest.mockResolvedValueOnce({
       startShellSession: { success: false, message, instanceId: null, aws: null },
     })

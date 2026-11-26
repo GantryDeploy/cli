@@ -12,6 +12,8 @@ import type {
   AwsEfsPerformanceModeEnum,
   AwsEfsThroughputModeEnum,
   AwsFilesystemSettingsInput,
+  AwsFirewallManagedGroup,
+  AwsFirewallSettingsInput,
   AwsNatGatewayOptionEnum,
   AwsNetworkSettingsInput,
 } from '../../generated/graphql'
@@ -366,4 +368,103 @@ export async function awsCertificateRegions(
     )
   }
   return { ok: true, value: regions }
+}
+
+const AWS_FIREWALL_GROUP_NAMES = {
+  IP_REPUTATION: 'ip-reputation',
+  COMMON: 'common',
+  KNOWN_BAD_INPUTS: 'known-bad-inputs',
+  SQL: 'sql',
+  LINUX: 'linux',
+  PHP: 'php',
+  WORDPRESS: 'wordpress',
+} as const satisfies Record<AwsFirewallManagedGroup, string>
+
+const AWS_FIREWALL_GROUPS = Object.keys(AWS_FIREWALL_GROUP_NAMES) as AwsFirewallManagedGroup[]
+
+const AWS_FIREWALL_PRESETS: Partial<Record<string, AwsFirewallManagedGroup[]>> = {
+  wordpress: ['IP_REPUTATION', 'COMMON', 'KNOWN_BAD_INPUTS', 'SQL', 'PHP', 'WORDPRESS'],
+}
+
+export const AWS_FIREWALL_GROUP_LIST = Object.values(AWS_FIREWALL_GROUP_NAMES).join(', ')
+export const AWS_FIREWALL_PRESET_LIST = Object.keys(AWS_FIREWALL_PRESETS).join(', ')
+
+export interface AwsFirewallFlags {
+  awsManagedGroups?: string
+  awsPreset?: string
+}
+
+/** The managed rule groups the `--aws-*` firewall flags name, or undefined when neither is set. */
+export function buildAwsFirewallSettings(
+  flags: AwsFirewallFlags
+): Result<AwsFirewallSettingsInput | undefined> {
+  if (flags.awsManagedGroups === undefined && flags.awsPreset === undefined) {
+    return { ok: true, value: undefined }
+  }
+
+  const selected = new Set<AwsFirewallManagedGroup>()
+  if (flags.awsPreset !== undefined) {
+    const preset = AWS_FIREWALL_PRESETS[flags.awsPreset.trim().toLowerCase()]
+    if (!preset) {
+      return { ok: false, message: `--aws-preset must be ${AWS_FIREWALL_PRESET_LIST}` }
+    }
+    for (const group of preset) selected.add(group)
+  }
+
+  if (flags.awsManagedGroups !== undefined) {
+    const names = flags.awsManagedGroups
+      .split(',')
+      .map((name) => name.trim().toLowerCase())
+      .filter(Boolean)
+    for (const name of names) {
+      const group = AWS_FIREWALL_GROUPS.find((g) => AWS_FIREWALL_GROUP_NAMES[g] === name)
+      if (!group) {
+        return {
+          ok: false,
+          message: `--aws-managed-groups takes a comma-separated list of ${AWS_FIREWALL_GROUP_LIST}`,
+        }
+      }
+      selected.add(group)
+    }
+  }
+
+  return { ok: true, value: { managedGroups: AWS_FIREWALL_GROUPS.filter((g) => selected.has(g)) } }
+}
+
+/**
+ * Reads the `--aws-*` firewall flags for a new firewall, offering the managed rule groups when
+ * neither is set and a terminal is attached.
+ */
+export async function awsFirewallCreateSettings(
+  flags: AwsFirewallFlags
+): Promise<Result<AwsFirewallSettingsInput>> {
+  const fromFlags = buildAwsFirewallSettings(flags)
+  if (!fromFlags.ok) return fromFlags
+  if (fromFlags.value) return { ok: true, value: fromFlags.value }
+  if (!isInteractive()) {
+    return { ok: false, message: 'Choose the rules with --aws-managed-groups or --aws-preset.' }
+  }
+  const managedGroups = await checkbox<AwsFirewallManagedGroup>({
+    message: 'Managed rule groups:',
+    choices: AWS_FIREWALL_GROUPS.map((group) => ({
+      name: AWS_FIREWALL_GROUP_NAMES[group],
+      value: group,
+    })),
+  })
+  return { ok: true, value: { managedGroups } }
+}
+
+/** An AWS firewall's rules, one line per setting. */
+export function awsFirewallRuleLines(rules: Record<string, unknown>): string[] {
+  const { managedGroups, rateLimit } = rules
+  if (!Array.isArray(managedGroups) || !managedGroups.every((g) => typeof g === 'string')) {
+    throw new Error('The firewall rules are not in the expected shape.')
+  }
+  const lines = [
+    `Managed rule groups: ${managedGroups.length > 0 ? managedGroups.join(', ') : 'none'}`,
+  ]
+  if (typeof rateLimit === 'number') {
+    lines.push(`Rate limit: ${rateLimit.toLocaleString('en-US')} requests per 5 minutes`)
+  }
+  return lines
 }

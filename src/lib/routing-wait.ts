@@ -42,6 +42,7 @@ const VERSION_ROUTE_URLS_QUERY = /* GraphQL */ `
       path
       serviceName
       cache
+      firewall
     }
   }
 `

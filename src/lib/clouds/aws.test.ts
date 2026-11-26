@@ -5,6 +5,7 @@ import type { MockInstance } from 'vitest'
 import {
   AWS_OPTIONS_GROUP,
   awsCertificateRegions,
+  awsFirewallRuleLines,
   awsOption,
   buildAwsDatabaseUpdate,
   buildAwsNetworkSettings,
@@ -80,6 +81,27 @@ describe('aws cloud module', () => {
         ok: false,
         message: 'Choose either --aws-master-rotation or --aws-no-master-rotation.',
       })
+    })
+  })
+
+  describe('awsFirewallRuleLines', () => {
+    it('lists the managed rule groups and the rate limit', () => {
+      expect(
+        awsFirewallRuleLines({
+          provider: 'aws',
+          managedGroups: ['ip-reputation', 'sql'],
+          rateLimit: 2000,
+        })
+      ).toEqual([
+        'Managed rule groups: ip-reputation, sql',
+        'Rate limit: 2,000 requests per 5 minutes',
+      ])
+    })
+
+    it('throws on rules without a managed group list', () => {
+      expect(() => awsFirewallRuleLines({ provider: 'aws' })).toThrow(
+        'The firewall rules are not in the expected shape.'
+      )
     })
   })
 

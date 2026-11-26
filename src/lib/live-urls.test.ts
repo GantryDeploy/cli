@@ -11,6 +11,7 @@ describe('buildLiveUrlLines', () => {
         path: '/',
         serviceName: 'site',
         cache: 'cached 5m',
+        firewall: 'edge-waf',
       },
       {
         url: 'https://parent.pvtest.api-testing.dev/b',
@@ -18,17 +19,18 @@ describe('buildLiveUrlLines', () => {
         path: '/b/*',
         serviceName: 'site-b',
         cache: 'cached 5m',
+        firewall: 'edge-waf',
       },
     ])
 
     expect(lines).toEqual([
       '  https://parent.pvtest.api-testing.dev',
-      '    /      site     cached 5m',
-      '    /b/*   site-b   cached 5m',
+      '    /      site     cached 5m   firewall: edge-waf',
+      '    /b/*   site-b   cached 5m   firewall: edge-waf',
     ])
   })
 
-  it('labels a path with no cache setting as not cached', () => {
+  it('labels a path with no cache setting as not cached and no firewall as none', () => {
     const lines = buildLiveUrlLines([
       {
         url: 'https://shop.example.com/checkout',
@@ -36,10 +38,14 @@ describe('buildLiveUrlLines', () => {
         path: '/checkout',
         serviceName: 'api',
         cache: null,
+        firewall: null,
       },
     ])
 
-    expect(lines).toEqual(['  https://shop.example.com', '    /checkout   api   not cached'])
+    expect(lines).toEqual([
+      '  https://shop.example.com',
+      '    /checkout   api   not cached   firewall: none',
+    ])
   })
 
   it('groups each hostname separately, aligning columns within each', () => {
@@ -50,6 +56,7 @@ describe('buildLiveUrlLines', () => {
         path: '/*',
         serviceName: 'web',
         cache: 'not cached',
+        firewall: 'shop-waf',
       },
       {
         url: 'https://a.example.com/assets',
@@ -57,6 +64,7 @@ describe('buildLiveUrlLines', () => {
         path: '/assets/*',
         serviceName: 'web',
         cache: 'cached 1y',
+        firewall: 'shop-waf',
       },
       {
         url: 'https://b.example.com/blog',
@@ -64,15 +72,16 @@ describe('buildLiveUrlLines', () => {
         path: '/blog/*',
         serviceName: 'blog',
         cache: 'cached 5m',
+        firewall: null,
       },
     ])
 
     expect(lines).toEqual([
       '  https://a.example.com',
-      '    /*          web   not cached',
-      '    /assets/*   web   cached 1y',
+      '    /*          web   not cached   firewall: shop-waf',
+      '    /assets/*   web   cached 1y    firewall: shop-waf',
       '  https://b.example.com',
-      '    /blog/*   blog   cached 5m',
+      '    /blog/*   blog   cached 5m   firewall: none',
     ])
   })
 

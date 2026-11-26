@@ -177,6 +177,29 @@ export type AwsFilesystemSettingsInput = {
   throughputMode?: AwsEfsThroughputModeEnum | null | undefined;
 };
 
+/** An AWS managed rule group a firewall can turn on. */
+export type AwsFirewallManagedGroup =
+  /** Core rules against common web exploits, such as the OWASP Top 10. */
+  | 'COMMON'
+  /** Blocks addresses Amazon threat intelligence flags as bots. */
+  | 'IP_REPUTATION'
+  /** Blocks request patterns known to exploit vulnerabilities. */
+  | 'KNOWN_BAD_INPUTS'
+  /** Blocks exploits of Linux-specific vulnerabilities. */
+  | 'LINUX'
+  /** Blocks exploits of PHP-specific vulnerabilities. */
+  | 'PHP'
+  /** Blocks SQL injection attempts. */
+  | 'SQL'
+  /** Blocks exploits of WordPress-specific vulnerabilities. */
+  | 'WORDPRESS';
+
+/** Firewall rules for an AWS firewall */
+export type AwsFirewallSettingsInput = {
+  /** Managed rule groups to turn on. Groups left out are off. */
+  managedGroups: Array<AwsFirewallManagedGroup>;
+};
+
 /** Which EC2 instances a managed instances capacity provider may launch */
 export type AwsInstanceRequirementsInput = {
   /** e.g. c5.* or m5.large */
@@ -462,6 +485,18 @@ export type CreateFilesystemInput = {
   slug: string;
 };
 
+/** A new firewall to create. */
+export type CreateFirewallInput = {
+  /** Rules for an AWS firewall. Required when the provider is aws. */
+  aws?: AwsFirewallSettingsInput | null | undefined;
+  /** Display name */
+  name: string;
+  /** Cloud the rules are written for */
+  provider: CloudProviderEnum;
+  /** Identifier that gantry.yml routes use to name the firewall */
+  slug: string;
+};
+
 /** A new load balancer to create. */
 export type CreateLoadBalancerInput = {
   /** Only for an AWS cloud account */
@@ -714,6 +749,15 @@ export type FilesystemStatusEnum =
   | 'FAILED'
   /** Being created or changed */
   | 'PENDING';
+
+/** State of a firewall's deployment in one cloud account */
+export type FirewallPlacementStatus =
+  /** A hostname in the cloud account uses the firewall. */
+  | 'ACTIVE'
+  /** No hostname in the cloud account uses the firewall, and it is being removed. */
+  | 'DRAINING'
+  /** The firewall was removed from the cloud account. */
+  | 'RELEASED';
 
 /** An inclusive range of whole numbers. */
 export type IntRangeInput = {
@@ -999,6 +1043,16 @@ export type UpdateDatabaseInput = {
   size?: string | null | undefined;
   /** Storage in GB. It can only grow. */
   storageGb?: number | null | undefined;
+};
+
+/** Changes to a firewall. New rules are redeployed to every cloud account it's deployed in. */
+export type UpdateFirewallInput = {
+  /** New rules for an AWS firewall, replacing the current ones */
+  aws?: AwsFirewallSettingsInput | null | undefined;
+  /** Firewall ID */
+  id: string;
+  /** New display name */
+  name?: string | null | undefined;
 };
 
 /** Changes to a secret. Fields left out stay as they are. */
@@ -1361,6 +1415,32 @@ export type CreateFilesystemMutationVariables = Exact<{
 
 
 export type CreateFilesystemMutation = { createFilesystem: { success: boolean, message: string | null, filesystem: { id: string, name: string, slug: string, provider: string, status: FilesystemStatusEnum } | null } };
+
+export type GetFirewallsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetFirewallsQuery = { firewalls: Array<{ id: string, name: string, slug: string, provider: CloudProviderEnum, rules: Record<string, unknown>, placements: Array<{ id: string, cloudAccountId: string, status: FirewallPlacementStatus }>, uses: Array<{ hostname: string, projectId: string, projectName: string }> }> };
+
+export type CreateFirewallMutationVariables = Exact<{
+  input: CreateFirewallInput;
+}>;
+
+
+export type CreateFirewallMutation = { createFirewall: { success: boolean, message: string | null, firewall: { id: string, name: string, slug: string } | null } };
+
+export type UpdateFirewallMutationVariables = Exact<{
+  input: UpdateFirewallInput;
+}>;
+
+
+export type UpdateFirewallMutation = { updateFirewall: { success: boolean, message: string | null, firewall: { id: string, name: string, slug: string, placements: Array<{ status: FirewallPlacementStatus }> } | null } };
+
+export type DeleteFirewallMutationVariables = Exact<{
+  id: string;
+}>;
+
+
+export type DeleteFirewallMutation = { deleteFirewall: { success: boolean, message: string | null } };
 
 export type CreateVersionMutationVariables = Exact<{
   config: Record<string, unknown>;
@@ -1777,7 +1857,7 @@ export type VersionRouteUrlsQueryVariables = Exact<{
 }>;
 
 
-export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null }> };
+export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null, firewall: string | null }> };
 
 export type VersionDnsRecordsQueryVariables = Exact<{
   versionId: string;

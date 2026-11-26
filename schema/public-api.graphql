@@ -296,6 +296,36 @@ input AwsFilesystemSettingsInput {
   throughputMode: AwsEfsThroughputModeEnum
 }
 
+"""An AWS managed rule group a firewall can turn on."""
+enum AwsFirewallManagedGroup {
+  """Core rules against common web exploits, such as the OWASP Top 10."""
+  COMMON
+
+  """Blocks addresses Amazon threat intelligence flags as bots."""
+  IP_REPUTATION
+
+  """Blocks request patterns known to exploit vulnerabilities."""
+  KNOWN_BAD_INPUTS
+
+  """Blocks exploits of Linux-specific vulnerabilities."""
+  LINUX
+
+  """Blocks exploits of PHP-specific vulnerabilities."""
+  PHP
+
+  """Blocks SQL injection attempts."""
+  SQL
+
+  """Blocks exploits of WordPress-specific vulnerabilities."""
+  WORDPRESS
+}
+
+"""Firewall rules for an AWS firewall"""
+input AwsFirewallSettingsInput {
+  """Managed rule groups to turn on. Groups left out are off."""
+  managedGroups: [AwsFirewallManagedGroup!]!
+}
+
 """Which EC2 instances a managed instances capacity provider may launch"""
 input AwsInstanceRequirementsInput {
   """e.g. c5.* or m5.large"""
@@ -1403,6 +1433,21 @@ input CreateFilesystemInput {
   slug: String!
 }
 
+"""A new firewall to create."""
+input CreateFirewallInput {
+  """Rules for an AWS firewall. Required when the provider is aws."""
+  aws: AwsFirewallSettingsInput
+
+  """Display name"""
+  name: String!
+
+  """Cloud the rules are written for"""
+  provider: CloudProviderEnum!
+
+  """Identifier that gantry.yml routes use to name the firewall"""
+  slug: String!
+}
+
 """A new load balancer to create."""
 input CreateLoadBalancerInput {
   """Only for an AWS cloud account"""
@@ -2351,6 +2396,98 @@ enum FilesystemStatusEnum {
   PENDING
 }
 
+"""
+A team's set of rules that blocks unwanted requests before they reach a hostname. A route puts one in front of its hostname by slug.
+"""
+type Firewall {
+  """When the firewall was created"""
+  createdAt: String!
+
+  """Firewall ID"""
+  id: String!
+
+  """Display name"""
+  name: String!
+
+  """Cloud accounts the firewall is deployed in or being removed from"""
+  placements: [FirewallPlacement!]!
+
+  """Cloud the rules are written for"""
+  provider: CloudProviderEnum!
+
+  """The firewall's rules, in its cloud's terms"""
+  rules: JSON!
+
+  """Identifier that gantry.yml routes use to name the firewall"""
+  slug: String!
+
+  """Team ID"""
+  teamId: String!
+
+  """When the firewall last changed"""
+  updatedAt: String!
+
+  """Hostnames live versions route through it"""
+  uses: [FirewallUse!]!
+}
+
+"""Outcome of a firewall mutation."""
+type FirewallMutationResult {
+  """The firewall, when a create or update succeeded"""
+  firewall: Firewall
+
+  """What happened, safe to show to a user"""
+  message: String
+
+  """Whether the mutation succeeded"""
+  success: Boolean!
+}
+
+"""
+A deployment of a firewall into one cloud account, made when a hostname there first uses it.
+"""
+type FirewallPlacement {
+  """Cloud account the firewall is deployed in"""
+  cloudAccountId: String!
+
+  """Placement ID"""
+  id: String!
+
+  """
+  Outputs only this cloud has, such as the ID of the deployed rule set. Empty until the deployment succeeds.
+  """
+  providerData: JSON!
+
+  """Deployment state"""
+  status: FirewallPlacementStatus!
+}
+
+"""State of a firewall's deployment in one cloud account"""
+enum FirewallPlacementStatus {
+  """A hostname in the cloud account uses the firewall."""
+  ACTIVE
+
+  """
+  No hostname in the cloud account uses the firewall, and it is being removed.
+  """
+  DRAINING
+
+  """The firewall was removed from the cloud account."""
+  RELEASED
+}
+
+"""A hostname a live version routes through a firewall."""
+type FirewallUse {
+  """Hostname behind the firewall"""
+  hostname: String!
+
+  """Project that routes the hostname"""
+  projectId: String!
+
+  """Name of that project"""
+  projectName: String!
+}
+
 """An inclusive range of whole numbers."""
 input IntRangeInput {
   """Highest allowed value. Omit for no limit."""
@@ -2779,6 +2916,17 @@ type Mutation {
   ): FilesystemMutationResult!
 
   """
+  Create a firewall. It is deployed to a cloud account when a route there first puts it in front of a hostname.
+  """
+  createFirewall(
+    """The firewall to create"""
+    input: CreateFirewallInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
+
+  """
   Create a load balancer and start provisioning it. Follow progress with the returned deploymentId.
   """
   createLoadBalancer(
@@ -2839,6 +2987,17 @@ type Mutation {
     """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): ReleaseOperationResult!
+
+  """
+  Delete a firewall. Refused while a live version routes through it or it is still deployed in a cloud account.
+  """
+  deleteFirewall(
+    """Firewall ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
 
   """Delete a secret from its cloud and from Gantry"""
   deleteSecret(
@@ -3082,6 +3241,17 @@ type Mutation {
     """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): DatabaseMutationResult!
+
+  """
+  Rename a firewall or replace its rules. New rules are redeployed to every cloud account it's deployed in.
+  """
+  updateFirewall(
+    """The changes to make"""
+    input: UpdateFirewallInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
 
   """
   Rename a secret, change its description, or replace its keys and values
@@ -3716,6 +3886,23 @@ type Query {
     """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): [Filesystem!]!
+
+  """
+  One firewall, with the cloud accounts it is deployed in and the hostnames behind it. Null when it does not exist or was deleted.
+  """
+  firewall(
+    """Firewall ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Firewall
+
+  """The team's firewalls that you can view, oldest first."""
+  firewalls(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Firewall!]!
 
   """
   Kinds of load balancer the cloud offers, for choosing one in createLoadBalancer.
@@ -4797,6 +4984,20 @@ input UpdateDatabaseInput {
   storageGb: Int
 }
 
+"""
+Changes to a firewall. New rules are redeployed to every cloud account it's deployed in.
+"""
+input UpdateFirewallInput {
+  """New rules for an AWS firewall, replacing the current ones"""
+  aws: AwsFirewallSettingsInput
+
+  """Firewall ID"""
+  id: String!
+
+  """New display name"""
+  name: String
+}
+
 """Changes to a secret. Fields left out stay as they are."""
 input UpdateSecretInput {
   """New description"""
@@ -4907,6 +5108,11 @@ type VersionRouteUrl {
 
   """Hostname of the route."""
   domain: String
+
+  """
+  Slug of the firewall in front of the route's hostname, set by this version or inherited from another project routing the hostname. Null when there is none.
+  """
+  firewall: String
 
   """Path of the route as written in gantry.yml, such as `/` or `/api/*`."""
   path: String!

@@ -14,6 +14,7 @@ import { registerDomainsCommand } from './commands/domains'
 import { registerEnvCommand } from './commands/env'
 import { registerEnvironmentsCommand } from './commands/environments'
 import { registerFilesystemsCommand } from './commands/filesystems'
+import { registerFirewallsCommand } from './commands/firewalls'
 import { registerLiftCommand } from './commands/lift'
 import { registerLoadBalancersCommand } from './commands/load-balancers'
 import { registerLoginCommand } from './commands/login'
@@ -88,6 +89,7 @@ export function buildProgram(): Command {
   registerDeploymentsCommand(program)
   registerDomainsCommand(program)
   registerLoadBalancersCommand(program)
+  registerFirewallsCommand(program)
   registerTeardownCommand(program)
 
   // One place to record the global `--team`, rather than every command reading it

@@ -4285,7 +4285,7 @@ type RoutingPathEntryType {
   path: String!
 
   """
-  Hops a request takes from the viewer to the service, as hop ids, viewer first.
+  Hops a request takes from the viewer to the service, viewer first: `cdn`, `load-balancer`, `gateway`, `container`, `function` or `bucket`.
   """
   routeHops: [String!]!
 
@@ -4898,14 +4898,14 @@ type VersionDnsRecord {
 """A URL a version serves, with the service behind it."""
 type VersionRouteUrl {
   """
-  Short cache label for the path, such as `no-cache`, `cached 1y` or a named cache policy. Null when the path sets no cache behavior.
+  Short label for the path's cache, from the path or inherited from its hostname: `not cached`, `cached 1y` or a named cache policy. Null when neither sets one.
   """
   cache: String
 
   """Hostname of the route."""
   domain: String
 
-  """Path pattern of the route, such as `/api/*`."""
+  """Path of the route as written in gantry.yml, such as `/` or `/api/*`."""
   path: String!
 
   """Service that serves the route."""

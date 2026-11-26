@@ -20,6 +20,7 @@ import { registerLoadBalancersCommand } from './commands/load-balancers'
 import { registerLoginCommand } from './commands/login'
 import { registerLogsCommand } from './commands/logs'
 import { registerNetworksCommand } from './commands/networks'
+import { registerOriginLockCommand } from './commands/origin-lock'
 import { registerPreviewCommand } from './commands/preview'
 import { registerProjectsCommand } from './commands/projects'
 import { registerRegionsCommand } from './commands/regions'
@@ -90,6 +91,7 @@ export function buildProgram(): Command {
   registerDomainsCommand(program)
   registerLoadBalancersCommand(program)
   registerFirewallsCommand(program)
+  registerOriginLockCommand(program)
   registerTeardownCommand(program)
 
   // One place to record the global `--team`, rather than every command reading it

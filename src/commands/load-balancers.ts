@@ -38,6 +38,7 @@ const LOAD_BALANCERS_QUERY = /* GraphQL */ `
       name
       slug
       type
+      visibility
       region
       endpoint
       status
@@ -71,6 +72,7 @@ const CREATE_LOAD_BALANCER_MUTATION = /* GraphQL */ `
         name
         slug
         type
+        visibility
         status
       }
       deploymentId
@@ -97,7 +99,17 @@ export function registerLoadBalancersCommand(program: Command): void {
         }
 
         const table = createTable({
-          head: ['ID', 'Name', 'Slug', 'Type', 'Region', 'Endpoint', 'Status', 'Created'],
+          head: [
+            'ID',
+            'Name',
+            'Slug',
+            'Type',
+            'Visibility',
+            'Region',
+            'Endpoint',
+            'Status',
+            'Created',
+          ],
         })
 
         for (const lb of loadBalancers) {
@@ -106,6 +118,7 @@ export function registerLoadBalancersCommand(program: Command): void {
             lb.name,
             lb.slug,
             lb.type,
+            lb.visibility.toLowerCase(),
             lb.region ?? '-',
             lb.endpoint ?? '-',
             lb.status.toUpperCase(),
@@ -167,6 +180,10 @@ export function registerLoadBalancersCommand(program: Command): void {
     .option('--type <type>', 'Load balancer type (see "gantry lb types")')
     .option('--network <id>', 'Network ID (required for application load balancers)')
     .option('--region <region>', 'Region (see "gantry regions --cloud <id>")')
+    .option(
+      '--internal',
+      "Take traffic only from inside the network. It can't change to public later, and a CDN can't sit in front of it."
+    )
     .addOption(
       awsOption('--aws-certificate-arn <arn>', 'Default certificate for the HTTPS listener')
     )
@@ -178,6 +195,7 @@ export function registerLoadBalancersCommand(program: Command): void {
         type?: string
         network?: string
         region?: string
+        internal?: boolean
         awsCertificateArn?: string
       }) => {
         try {
@@ -244,6 +262,7 @@ export function registerLoadBalancersCommand(program: Command): void {
               name,
               slug,
               type: lbType,
+              visibility: options.internal ? 'INTERNAL' : 'PUBLIC',
               networkId,
               region,
               ...(options.awsCertificateArn
@@ -261,6 +280,7 @@ export function registerLoadBalancersCommand(program: Command): void {
 
           printSuccess(`Load balancer created: ${loadBalancer.name} (${loadBalancer.slug})`)
           console.log(`  ID: ${sanitizeTerminal(loadBalancer.id)}`)
+          console.log(`  Visibility: ${loadBalancer.visibility.toLowerCase()}`)
           if (result.deploymentId) {
             console.log(`  Deployment: ${sanitizeTerminal(result.deploymentId)}`)
           }
@@ -296,6 +316,11 @@ export function registerLoadBalancersCommand(program: Command): void {
       command:
         'gantry lb create --cloud c4xp9w --type APPLICATION --network n8kd2q --region us-east-1 --name "Public web"',
       description: 'Create an application load balancer on a network',
+    },
+    {
+      command:
+        'gantry lb create --cloud c4xp9w --type APPLICATION --network n8kd2q --name "Internal API" --internal',
+      description: 'Create one that takes traffic only from inside the network',
     },
   ])
 }

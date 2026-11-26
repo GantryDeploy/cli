@@ -64,6 +64,7 @@ const created = {
     name: 'Public ALB',
     slug: 'public-alb',
     type: 'APPLICATION',
+    visibility: 'PUBLIC',
     status: 'PENDING',
   },
   deploymentId: 'z3cy6t',
@@ -118,6 +119,7 @@ describe('load-balancers command', () => {
             name: 'Public ALB\x1b]0;pwned\x07',
             slug: 'public-alb',
             type: 'APPLICATION',
+            visibility: 'INTERNAL',
             region: 'us-east-2',
             endpoint: 'gantry-web-1234567890.us-east-2.elb.amazonaws.com',
             status: 'active',
@@ -132,6 +134,8 @@ describe('load-balancers command', () => {
       expect(String(graphqlRequest.mock.calls[0]?.[0])).toContain('query GetLoadBalancers')
       expect(printed()).toContain('l5zq8c')
       expect(printed()).toContain('APPLICATION')
+      expect(printed()).toContain('Visibility')
+      expect(printed()).toContain('internal')
       expect(printed()).toContain('ACTIVE')
       expect(printed()).toContain('Jul 4, 2026')
       expect(printed()).toContain('gantry-web-1234567890.us-east-2.elb.amazonaws.com')
@@ -214,6 +218,7 @@ describe('load-balancers command', () => {
           name: 'Public ALB',
           slug: 'alb',
           type: 'APPLICATION',
+          visibility: 'PUBLIC',
           networkId: 'h4nw8r',
           region: 'us-east-1',
           aws: { defaultSslCertificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/4f2a' },
@@ -222,6 +227,7 @@ describe('load-balancers command', () => {
       expect(printed()).toContain('Load balancer created: Public ALB (public-alb)')
       expect(printed()).toContain('ID: l5zq8c')
       expect(printed()).toContain('Deployment: z3cy6t')
+      expect(printed()).toContain('Visibility: public')
     })
 
     it('requires a network for a type that needs one and takes its region from it', async () => {
@@ -258,6 +264,7 @@ describe('load-balancers command', () => {
           name: 'Public ALB',
           slug: 'public-alb',
           type: 'APPLICATION',
+          visibility: 'PUBLIC',
           networkId: 'h4nw8r',
           region: undefined,
         },
@@ -299,10 +306,27 @@ describe('load-balancers command', () => {
           name: 'Edge',
           slug: 'edge',
           type: 'GLOBAL',
+          visibility: 'PUBLIC',
           networkId: undefined,
           region: undefined,
         },
       })
+    })
+
+    it('creates an internal load balancer with --internal', async () => {
+      graphqlRequest.mockResolvedValueOnce(lbTypes).mockResolvedValueOnce({
+        createLoadBalancer: {
+          ...created,
+          loadBalancer: { ...created.loadBalancer, visibility: 'INTERNAL' },
+        },
+      })
+
+      await run([...flags, '--internal'])
+
+      expect(graphqlRequest.mock.calls[1]?.[1]).toMatchObject({
+        input: { visibility: 'INTERNAL' },
+      })
+      expect(printed()).toContain('Visibility: internal')
     })
 
     it("looks up a --type's network and region needs before prompting", async () => {

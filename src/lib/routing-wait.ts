@@ -43,6 +43,7 @@ const VERSION_ROUTE_URLS_QUERY = /* GraphQL */ `
       serviceName
       cache
       firewall
+      originLock
     }
   }
 `

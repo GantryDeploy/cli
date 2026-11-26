@@ -92,4 +92,69 @@ describe('buildLiveUrlLines', () => {
 
     expect(lines[0]).toBe('  https://app.example.com')
   })
+
+  it('marks locked routes and names the hostname to set up once', () => {
+    const lines = buildLiveUrlLines([
+      {
+        url: 'https://shop.example.com',
+        domain: 'shop.example.com',
+        path: '/',
+        serviceName: 'web',
+        cache: null,
+        firewall: 'edge-waf',
+        originLock: 'cloudflare',
+      },
+      {
+        url: 'https://shop.example.com/api',
+        domain: 'shop.example.com',
+        path: '/api/*',
+        serviceName: 'api',
+        cache: null,
+        firewall: 'edge-waf',
+        originLock: 'cloudflare',
+      },
+      {
+        url: 'https://status.example.com',
+        domain: 'status.example.com',
+        path: '/',
+        serviceName: 'status',
+        cache: null,
+        firewall: null,
+        originLock: null,
+      },
+    ])
+
+    expect(lines).toEqual([
+      '  https://shop.example.com',
+      '    /        web   not cached   firewall: edge-waf   locked: cloudflare',
+      '    /api/*   api   not cached   firewall: edge-waf   locked: cloudflare',
+      '  https://status.example.com',
+      '    /   status   not cached   firewall: none',
+      '',
+      '  Locked hostnames refuse requests without their header. Run gantry origin-lock show shop.example.com to set it up in Cloudflare.',
+    ])
+  })
+
+  it('leaves the hostname as a placeholder when more than one is locked', () => {
+    const lines = buildLiveUrlLines([
+      {
+        url: 'https://shop.example.com',
+        domain: 'shop.example.com',
+        path: '/',
+        serviceName: 'web',
+        originLock: 'cloudflare',
+      },
+      {
+        url: 'https://admin.example.com',
+        domain: 'admin.example.com',
+        path: '/',
+        serviceName: 'admin',
+        originLock: 'cloudflare',
+      },
+    ])
+
+    expect(lines.filter((line) => line.includes('Locked hostnames'))).toEqual([
+      '  Locked hostnames refuse requests without their header. Run gantry origin-lock show <hostname> to set it up in Cloudflare.',
+    ])
+  })
 })

@@ -2135,6 +2135,9 @@ enum EnvVarSourceEnum {
   """
   PARENT_ENVIRONMENT
 
+  """A preview template's `overrides` env in gantry.yml"""
+  PREVIEW_TEMPLATE
+
   """Stored at the project scope"""
   PROJECT
 

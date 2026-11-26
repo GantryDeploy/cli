@@ -177,6 +177,113 @@ export type AwsFilesystemSettingsInput = {
   throughputMode?: AwsEfsThroughputModeEnum | null | undefined;
 };
 
+/** What an AWS firewall rule does with a request it matches. */
+export type AwsFirewallAction =
+  /** Lets the request through without checking later rules. */
+  | 'ALLOW'
+  /** Refuses the request. */
+  | 'BLOCK'
+  /** Asks the visitor to solve a CAPTCHA. */
+  | 'CAPTCHA'
+  /** Runs a silent browser challenge. */
+  | 'CHALLENGE'
+  /** Counts the request and goes on to the next rule. */
+  | 'COUNT';
+
+/** A Bot Control category or signal a firewall can block. Verified bots, such as major search engines, pass every category except AI. */
+export type AwsFirewallBotCategory =
+  /** Bots used for advertising. */
+  | 'ADVERTISING'
+  /** AI bots, verified or not. */
+  | 'AI'
+  /** Bots that capture content to build archives. */
+  | 'ARCHIVER'
+  /** Requests from a browser that looks automated. */
+  | 'AUTOMATED_BROWSER'
+  /** Bots that fetch content, such as feeds, for a user. */
+  | 'CONTENT_FETCHER'
+  /** Bots that check links in emails. */
+  | 'EMAIL_CLIENT'
+  /** Requests from HTTP libraries, which can include API calls. */
+  | 'HTTP_LIBRARY'
+  /** Requests from data centers bots typically use. */
+  | 'KNOWN_BOT_DATA_CENTER'
+  /** Bots that check for broken links. */
+  | 'LINK_CHECKER'
+  /** Bots that match no other category. */
+  | 'MISCELLANEOUS'
+  /** Uptime and performance monitors. */
+  | 'MONITORING'
+  /** Requests whose user agent is not a browser, including API clients. */
+  | 'NON_BROWSER_USER_AGENT'
+  /** Bots that build link previews when a page is shared. */
+  | 'PAGE_PREVIEW'
+  /** Bots from web scraping frameworks. */
+  | 'SCRAPING_FRAMEWORK'
+  /** Unverified search engine crawlers. */
+  | 'SEARCH_ENGINE'
+  /** Bots that scan for vulnerabilities. */
+  | 'SECURITY'
+  /** Search engine optimization crawlers. */
+  | 'SEO'
+  /** Bots that social platforms use to summarize shared pages. */
+  | 'SOCIAL_MEDIA'
+  /** Bots that deliver webhook callbacks. */
+  | 'WEBHOOKS';
+
+/** Settings of a bot-control rule. */
+export type AwsFirewallBotControlRuleInput = {
+  /** Categories to block; the others are counted. AWS bills Bot Control per request it inspects. */
+  block: Array<AwsFirewallBotCategory>;
+};
+
+/** The part of a request an AWS firewall condition looks at. */
+export type AwsFirewallConditionField =
+  /** The size of the request body, compared with greaterThan. */
+  | 'BODY_SIZE'
+  /** The country the request comes from, checked against countries. */
+  | 'COUNTRY'
+  /** The header called name, compared with operator and value. */
+  | 'HEADER'
+  /** The client IP address, checked against cidrs. */
+  | 'IP'
+  /** The HTTP method, checked against methods. */
+  | 'METHOD'
+  /** The URL path, compared with operator and value. */
+  | 'PATH'
+  /** The query parameter called name, compared with operator and value. */
+  | 'QUERY_PARAM';
+
+/** One test on a request. The field decides which of the other settings it reads: operator and value for path; name, operator and value for header and query-param; cidrs for ip; countries for country; methods for method; greaterThan for body-size. */
+export type AwsFirewallConditionInput = {
+  /** IPv4 or IPv6 ranges in CIDR notation */
+  cidrs?: Array<string> | null | undefined;
+  /** Two-letter ISO country codes */
+  countries?: Array<string> | null | undefined;
+  /** Part of the request to test */
+  field: AwsFirewallConditionField;
+  /** Match a body larger than this many bytes */
+  greaterThan?: number | null | undefined;
+  /** HTTP methods, such as POST */
+  methods?: Array<string> | null | undefined;
+  /** Header or query parameter name */
+  name?: string | null | undefined;
+  /** Match the requests the test does not */
+  negate?: boolean | null | undefined;
+  /** How the text is compared to value */
+  operator?: AwsFirewallTextOperator | null | undefined;
+  /** Text to compare against */
+  value?: string | null | undefined;
+};
+
+/** Settings of a custom rule. */
+export type AwsFirewallCustomRuleInput = {
+  /** What happens to a matching request */
+  action: AwsFirewallAction;
+  /** Requests the rule acts on */
+  match: AwsFirewallMatchInput;
+};
+
 /** An AWS managed rule group a firewall can turn on. */
 export type AwsFirewallManagedGroup =
   /** Core rules against common web exploits, such as the OWASP Top 10. */
@@ -194,11 +301,99 @@ export type AwsFirewallManagedGroup =
   /** Blocks exploits of WordPress-specific vulnerabilities. */
   | 'WORDPRESS';
 
-/** Firewall rules for an AWS firewall */
-export type AwsFirewallSettingsInput = {
-  /** Managed rule groups to turn on. Groups left out are off. */
-  managedGroups: Array<AwsFirewallManagedGroup>;
+/** Settings of a managed-group rule. */
+export type AwsFirewallManagedGroupRuleInput = {
+  /** Names of rules in the group that count matching requests instead of blocking */
+  countRules?: Array<string> | null | undefined;
+  /** Managed rule group to turn on */
+  group: AwsFirewallManagedGroup;
 };
+
+/** How an AWS firewall match combines its conditions. */
+export type AwsFirewallMatchCombine =
+  /** A request matches when every condition does. */
+  | 'ALL'
+  /** A request matches when at least one condition does. */
+  | 'ANY';
+
+/** Which requests a rule applies to. */
+export type AwsFirewallMatchInput = {
+  /** How the conditions combine */
+  combine: AwsFirewallMatchCombine;
+  /** From 1 to 10 conditions */
+  conditions: Array<AwsFirewallConditionInput>;
+};
+
+/** Which address an AWS rate limit counts requests by. */
+export type AwsFirewallRateAggregate =
+  /** The client address in the X-Forwarded-For header. */
+  | 'FORWARDED_IP'
+  /** The address the request comes from. */
+  | 'IP';
+
+/** Settings of a rate-limit rule. */
+export type AwsFirewallRateLimitRuleInput = {
+  /** What happens to a client over the limit. Allow is not valid here. */
+  action: AwsFirewallAction;
+  /** Address requests are counted by */
+  aggregate: AwsFirewallRateAggregate;
+  /** Requests one client can send in the window, from 10 to 2,000,000,000 */
+  limit: number;
+  /** Only matching requests count toward the limit. Left out, every request counts. */
+  match?: AwsFirewallMatchInput | null | undefined;
+  /** Window the requests are counted over: 60, 120, 300 or 600 */
+  windowSeconds: number;
+};
+
+/** One rule of an AWS firewall. The section named by kind holds its settings. */
+export type AwsFirewallRuleInput = {
+  /** Settings when kind is BOT_CONTROL */
+  botControl?: AwsFirewallBotControlRuleInput | null | undefined;
+  /** Settings when kind is CUSTOM */
+  custom?: AwsFirewallCustomRuleInput | null | undefined;
+  /** Whether the rule is evaluated */
+  enabled: boolean;
+  /** ID of an existing rule to keep. Left out, the rule is new and gets an ID. */
+  id?: string | null | undefined;
+  /** What the rule does */
+  kind: AwsFirewallRuleKind;
+  /** Settings when kind is MANAGED_GROUP */
+  managedGroup?: AwsFirewallManagedGroupRuleInput | null | undefined;
+  /** Display name */
+  name: string;
+  /** Settings when kind is RATE_LIMIT */
+  rateLimit?: AwsFirewallRateLimitRuleInput | null | undefined;
+};
+
+/** What an AWS firewall rule does. The section of the same name holds its settings. */
+export type AwsFirewallRuleKind =
+  /** Blocks the Bot Control categories it names. */
+  | 'BOT_CONTROL'
+  /** Acts on requests that match its conditions. */
+  | 'CUSTOM'
+  /** Turns on an AWS managed rule group. */
+  | 'MANAGED_GROUP'
+  /** Acts on a client that sends too many requests. */
+  | 'RATE_LIMIT';
+
+/** The rules of an AWS firewall. */
+export type AwsFirewallRulesInput = {
+  /** Every rule, in the order the firewall evaluates them. Up to 100. */
+  rules: Array<AwsFirewallRuleInput>;
+};
+
+/** How an AWS firewall condition compares a request's text to its value. */
+export type AwsFirewallTextOperator =
+  /** The text contains the value. */
+  | 'CONTAINS'
+  /** The text ends with the value. */
+  | 'ENDS_WITH'
+  /** The text equals the value. */
+  | 'EXACT'
+  /** The text matches the value as a regular expression. */
+  | 'REGEX'
+  /** The text starts with the value. */
+  | 'STARTS_WITH';
 
 /** Which EC2 instances a managed instances capacity provider may launch */
 export type AwsInstanceRequirementsInput = {
@@ -485,10 +680,8 @@ export type CreateFilesystemInput = {
   slug: string;
 };
 
-/** A new firewall to create. */
+/** A new firewall to create. It starts with no rules. */
 export type CreateFirewallInput = {
-  /** Rules for an AWS firewall. Required when the provider is aws. */
-  aws?: AwsFirewallSettingsInput | null | undefined;
   /** Display name */
   name: string;
   /** Cloud the rules are written for */
@@ -513,6 +706,8 @@ export type CreateLoadBalancerInput = {
   slug: string;
   /** Load balancer type */
   type: LoadBalancerTypeEnum;
+  /** Who can reach it. An internal load balancer goes in the network's private subnets and can't change to public later. */
+  visibility?: LoadBalancerVisibility;
 };
 
 /** A new network to create. */
@@ -813,6 +1008,13 @@ export type LoadBalancerTypeEnum =
   /** An HTTP and HTTPS load balancer with no region. */
   | 'GLOBAL';
 
+/** Who can reach a load balancer */
+export type LoadBalancerVisibility =
+  /** Takes traffic only from inside its network. A CDN cannot sit in front of it; route a hostname to it with cdn: false. */
+  | 'INTERNAL'
+  /** Takes traffic from the internet. */
+  | 'PUBLIC';
+
 export type LocalBuildCliOutputsInput = {
   buildCommands?: string | null | undefined;
   localImageTag?: string | null | undefined;
@@ -934,6 +1136,14 @@ export type SetEnvVarsInput = {
   variables: Array<EnvVarInput>;
 };
 
+/** A firewall's complete rule list, replacing the current one. Send the section of the firewall's cloud. */
+export type SetFirewallRulesInput = {
+  /** Rules of an AWS firewall */
+  aws?: AwsFirewallRulesInput | null | undefined;
+  /** Firewall ID */
+  id: string;
+};
+
 /** How much traffic the new version of a canary release takes. */
 export type ShiftTrafficInput = {
   /** Also complete the release, dropping the previous version. Only at 100. */
@@ -1045,14 +1255,12 @@ export type UpdateDatabaseInput = {
   storageGb?: number | null | undefined;
 };
 
-/** Changes to a firewall. New rules are redeployed to every cloud account it's deployed in. */
+/** A new name for a firewall. */
 export type UpdateFirewallInput = {
-  /** New rules for an AWS firewall, replacing the current ones */
-  aws?: AwsFirewallSettingsInput | null | undefined;
   /** Firewall ID */
   id: string;
   /** New display name */
-  name?: string | null | undefined;
+  name: string;
 };
 
 /** Changes to a secret. Fields left out stay as they are. */
@@ -1433,7 +1641,14 @@ export type UpdateFirewallMutationVariables = Exact<{
 }>;
 
 
-export type UpdateFirewallMutation = { updateFirewall: { success: boolean, message: string | null, firewall: { id: string, name: string, slug: string, placements: Array<{ status: FirewallPlacementStatus }> } | null } };
+export type UpdateFirewallMutation = { updateFirewall: { success: boolean, message: string | null, firewall: { id: string, name: string, slug: string } | null } };
+
+export type SetFirewallRulesMutationVariables = Exact<{
+  input: SetFirewallRulesInput;
+}>;
+
+
+export type SetFirewallRulesMutation = { setFirewallRules: { success: boolean, message: string | null, firewall: { id: string, slug: string, placements: Array<{ status: FirewallPlacementStatus }> } | null } };
 
 export type DeleteFirewallMutationVariables = Exact<{
   id: string;
@@ -1464,7 +1679,7 @@ export type StartLiftDeploymentMutation = { startDeployment: { success: boolean,
 export type GetLoadBalancersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, region: string | null, endpoint: string | null, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
+export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, visibility: LoadBalancerVisibility, region: string | null, endpoint: string | null, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
 
 export type GetLoadBalancerTypesQueryVariables = Exact<{
   provider: CloudProviderEnum;
@@ -1478,7 +1693,7 @@ export type CreateLoadBalancerMutationVariables = Exact<{
 }>;
 
 
-export type CreateLoadBalancerMutation = { createLoadBalancer: { success: boolean, message: string | null, deploymentId: string | null, loadBalancer: { id: string, name: string, slug: string, type: LoadBalancerTypeEnum, status: LoadBalancerStatusEnum } | null } };
+export type CreateLoadBalancerMutation = { createLoadBalancer: { success: boolean, message: string | null, deploymentId: string | null, loadBalancer: { id: string, name: string, slug: string, type: LoadBalancerTypeEnum, visibility: LoadBalancerVisibility, status: LoadBalancerStatusEnum } | null } };
 
 export type VerifyLoginQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1510,6 +1725,13 @@ export type CreateNetworkMutationVariables = Exact<{
 
 
 export type CreateNetworkMutation = { createNetwork: { success: boolean, message: string | null, deploymentId: string | null, network: { id: string, name: string, slug: string, region: string } | null } };
+
+export type GetOriginLockQueryVariables = Exact<{
+  hostname: string;
+}>;
+
+
+export type GetOriginLockQuery = { originLock: { hostname: string, header: string, value: string } | null };
 
 export type LiftPreviewEnvironmentMutationVariables = Exact<{
   input: LiftPreviewEnvironmentInput;
@@ -1857,7 +2079,7 @@ export type VersionRouteUrlsQueryVariables = Exact<{
 }>;
 
 
-export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null, firewall: string | null }> };
+export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null, firewall: string | null, originLock: string | null }> };
 
 export type VersionDnsRecordsQueryVariables = Exact<{
   versionId: string;

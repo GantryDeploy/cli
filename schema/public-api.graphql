@@ -296,6 +296,159 @@ input AwsFilesystemSettingsInput {
   throughputMode: AwsEfsThroughputModeEnum
 }
 
+"""What an AWS firewall rule does with a request it matches."""
+enum AwsFirewallAction {
+  """Lets the request through without checking later rules."""
+  ALLOW
+
+  """Refuses the request."""
+  BLOCK
+
+  """Asks the visitor to solve a CAPTCHA."""
+  CAPTCHA
+
+  """Runs a silent browser challenge."""
+  CHALLENGE
+
+  """Counts the request and goes on to the next rule."""
+  COUNT
+}
+
+"""
+A Bot Control category or signal a firewall can block. Verified bots, such as major search engines, pass every category except AI.
+"""
+enum AwsFirewallBotCategory {
+  """Bots used for advertising."""
+  ADVERTISING
+
+  """AI bots, verified or not."""
+  AI
+
+  """Bots that capture content to build archives."""
+  ARCHIVER
+
+  """Requests from a browser that looks automated."""
+  AUTOMATED_BROWSER
+
+  """Bots that fetch content, such as feeds, for a user."""
+  CONTENT_FETCHER
+
+  """Bots that check links in emails."""
+  EMAIL_CLIENT
+
+  """Requests from HTTP libraries, which can include API calls."""
+  HTTP_LIBRARY
+
+  """Requests from data centers bots typically use."""
+  KNOWN_BOT_DATA_CENTER
+
+  """Bots that check for broken links."""
+  LINK_CHECKER
+
+  """Bots that match no other category."""
+  MISCELLANEOUS
+
+  """Uptime and performance monitors."""
+  MONITORING
+
+  """Requests whose user agent is not a browser, including API clients."""
+  NON_BROWSER_USER_AGENT
+
+  """Bots that build link previews when a page is shared."""
+  PAGE_PREVIEW
+
+  """Bots from web scraping frameworks."""
+  SCRAPING_FRAMEWORK
+
+  """Unverified search engine crawlers."""
+  SEARCH_ENGINE
+
+  """Bots that scan for vulnerabilities."""
+  SECURITY
+
+  """Search engine optimization crawlers."""
+  SEO
+
+  """Bots that social platforms use to summarize shared pages."""
+  SOCIAL_MEDIA
+
+  """Bots that deliver webhook callbacks."""
+  WEBHOOKS
+}
+
+"""Settings of a bot-control rule."""
+input AwsFirewallBotControlRuleInput {
+  """
+  Categories to block; the others are counted. AWS bills Bot Control per request it inspects.
+  """
+  block: [AwsFirewallBotCategory!]!
+}
+
+"""The part of a request an AWS firewall condition looks at."""
+enum AwsFirewallConditionField {
+  """The size of the request body, compared with greaterThan."""
+  BODY_SIZE
+
+  """The country the request comes from, checked against countries."""
+  COUNTRY
+
+  """The header called name, compared with operator and value."""
+  HEADER
+
+  """The client IP address, checked against cidrs."""
+  IP
+
+  """The HTTP method, checked against methods."""
+  METHOD
+
+  """The URL path, compared with operator and value."""
+  PATH
+
+  """The query parameter called name, compared with operator and value."""
+  QUERY_PARAM
+}
+
+"""
+One test on a request. The field decides which of the other settings it reads: operator and value for path; name, operator and value for header and query-param; cidrs for ip; countries for country; methods for method; greaterThan for body-size.
+"""
+input AwsFirewallConditionInput {
+  """IPv4 or IPv6 ranges in CIDR notation"""
+  cidrs: [String!]
+
+  """Two-letter ISO country codes"""
+  countries: [String!]
+
+  """Part of the request to test"""
+  field: AwsFirewallConditionField!
+
+  """Match a body larger than this many bytes"""
+  greaterThan: Int
+
+  """HTTP methods, such as POST"""
+  methods: [String!]
+
+  """Header or query parameter name"""
+  name: String
+
+  """Match the requests the test does not"""
+  negate: Boolean
+
+  """How the text is compared to value"""
+  operator: AwsFirewallTextOperator
+
+  """Text to compare against"""
+  value: String
+}
+
+"""Settings of a custom rule."""
+input AwsFirewallCustomRuleInput {
+  """What happens to a matching request"""
+  action: AwsFirewallAction!
+
+  """Requests the rule acts on"""
+  match: AwsFirewallMatchInput!
+}
+
 """An AWS managed rule group a firewall can turn on."""
 enum AwsFirewallManagedGroup {
   """Core rules against common web exploits, such as the OWASP Top 10."""
@@ -320,10 +473,134 @@ enum AwsFirewallManagedGroup {
   WORDPRESS
 }
 
-"""Firewall rules for an AWS firewall"""
-input AwsFirewallSettingsInput {
-  """Managed rule groups to turn on. Groups left out are off."""
-  managedGroups: [AwsFirewallManagedGroup!]!
+"""Settings of a managed-group rule."""
+input AwsFirewallManagedGroupRuleInput {
+  """
+  Names of rules in the group that count matching requests instead of blocking
+  """
+  countRules: [String!]
+
+  """Managed rule group to turn on"""
+  group: AwsFirewallManagedGroup!
+}
+
+"""How an AWS firewall match combines its conditions."""
+enum AwsFirewallMatchCombine {
+  """A request matches when every condition does."""
+  ALL
+
+  """A request matches when at least one condition does."""
+  ANY
+}
+
+"""Which requests a rule applies to."""
+input AwsFirewallMatchInput {
+  """How the conditions combine"""
+  combine: AwsFirewallMatchCombine!
+
+  """From 1 to 10 conditions"""
+  conditions: [AwsFirewallConditionInput!]!
+}
+
+"""Which address an AWS rate limit counts requests by."""
+enum AwsFirewallRateAggregate {
+  """The client address in the X-Forwarded-For header."""
+  FORWARDED_IP
+
+  """The address the request comes from."""
+  IP
+}
+
+"""Settings of a rate-limit rule."""
+input AwsFirewallRateLimitRuleInput {
+  """What happens to a client over the limit. Allow is not valid here."""
+  action: AwsFirewallAction!
+
+  """Address requests are counted by"""
+  aggregate: AwsFirewallRateAggregate!
+
+  """Requests one client can send in the window, from 10 to 2,000,000,000"""
+  limit: Int!
+
+  """
+  Only matching requests count toward the limit. Left out, every request counts.
+  """
+  match: AwsFirewallMatchInput
+
+  """Window the requests are counted over: 60, 120, 300 or 600"""
+  windowSeconds: Int!
+}
+
+"""
+One rule of an AWS firewall. The section named by kind holds its settings.
+"""
+input AwsFirewallRuleInput {
+  """Settings when kind is BOT_CONTROL"""
+  botControl: AwsFirewallBotControlRuleInput
+
+  """Settings when kind is CUSTOM"""
+  custom: AwsFirewallCustomRuleInput
+
+  """Whether the rule is evaluated"""
+  enabled: Boolean!
+
+  """
+  ID of an existing rule to keep. Left out, the rule is new and gets an ID.
+  """
+  id: String
+
+  """What the rule does"""
+  kind: AwsFirewallRuleKind!
+
+  """Settings when kind is MANAGED_GROUP"""
+  managedGroup: AwsFirewallManagedGroupRuleInput
+
+  """Display name"""
+  name: String!
+
+  """Settings when kind is RATE_LIMIT"""
+  rateLimit: AwsFirewallRateLimitRuleInput
+}
+
+"""
+What an AWS firewall rule does. The section of the same name holds its settings.
+"""
+enum AwsFirewallRuleKind {
+  """Blocks the Bot Control categories it names."""
+  BOT_CONTROL
+
+  """Acts on requests that match its conditions."""
+  CUSTOM
+
+  """Turns on an AWS managed rule group."""
+  MANAGED_GROUP
+
+  """Acts on a client that sends too many requests."""
+  RATE_LIMIT
+}
+
+"""The rules of an AWS firewall."""
+input AwsFirewallRulesInput {
+  """Every rule, in the order the firewall evaluates them. Up to 100."""
+  rules: [AwsFirewallRuleInput!]!
+}
+
+"""How an AWS firewall condition compares a request's text to its value."""
+enum AwsFirewallTextOperator {
+  """The text contains the value."""
+  CONTAINS
+
+  """The text ends with the value."""
+  ENDS_WITH
+
+  """The text equals the value."""
+  EXACT
+
+  """The text matches the value as a regular expression."""
+  REGEX
+
+  """The text starts with the value."""
+  STARTS_WITH
 }
 
 """Which EC2 instances a managed instances capacity provider may launch"""
@@ -1433,11 +1710,8 @@ input CreateFilesystemInput {
   slug: String!
 }
 
-"""A new firewall to create."""
+"""A new firewall to create. It starts with no rules."""
 input CreateFirewallInput {
-  """Rules for an AWS firewall. Required when the provider is aws."""
-  aws: AwsFirewallSettingsInput
-
   """Display name"""
   name: String!
 
@@ -1472,6 +1746,11 @@ input CreateLoadBalancerInput {
 
   """Load balancer type"""
   type: LoadBalancerTypeEnum!
+
+  """
+  Who can reach it. An internal load balancer goes in the network's private subnets and can't change to public later.
+  """
+  visibility: LoadBalancerVisibility! = PUBLIC
 }
 
 """A new network to create."""
@@ -2630,6 +2909,11 @@ type LoadBalancer {
 
   """When the load balancer last changed"""
   updatedAt: String!
+
+  """
+  Whether it takes traffic from the internet or only from inside its network
+  """
+  visibility: LoadBalancerVisibility!
 }
 
 """Outcome of a load balancer mutation."""
@@ -2690,6 +2974,17 @@ type LoadBalancerTypeInfo {
 
   """Load balancer type"""
   type: LoadBalancerTypeEnum!
+}
+
+"""Who can reach a load balancer"""
+enum LoadBalancerVisibility {
+  """
+  Takes traffic only from inside its network. A CDN cannot sit in front of it; route a hostname to it with cdn: false.
+  """
+  INTERNAL
+
+  """Takes traffic from the internet."""
+  PUBLIC
 }
 
 """Inputs for a local-build CLI task"""
@@ -3102,6 +3397,17 @@ type Mutation {
     team: String
   ): EnvVarsMutationResult!
 
+  """
+  Replace a firewall's rules with an ordered list. The new rules are redeployed to every cloud account it's deployed in.
+  """
+  setFirewallRules(
+    """The firewall and its new rules"""
+    input: SetFirewallRulesInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
+
   """Send a share of traffic to the new version of a canary release."""
   shiftTraffic(
     """The environment, and the share of traffic."""
@@ -3242,11 +3548,9 @@ type Mutation {
     team: String
   ): DatabaseMutationResult!
 
-  """
-  Rename a firewall or replace its rules. New rules are redeployed to every cloud account it's deployed in.
-  """
+  """Rename a firewall. Its deployments are unchanged."""
   updateFirewall(
-    """The changes to make"""
+    """The new name"""
     input: UpdateFirewallInput!
 
     """Team id to act for. Required when the token covers more than one team."""
@@ -3423,6 +3727,22 @@ type ObjectUploadSource {
 
   """Region of the bucket."""
   region: String!
+}
+
+"""
+What your zero trust provider must add to every request to a hostname with origin_lock. Requests without it are refused.
+"""
+type OriginLock {
+  """The request header your provider adds."""
+  header: String!
+
+  """The hostname as routed. A preview hostname is locked as its wildcard."""
+  hostname: String!
+
+  """
+  The header's value. Keep it secret: anyone with it can skip your provider.
+  """
+  value: String!
 }
 
 """
@@ -3927,6 +4247,17 @@ type Query {
     """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): [Network!]!
+
+  """
+  The header and secret your zero trust provider adds to requests to a locked hostname. Null until a deploy with origin_lock has gone live for it.
+  """
+  originLock(
+    """The hostname, as written in gantry.yml."""
+    hostname: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): OriginLock
 
   """The project's preview environments, oldest first."""
   previewEnvironments(
@@ -4651,6 +4982,17 @@ input SetEnvVarsInput {
   variables: [EnvVarInput!]!
 }
 
+"""
+A firewall's complete rule list, replacing the current one. Send the section of the firewall's cloud.
+"""
+input SetFirewallRulesInput {
+  """Rules of an AWS firewall"""
+  aws: AwsFirewallRulesInput
+
+  """Firewall ID"""
+  id: String!
+}
+
 """How much traffic the new version of a canary release takes."""
 input ShiftTrafficInput {
   """Also complete the release, dropping the previous version. Only at 100."""
@@ -4984,18 +5326,13 @@ input UpdateDatabaseInput {
   storageGb: Int
 }
 
-"""
-Changes to a firewall. New rules are redeployed to every cloud account it's deployed in.
-"""
+"""A new name for a firewall."""
 input UpdateFirewallInput {
-  """New rules for an AWS firewall, replacing the current ones"""
-  aws: AwsFirewallSettingsInput
-
   """Firewall ID"""
   id: String!
 
   """New display name"""
-  name: String
+  name: String!
 }
 
 """Changes to a secret. Fields left out stay as they are."""
@@ -5113,6 +5450,11 @@ type VersionRouteUrl {
   Slug of the firewall in front of the route's hostname, set by this version or inherited from another project routing the hostname. Null when there is none.
   """
   firewall: String
+
+  """
+  The zero trust provider the route's hostname is locked to (origin_lock), set by this version or inherited from another project routing the hostname. Null when it is not locked; the `originLock` query returns the header to add.
+  """
+  originLock: String
 
   """Path of the route as written in gantry.yml, such as `/` or `/api/*`."""
   path: String!

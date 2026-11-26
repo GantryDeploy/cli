@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
 
 const graphqlRequest = vi.hoisted(() => vi.fn())
-const checkbox = vi.hoisted(() => vi.fn())
 const confirm = vi.hoisted(() => vi.fn())
 const input = vi.hoisted(() => vi.fn())
 const select = vi.hoisted(() => vi.fn())
 const isInteractive = vi.hoisted(() => vi.fn(() => true))
+const readFileSync = vi.hoisted(() => vi.fn())
 
-vi.mock('@inquirer/prompts', () => ({ checkbox, confirm, input, select }))
+vi.mock('fs', async (importOriginal) => ({ ...(await importOriginal()), readFileSync }))
+vi.mock('@inquirer/prompts', () => ({ confirm, input, select }))
 vi.mock('../lib/client', () => ({
   formatApiError: (error: unknown) => (error instanceof Error ? error.message : 'API error'),
   graphqlRequest,
@@ -32,12 +33,37 @@ async function run(args: string[]): Promise<void> {
   await program.parseAsync(['node', 'gantry', 'firewalls', ...args])
 }
 
+const storedRules = [
+  {
+    id: 'r_k3m9qa',
+    name: 'Login rate limit',
+    enabled: true,
+    kind: 'rate-limit',
+    limit: 100,
+    windowSeconds: 300,
+    aggregate: 'ip',
+    match: {
+      combine: 'all',
+      conditions: [{ field: 'path', operator: 'exact', value: '/wp-login.php' }],
+    },
+    action: 'block',
+  },
+  {
+    id: 'r_p7w2xc',
+    name: 'WordPress exploits',
+    enabled: false,
+    kind: 'managed-group',
+    group: 'wordpress',
+    countRules: [],
+  },
+]
+
 const edgeWaf = {
   id: 'fw_k7d2mq',
   name: 'Edge WAF',
   slug: 'edge-waf',
   provider: 'AWS',
-  rules: { provider: 'aws', managedGroups: ['ip-reputation', 'common', 'wordpress'] },
+  rules: { provider: 'aws', rules: storedRules },
   placements: [
     { id: 'fwp_r3x8va', cloudAccountId: 'c4xp9w', status: 'ACTIVE' },
     { id: 'fwp_b6n1tz', cloudAccountId: 'c9hm2e', status: 'DRAINING' },
@@ -54,7 +80,7 @@ const unused = {
   name: 'Staging WAF',
   slug: 'staging-waf',
   provider: 'AWS',
-  rules: { provider: 'aws', managedGroups: [] },
+  rules: { provider: 'aws', rules: [] },
   placements: [],
   uses: [],
 }
@@ -130,7 +156,10 @@ describe('firewalls command', () => {
       const out = printed()
       expect(out).toContain('Firewall: Edge WAF')
       expect(out).toContain('ID:       fw_k7d2mq')
-      expect(out).toContain('Managed rule groups: ip-reputation, common, wordpress')
+      expect(out).toMatch(
+        /1\s+│ Login rate limit\s+│ rate-limit\s+│ yes\s+│ 100 per 5 min per IP on \/wp-login\.php → block/
+      )
+      expect(out).toMatch(/2\s+│ WordPress exploits\s+│ managed-group\s+│ no\s+│ wordpress/)
       expect(out).toMatch(/shop\.example\.com\s+│ Storefront/)
       expect(out).toMatch(/blog\.example\.com\s+│ Marketing site/)
       expect(out).toMatch(/c4xp9w\s+│ ACTIVE/)
@@ -145,7 +174,7 @@ describe('firewalls command', () => {
 
       const out = printed()
       expect(out).toContain('Firewall: Staging WAF')
-      expect(out).toContain('Managed rule groups: none')
+      expect(out).toContain('No rules. The firewall lets every request through.')
       expect(out).toContain('No live version routes through this firewall.')
       expect(out).toContain('Not deployed yet.')
     })
@@ -168,98 +197,29 @@ describe('firewalls command', () => {
       },
     }
 
-    it('sends the managed groups as enum values', async () => {
-      graphqlRequest.mockResolvedValueOnce(created)
-
-      await run([
-        'create',
-        'edge-waf',
-        '--name',
-        'Edge WAF',
-        '--provider',
-        'aws',
-        '--aws-managed-groups',
-        'common, php,known-bad-inputs',
-      ])
-
-      expect(mutationInput(0)).toEqual({
-        name: 'Edge WAF',
-        slug: 'edge-waf',
-        provider: 'AWS',
-        aws: { managedGroups: ['COMMON', 'KNOWN_BAD_INPUTS', 'PHP'] },
-      })
-      expect(printed()).toContain('Firewall created: Edge WAF (edge-waf)')
-    })
-
-    it('merges the wordpress preset with extra groups, without repeating any', async () => {
-      graphqlRequest.mockResolvedValueOnce(created)
-
-      await run([
-        'create',
-        'edge-waf',
-        '--name',
-        'Edge WAF',
-        '--provider',
-        'aws',
-        '--aws-preset',
-        'wordpress',
-        '--aws-managed-groups',
-        'linux,php',
-      ])
-
-      expect(mutationInput(0)).toMatchObject({
-        aws: {
-          managedGroups: [
-            'IP_REPUTATION',
-            'COMMON',
-            'KNOWN_BAD_INPUTS',
-            'SQL',
-            'LINUX',
-            'PHP',
-            'WORDPRESS',
-          ],
-        },
-      })
-    })
-
-    it('offers the managed groups when no rule flag is given', async () => {
-      checkbox.mockResolvedValueOnce(['SQL', 'PHP'])
+    it('creates a firewall with no rules and points at rules set', async () => {
       graphqlRequest.mockResolvedValueOnce(created)
 
       await run(['create', 'edge-waf', '--name', 'Edge WAF', '--provider', 'aws'])
 
-      expect(mutationInput(0)).toMatchObject({ aws: { managedGroups: ['SQL', 'PHP'] } })
+      expect(mutationInput(0)).toEqual({ name: 'Edge WAF', slug: 'edge-waf', provider: 'AWS' })
+      expect(printed()).toContain('Firewall created: Edge WAF (edge-waf)')
+      expect(printed()).toContain('gantry firewalls rules set edge-waf --file rules.json')
     })
 
-    it('needs a rule flag when no terminal is attached', async () => {
-      isInteractive.mockReturnValue(false)
+    it('asks for the cloud and the name when they are left out', async () => {
+      select.mockResolvedValueOnce('GCP')
+      input.mockResolvedValueOnce('Edge WAF')
+      graphqlRequest.mockResolvedValueOnce(created)
 
-      await expect(
-        run(['create', 'edge-waf', '--name', 'Edge WAF', '--provider', 'aws'])
-      ).rejects.toThrow(ExitError)
+      await run(['create', 'edge-waf'])
 
-      expect(firstError()).toBe(
-        'Error: Choose the rules with --aws-managed-groups or --aws-preset.'
-      )
-      expect(graphqlRequest).not.toHaveBeenCalled()
+      expect(mutationInput(0)).toEqual({ name: 'Edge WAF', slug: 'edge-waf', provider: 'GCP' })
     })
 
-    it.each([
-      [
-        ['--aws-managed-groups', 'common,drupal'],
-        '--aws-managed-groups takes a comma-separated list',
-      ],
-      [['--aws-preset', 'magento'], '--aws-preset must be wordpress'],
-    ])('refuses %j', async (flags, message) => {
-      await expect(
-        run(['create', 'edge-waf', '--name', 'Edge WAF', '--provider', 'aws', ...flags])
-      ).rejects.toThrow(ExitError)
+    it('rejects the removed rule flags', async () => {
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
 
-      expect(firstError()).toContain(message)
-      expect(graphqlRequest).not.toHaveBeenCalled()
-    })
-
-    it('refuses AWS flags for another cloud before sending anything', async () => {
       await expect(
         run([
           'create',
@@ -267,17 +227,16 @@ describe('firewalls command', () => {
           '--name',
           'Edge WAF',
           '--provider',
-          'gcp',
+          'aws',
           '--aws-preset',
           'wordpress',
         ])
-      ).rejects.toThrow(ExitError)
+      ).rejects.toThrow()
 
-      expect(firstError()).toBe('Error: --aws-preset only applies to AWS cloud accounts.')
       expect(graphqlRequest).not.toHaveBeenCalled()
     })
 
-    it('sends no AWS section for another cloud and prints the refusal', async () => {
+    it('prints the refusal', async () => {
       graphqlRequest.mockResolvedValueOnce({
         createFirewall: {
           success: false,
@@ -290,73 +249,211 @@ describe('firewalls command', () => {
         run(['create', 'edge-waf', '--name', 'Edge WAF', '--provider', 'gcp'])
       ).rejects.toThrow(ExitError)
 
-      expect(mutationInput(0)).toEqual({ name: 'Edge WAF', slug: 'edge-waf', provider: 'GCP' })
       expect(firstError()).toBe('Error: The firewall configuration is not valid.')
     })
   })
 
   describe('update', () => {
-    function updated(placements: { status: string }[]) {
-      return {
+    it('renames a firewall', async () => {
+      graphqlRequest.mockResolvedValueOnce(listResponse(edgeWaf)).mockResolvedValueOnce({
         updateFirewall: {
           success: true,
           message: null,
-          firewall: { id: 'fw_k7d2mq', name: 'Edge WAF', slug: 'edge-waf', placements },
-        },
-      }
-    }
-
-    it('replaces the rules and says they roll out to every account it is deployed in', async () => {
-      graphqlRequest
-        .mockResolvedValueOnce(listResponse(edgeWaf))
-        .mockResolvedValueOnce(
-          updated([{ status: 'ACTIVE' }, { status: 'DRAINING' }, { status: 'RELEASED' }])
-        )
-
-      await run(['update', 'edge-waf', '--aws-preset', 'wordpress'])
-
-      expect(mutationInput(1)).toEqual({
-        id: 'fw_k7d2mq',
-        aws: {
-          managedGroups: ['IP_REPUTATION', 'COMMON', 'KNOWN_BAD_INPUTS', 'SQL', 'PHP', 'WORDPRESS'],
+          firewall: { id: 'fw_k7d2mq', name: 'Edge firewall', slug: 'edge-waf' },
         },
       })
-      expect(printed()).toContain(
-        'The new rules roll out to every cloud account the firewall is deployed in (2).'
-      )
-    })
-
-    it('renames without touching the rules', async () => {
-      graphqlRequest
-        .mockResolvedValueOnce(listResponse(edgeWaf))
-        .mockResolvedValueOnce(updated([{ status: 'ACTIVE' }]))
 
       await run(['update', 'fw_k7d2mq', '--name', 'Edge firewall'])
 
       expect(mutationInput(1)).toEqual({ id: 'fw_k7d2mq', name: 'Edge firewall' })
-      expect(printed()).not.toContain('roll out')
+      expect(printed()).toContain('Firewall renamed: Edge firewall (edge-waf)')
     })
 
-    it('refuses an update with nothing to change', async () => {
+    it('needs --name', async () => {
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+      await expect(run(['update', 'edge-waf'])).rejects.toThrow()
+
+      expect(graphqlRequest).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('rules', () => {
+    it('lists the rules in evaluation order with a summary of each', async () => {
       graphqlRequest.mockResolvedValueOnce(listResponse(edgeWaf))
 
-      await expect(run(['update', 'edge-waf'])).rejects.toThrow(ExitError)
+      await run(['rules', 'edge-waf'])
 
-      expect(firstError()).toBe('Error: Nothing to update. Pass --name or new rules.')
-      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+      const rows = printed()
+        .split('\n')
+        .filter((row) => /^│ \d/.test(row))
+      expect(rows).toHaveLength(2)
+      expect(rows[0]).toMatch(
+        /│ 1\s+│ Login rate limit\s+│ rate-limit\s+│ yes\s+│ 100 per 5 min per IP on \/wp-login\.php → block/
+      )
+      expect(rows[1]).toMatch(
+        /│ 2\s+│ WordPress exploits\s+│ managed-group\s+│ no\s+│ wordpress\s+│/
+      )
     })
 
-    it('refuses AWS flags on a firewall for another cloud', async () => {
-      graphqlRequest.mockResolvedValueOnce(
-        listResponse({ ...edgeWaf, provider: 'GCP', rules: { provider: 'gcp' } })
-      )
+    it('prints the stored rule list as JSON with --json', async () => {
+      graphqlRequest.mockResolvedValueOnce(listResponse(edgeWaf))
 
-      await expect(run(['update', 'edge-waf', '--aws-managed-groups', 'common'])).rejects.toThrow(
+      await run(['rules', 'edge-waf', '--json'])
+
+      expect(JSON.parse(printed())).toEqual(storedRules)
+    })
+  })
+
+  describe('rules set', () => {
+    function rulesSet(placements: { status: string }[]) {
+      return {
+        setFirewallRules: {
+          success: true,
+          message: null,
+          firewall: { id: 'fw_k7d2mq', slug: 'edge-waf', placements },
+        },
+      }
+    }
+
+    const newRule = {
+      name: 'Block XML-RPC',
+      enabled: true,
+      kind: 'custom',
+      match: {
+        combine: 'any',
+        conditions: [{ field: 'path', operator: 'exact', value: '/xmlrpc.php' }],
+      },
+      action: 'block',
+    }
+
+    it('sends the file as the ordered rule list and says it rolls out', async () => {
+      readFileSync.mockReturnValueOnce(JSON.stringify([...storedRules, newRule]))
+      graphqlRequest
+        .mockResolvedValueOnce(listResponse(edgeWaf))
+        .mockResolvedValueOnce(rulesSet([{ status: 'ACTIVE' }, { status: 'RELEASED' }]))
+
+      await run(['rules', 'set', 'edge-waf', '--file', 'rules.json'])
+
+      expect(readFileSync).toHaveBeenCalledWith('rules.json', 'utf-8')
+      expect(mutationInput(1)).toEqual({
+        id: 'fw_k7d2mq',
+        aws: {
+          rules: [
+            expect.objectContaining({ id: 'r_k3m9qa', kind: 'RATE_LIMIT' }),
+            {
+              id: 'r_p7w2xc',
+              name: 'WordPress exploits',
+              enabled: false,
+              kind: 'MANAGED_GROUP',
+              managedGroup: { group: 'WORDPRESS', countRules: [] },
+            },
+            {
+              name: 'Block XML-RPC',
+              enabled: true,
+              kind: 'CUSTOM',
+              custom: {
+                action: 'BLOCK',
+                match: {
+                  combine: 'ANY',
+                  conditions: [{ field: 'PATH', operator: 'EXACT', value: '/xmlrpc.php' }],
+                },
+              },
+            },
+          ],
+        },
+      })
+      const out = printed()
+      expect(out).toContain('Firewall rules replaced: edge-waf (3 rules)')
+      expect(out).toContain(
+        'The new rules roll out to every cloud account the firewall is deployed in.'
+      )
+    })
+
+    it('says the rules apply on first deploy when the firewall is not deployed', async () => {
+      readFileSync.mockReturnValueOnce('[]')
+      graphqlRequest
+        .mockResolvedValueOnce(listResponse(unused))
+        .mockResolvedValueOnce(rulesSet([{ status: 'RELEASED' }]))
+
+      await run(['rules', 'set', 'staging-waf', '--file', 'rules.json'])
+
+      expect(mutationInput(1)).toEqual({ id: 'fw_t5c9re', aws: { rules: [] } })
+      expect(printed()).toContain(
+        'The new rules apply when the firewall first deploys to a cloud account.'
+      )
+    })
+
+    it('refuses a file that is not JSON without echoing its contents', async () => {
+      readFileSync.mockReturnValueOnce('[{ "name": "sk_live_51Hx" ')
+      graphqlRequest.mockResolvedValueOnce(listResponse(edgeWaf))
+
+      await expect(run(['rules', 'set', 'edge-waf', '--file', 'waf/rules.json'])).rejects.toThrow(
         ExitError
       )
 
-      expect(firstError()).toBe('Error: --aws-managed-groups only applies to AWS cloud accounts.')
+      expect(firstError()).toBe('Error: waf/rules.json is not valid JSON.')
       expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses a file it cannot read', async () => {
+      readFileSync.mockImplementationOnce(() => {
+        throw new Error("ENOENT: no such file or directory, open 'missing.json'")
+      })
+      graphqlRequest.mockResolvedValueOnce(listResponse(edgeWaf))
+
+      await expect(run(['rules', 'set', 'edge-waf', '--file', 'missing.json'])).rejects.toThrow(
+        ExitError
+      )
+
+      expect(firstError()).toBe('Error: There was an error while reading missing.json.')
+    })
+
+    it('names the rule a file gets wrong', async () => {
+      readFileSync.mockReturnValueOnce(
+        JSON.stringify([storedRules[0], { ...newRule, action: 'drop' }])
+      )
+      graphqlRequest.mockResolvedValueOnce(listResponse(edgeWaf))
+
+      await expect(run(['rules', 'set', 'edge-waf', '--file', 'rules.json'])).rejects.toThrow(
+        ExitError
+      )
+
+      expect(firstError()).toBe(
+        'Error: rules.json is not a valid rules file. Rule 2: action must be block, allow, count, captcha, challenge.'
+      )
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses a rules file for a firewall on another cloud', async () => {
+      graphqlRequest.mockResolvedValueOnce(
+        listResponse({ ...edgeWaf, provider: 'GCP', rules: { provider: 'gcp', rules: [] } })
+      )
+
+      await expect(run(['rules', 'set', 'edge-waf', '--file', 'rules.json'])).rejects.toThrow(
+        ExitError
+      )
+
+      expect(firstError()).toBe('Error: The firewall configuration is not valid.')
+      expect(readFileSync).not.toHaveBeenCalled()
+      expect(graphqlRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it("prints the server's refusal", async () => {
+      readFileSync.mockReturnValueOnce(JSON.stringify(storedRules))
+      graphqlRequest.mockResolvedValueOnce(listResponse(edgeWaf)).mockResolvedValueOnce({
+        setFirewallRules: {
+          success: false,
+          message: 'Rule 1: the limit must be from 10 to 2,000,000,000.',
+          firewall: null,
+        },
+      })
+
+      await expect(run(['rules', 'set', 'edge-waf', '--file', 'rules.json'])).rejects.toThrow(
+        ExitError
+      )
+
+      expect(firstError()).toBe('Error: Rule 1: the limit must be from 10 to 2,000,000,000.')
     })
   })
 

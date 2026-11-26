@@ -1,8 +1,9 @@
+import { readFileSync } from 'fs'
+
 import { confirm, select } from '@inquirer/prompts'
 import type { Command } from 'commander'
 
 import type {
-  AwsFirewallSettingsInput,
   CloudProviderEnum,
   CreateFirewallMutation,
   CreateFirewallMutationVariables,
@@ -11,25 +12,18 @@ import type {
   FirewallPlacementStatus,
   GetFirewallsQuery,
   GetFirewallsQueryVariables,
+  SetFirewallRulesMutation,
+  SetFirewallRulesMutationVariables,
   UpdateFirewallMutation,
   UpdateFirewallMutationVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { CLOUD_PROVIDER_LABELS, invalidConfiguration, isAws, toCloudProvider } from '../lib/clouds'
 import {
-  CLOUD_PROVIDER_LABELS,
-  foreignAwsFlagsMessage,
-  isAws,
-  toCloudProvider,
-} from '../lib/clouds'
-import {
-  AWS_FIREWALL_GROUP_LIST,
-  AWS_FIREWALL_PRESET_LIST,
-  awsFirewallCreateSettings,
-  awsFirewallRuleLines,
-  awsOption,
-  buildAwsFirewallSettings,
+  awsFirewallRuleRows,
+  awsFirewallStoredRules,
+  parseAwsFirewallRules,
 } from '../lib/clouds/aws'
-import type { AwsFirewallFlags } from '../lib/clouds/aws'
 import { addExamples } from '../lib/examples'
 import { promptName } from '../lib/interactive-prompts'
 import { createTable, printError, printHeading, printSuccess } from '../lib/output'
@@ -83,6 +77,19 @@ const UPDATE_FIREWALL_MUTATION = /* GraphQL */ `
         id
         name
         slug
+      }
+    }
+  }
+`
+
+const SET_FIREWALL_RULES_MUTATION = /* GraphQL */ `
+  mutation SetFirewallRules($input: SetFirewallRulesInput!) {
+    setFirewallRules(input: $input) {
+      success
+      message
+      firewall {
+        id
+        slug
         placements {
           status
         }
@@ -99,9 +106,6 @@ const DELETE_FIREWALL_MUTATION = /* GraphQL */ `
     }
   }
 `
-
-const AWS_GROUPS_FLAG_HELP = `Managed rule groups to turn on, comma-separated (${AWS_FIREWALL_GROUP_LIST})`
-const AWS_PRESET_FLAG_HELP = `Turn on a preset's managed rule groups (${AWS_FIREWALL_PRESET_LIST}); combines with --aws-managed-groups`
 
 async function findFirewall(slugOrId: string): Promise<Firewall> {
   const { firewalls } = await graphqlRequest<GetFirewallsQuery, GetFirewallsQueryVariables>(
@@ -120,9 +124,49 @@ function isDeployed(placement: { status: FirewallPlacementStatus }): boolean {
   return placement.status !== 'RELEASED'
 }
 
-function ruleLines(firewall: Firewall): string[] {
-  if (isAws(firewall.provider)) return awsFirewallRuleLines(firewall.rules)
-  return JSON.stringify(firewall.rules, null, 2).split('\n')
+function printRules(firewall: Firewall): void {
+  if (!isAws(firewall.provider)) {
+    for (const line of JSON.stringify(firewall.rules, null, 2).split('\n')) {
+      console.log(`  ${sanitizeTerminal(line)}`)
+    }
+    return
+  }
+  const rows = awsFirewallRuleRows(firewall.rules)
+  if (rows.length === 0) {
+    console.log('  No rules. The firewall lets every request through.')
+    return
+  }
+  const table = createTable({ head: ['#', 'Name', 'Kind', 'Enabled', 'Summary'] })
+  rows.forEach((row, index) => {
+    table.push([
+      String(index + 1),
+      sanitizeTerminal(row.name),
+      row.kind,
+      row.enabled ? 'yes' : 'no',
+      sanitizeTerminal(row.summary),
+    ])
+  })
+  console.log(table.toString())
+}
+
+function storedRules(firewall: Firewall): unknown {
+  return isAws(firewall.provider) ? awsFirewallStoredRules(firewall.rules) : firewall.rules
+}
+
+function readRulesFile(path: string): unknown {
+  let content: string
+  try {
+    content = readFileSync(path, 'utf-8')
+  } catch {
+    printError(`There was an error while reading ${path}.`)
+    process.exit(1)
+  }
+  try {
+    return JSON.parse(content)
+  } catch {
+    printError(`${path} is not valid JSON.`)
+    process.exit(1)
+  }
 }
 
 async function confirmDelete(slug: string, yes: boolean): Promise<boolean> {
@@ -186,7 +230,7 @@ export function registerFirewallsCommand(program: Command): void {
         console.log(`  Provider: ${firewall.provider.toUpperCase()}`)
 
         printHeading('Rules')
-        for (const line of ruleLines(firewall)) console.log(`  ${sanitizeTerminal(line)}`)
+        printRules(firewall)
 
         printHeading('Used by')
         if (firewall.uses.length === 0) {
@@ -218,7 +262,7 @@ export function registerFirewallsCommand(program: Command): void {
   const createCmd = firewallsCmd
     .command('create')
     .argument('<slug>', 'Slug that gantry.yml routes use to name the firewall')
-    .description('Create a firewall')
+    .description('Create a firewall with no rules. Add them with "gantry firewalls rules set".')
     .option('--name <name>', 'Firewall name')
     .option(
       '--provider <provider>',
@@ -226,102 +270,117 @@ export function registerFirewallsCommand(program: Command): void {
         .map((p) => p.toLowerCase())
         .join(', ')})`
     )
-    .addOption(awsOption('--aws-managed-groups <groups>', AWS_GROUPS_FLAG_HELP))
-    .addOption(awsOption('--aws-preset <preset>', AWS_PRESET_FLAG_HELP))
-    .action(
-      async (slug: string, options: { name?: string; provider?: string } & AwsFirewallFlags) => {
-        try {
-          const provider = options.provider
-            ? toCloudProvider(options.provider)
-            : await select<CloudProviderEnum>({
-                message: 'Cloud the rules are written for:',
-                choices: Object.entries(CLOUD_PROVIDER_LABELS).map(([value, name]) => ({
-                  name,
-                  value: toCloudProvider(value),
-                })),
-              })
-          const foreign = foreignAwsFlagsMessage(provider, options)
-          if (foreign) {
-            printError(foreign)
-            process.exit(1)
-          }
+    .action(async (slug: string, options: { name?: string; provider?: string }) => {
+      try {
+        const provider = options.provider
+          ? toCloudProvider(options.provider)
+          : await select<CloudProviderEnum>({
+              message: 'Cloud the rules are written for:',
+              choices: Object.entries(CLOUD_PROVIDER_LABELS).map(([value, name]) => ({
+                name,
+                value: toCloudProvider(value),
+              })),
+            })
+        const name = options.name ?? (await promptName('Firewall'))
 
-          const name = options.name ?? (await promptName('Firewall'))
-
-          let aws: AwsFirewallSettingsInput | undefined
-          if (isAws(provider)) {
-            const settings = await awsFirewallCreateSettings(options)
-            if (!settings.ok) {
-              printError(settings.message)
-              process.exit(1)
-            }
-            aws = settings.value
-          }
-
-          const { createFirewall: result } = await graphqlRequest<
-            CreateFirewallMutation,
-            CreateFirewallMutationVariables
-          >(CREATE_FIREWALL_MUTATION, {
-            input: { name, slug, provider, ...(aws ? { aws } : {}) },
-          })
-          const firewall = result.firewall
-          if (!result.success || !firewall) {
-            printError(result.message ?? 'There was an error while creating the firewall.')
-            process.exit(1)
-          }
-
-          printSuccess(`Firewall created: ${firewall.name} (${firewall.slug})`)
-          console.log(`  ID: ${sanitizeTerminal(firewall.id)}`)
-          console.log(
-            '  It deploys to a cloud account when a route there first puts it in front of a hostname.'
-          )
-        } catch (error) {
-          printError(formatApiError(error))
+        const { createFirewall: result } = await graphqlRequest<
+          CreateFirewallMutation,
+          CreateFirewallMutationVariables
+        >(CREATE_FIREWALL_MUTATION, { input: { name, slug, provider } })
+        const firewall = result.firewall
+        if (!result.success || !firewall) {
+          printError(result.message ?? 'There was an error while creating the firewall.')
           process.exit(1)
         }
+
+        printSuccess(`Firewall created: ${firewall.name} (${firewall.slug})`)
+        console.log(`  ID: ${sanitizeTerminal(firewall.id)}`)
+        console.log(
+          `  It has no rules yet. Add them with "gantry firewalls rules set ${sanitizeTerminal(firewall.slug)} --file rules.json".`
+        )
+        console.log(
+          '  It deploys to a cloud account when a route there first puts it in front of a hostname.'
+        )
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
       }
-    )
+    })
 
   const updateCmd = firewallsCmd
     .command('update')
     .argument('<slugOrId>', 'Firewall slug or ID')
-    .description('Rename a firewall or replace its rules')
-    .option('--name <name>', 'New firewall name')
-    .addOption(
-      awsOption(
-        '--aws-managed-groups <groups>',
-        `${AWS_GROUPS_FLAG_HELP}; replaces the current groups`
-      )
-    )
-    .addOption(awsOption('--aws-preset <preset>', AWS_PRESET_FLAG_HELP))
-    .action(async (slugOrId: string, options: { name?: string } & AwsFirewallFlags) => {
+    .description('Rename a firewall. Change its rules with "gantry firewalls rules set".')
+    .requiredOption('--name <name>', 'New firewall name')
+    .action(async (slugOrId: string, options: { name: string }) => {
       try {
         const current = await findFirewall(slugOrId)
-        const foreign = foreignAwsFlagsMessage(current.provider, options)
-        if (foreign) {
-          printError(foreign)
-          process.exit(1)
-        }
-
-        const aws = buildAwsFirewallSettings(options)
-        if (!aws.ok) {
-          printError(aws.message)
-          process.exit(1)
-        }
-        if (options.name === undefined && !aws.value) {
-          printError('Nothing to update. Pass --name or new rules.')
-          process.exit(1)
-        }
 
         const { updateFirewall: result } = await graphqlRequest<
           UpdateFirewallMutation,
           UpdateFirewallMutationVariables
-        >(UPDATE_FIREWALL_MUTATION, {
-          input: {
-            id: current.id,
-            ...(options.name !== undefined ? { name: options.name } : {}),
-            ...(aws.value ? { aws: aws.value } : {}),
-          },
+        >(UPDATE_FIREWALL_MUTATION, { input: { id: current.id, name: options.name } })
+        const firewall = result.firewall
+        if (!result.success || !firewall) {
+          printError(result.message ?? 'There was an error while updating the firewall.')
+          process.exit(1)
+        }
+
+        printSuccess(`Firewall renamed: ${firewall.name} (${firewall.slug})`)
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  const rulesCmd = firewallsCmd
+    .command('rules')
+    .argument('<slugOrId>', 'Firewall slug or ID')
+    .description(
+      'List a firewall\'s rules in the order they are evaluated. To edit them, save "rules --json" to a file, change it, then pass it to "rules set --file".'
+    )
+    .option('--json', 'Print the rule list as JSON, in the shape "rules set" reads')
+    .action(async (slugOrId: string, options: { json?: boolean }) => {
+      try {
+        const firewall = await findFirewall(slugOrId)
+        if (options.json) {
+          console.log(JSON.stringify(storedRules(firewall), null, 2))
+          return
+        }
+        console.log(`\nRules of ${sanitizeTerminal(firewall.slug)}, in evaluation order:`)
+        printRules(firewall)
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  const rulesSetCmd = rulesCmd
+    .command('set')
+    .argument('<slugOrId>', 'Firewall slug or ID')
+    .description(
+      'Replace a firewall\'s rules with the JSON list in a file. Keep a rule\'s "id" to update it; leave it out for a new rule.'
+    )
+    .requiredOption('--file <path>', 'JSON file with the rule list, as "rules --json" prints it')
+    .action(async (slugOrId: string, options: { file: string }) => {
+      try {
+        const current = await findFirewall(slugOrId)
+        if (!isAws(current.provider)) {
+          printError(invalidConfiguration('firewall'))
+          process.exit(1)
+        }
+
+        const rules = parseAwsFirewallRules(readRulesFile(options.file))
+        if (!rules.ok) {
+          printError(`${options.file} is not a valid rules file. ${rules.message}`)
+          process.exit(1)
+        }
+
+        const { setFirewallRules: result } = await graphqlRequest<
+          SetFirewallRulesMutation,
+          SetFirewallRulesMutationVariables
+        >(SET_FIREWALL_RULES_MUTATION, {
+          input: { id: current.id, aws: { rules: rules.value } },
         })
         const firewall = result.firewall
         if (!result.success || !firewall) {
@@ -329,15 +388,14 @@ export function registerFirewallsCommand(program: Command): void {
           process.exit(1)
         }
 
-        printSuccess(`Firewall updated: ${firewall.name} (${firewall.slug})`)
-        if (aws.value) {
-          const accounts = firewall.placements.filter(isDeployed).length
-          console.log(
-            accounts === 0
-              ? '  The new rules apply when the firewall first deploys to a cloud account.'
-              : `  The new rules roll out to every cloud account the firewall is deployed in (${String(accounts)}).`
-          )
-        }
+        printSuccess(
+          `Firewall rules replaced: ${firewall.slug} (${String(rules.value.length)} rule${rules.value.length === 1 ? '' : 's'})`
+        )
+        console.log(
+          firewall.placements.some(isDeployed)
+            ? '  The new rules roll out to every cloud account the firewall is deployed in.'
+            : '  The new rules apply when the firewall first deploys to a cloud account.'
+        )
       } catch (error) {
         printError(formatApiError(error))
         process.exit(1)
@@ -370,13 +428,24 @@ export function registerFirewallsCommand(program: Command): void {
       }
     })
 
+  const editLoop = [
+    {
+      command: 'gantry firewalls rules edge-waf --json > rules.json',
+      description: 'Save the rules to a file to edit them',
+    },
+    {
+      command: 'gantry firewalls rules set edge-waf --file rules.json',
+      description: 'Replace the rules with the edited file',
+    },
+  ]
+
   addExamples(firewallsCmd, [
     { command: 'gantry firewalls list', description: "List the team's firewalls" },
     {
-      command:
-        'gantry firewalls create edge-waf --name "Edge WAF" --provider aws --aws-preset wordpress',
-      description: 'Create a firewall with the WordPress rules',
+      command: 'gantry firewalls create edge-waf --name "Edge WAF" --provider aws',
+      description: 'Create a firewall with no rules',
     },
+    ...editLoop,
   ])
   addExamples(listCmd, [
     { command: 'gantry firewalls list', description: "List the team's firewalls" },
@@ -389,26 +458,21 @@ export function registerFirewallsCommand(program: Command): void {
   ])
   addExamples(createCmd, [
     {
-      command:
-        'gantry firewalls create edge-waf --name "Edge WAF" --provider aws --aws-managed-groups common,php,wordpress',
-      description: 'Create a firewall with chosen managed rule groups',
-    },
-    {
-      command:
-        'gantry firewalls create shop-waf --name "Shop WAF" --provider aws --aws-preset wordpress --aws-managed-groups linux',
-      description: 'Start from the WordPress preset and add a group',
+      command: 'gantry firewalls create edge-waf --name "Edge WAF" --provider aws',
+      description: 'Create a firewall with no rules',
     },
   ])
   addExamples(updateCmd, [
-    {
-      command: 'gantry firewalls update edge-waf --aws-managed-groups ip-reputation,common,sql',
-      description: 'Replace the managed rule groups',
-    },
     {
       command: 'gantry firewalls update edge-waf --name "Edge firewall"',
       description: 'Rename a firewall',
     },
   ])
+  addExamples(rulesCmd, [
+    { command: 'gantry firewalls rules edge-waf', description: 'List the rules in order' },
+    ...editLoop,
+  ])
+  addExamples(rulesSetCmd, editLoop)
   addExamples(deleteCmd, [
     { command: 'gantry firewalls delete edge-waf', description: 'Delete a firewall' },
     {

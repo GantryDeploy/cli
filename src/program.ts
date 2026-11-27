@@ -4,6 +4,7 @@ import { Command } from 'commander'
 
 import { registerBastionsCommand } from './commands/bastions'
 import { registerCachesCommand } from './commands/caches'
+import { registerCertificatesCommand } from './commands/certificates'
 import { registerCleanupCommand } from './commands/cleanup'
 import { registerCloudsCommand } from './commands/clouds'
 import { registerClustersCommand } from './commands/clusters'
@@ -92,6 +93,7 @@ export function buildProgram(): Command {
   registerVersionsCommand(program)
   registerDeploymentsCommand(program)
   registerDomainsCommand(program)
+  registerCertificatesCommand(program)
   registerLoadBalancersCommand(program)
   registerFirewallsCommand(program)
   registerOriginLockCommand(program)

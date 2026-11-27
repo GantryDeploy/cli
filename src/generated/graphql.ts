@@ -1397,6 +1397,22 @@ export type CreateCacheMutationVariables = Exact<{
 
 export type CreateCacheMutation = { createCache: { success: boolean, message: string | null, deploymentId: string | null, cache: { id: string, name: string, slug: string, engine: CacheEngineEnum, status: CacheStatusEnum } | null } };
 
+export type GetCertificatesQueryVariables = Exact<{
+  cloudAccountId?: string | null | undefined;
+  domainId?: string | null | undefined;
+}>;
+
+
+export type GetCertificatesQuery = { certificates: Array<{ id: string, primaryDomain: string, additionalDomains: Array<string> | null, status: CertificateStatusEnum, lastCheckedAt: string | null, regionalCertificates: Array<{ region: string, status: CertificateStatusEnum, lastValidatedAt: string | null, validationAttempts: number, dnsRecords: Array<{ name: string, type: string, value: string }> | null }> | null }> };
+
+export type TriggerCertificateValidationMutationVariables = Exact<{
+  id: string;
+  region?: string | null | undefined;
+}>;
+
+
+export type TriggerCertificateValidationMutation = { triggerCertificateValidation: { success: boolean, message: string | null } };
+
 export type GetCleanupItemsQueryVariables = Exact<{ [key: string]: never; }>;
 
 

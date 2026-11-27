@@ -112,7 +112,7 @@ interface Scope {
   /** Default file for pull and push. */
   file: string
   /** Set for environment scopes, to suggest lifting the live build again. */
-  environmentSlug?: string
+  environment?: { projectId: string; slug: string; service?: string }
 }
 
 const SOURCE_LABELS: Record<EnvVarSourceEnum, string> = {
@@ -197,7 +197,7 @@ function resolveScope(options: ScopeOptions, command: Command): Scope {
       target: scope('ENVIRONMENT', { projectId: identity.id, environmentSlug: slug, service }),
       label: service ? `${slug}/${service}` : slug,
       file: service ? `.env.${slug}.${service}` : `.env.${slug}`,
-      environmentSlug: slug,
+      environment: { projectId: identity.id, slug, service },
     }
   }
 
@@ -209,8 +209,9 @@ function resolveScope(options: ScopeOptions, command: Command): Scope {
 }
 
 function nextDeployHint(scope: Scope): string {
-  return scope.environmentSlug
-    ? `Takes effect on the next deploy of ${scope.environmentSlug}. Run \`gantry lift ${scope.environmentSlug} --from ${scope.environmentSlug}\` to apply it now.`
+  const slug = scope.environment?.slug
+  return slug
+    ? `Takes effect on the next deploy of ${slug}. Run \`gantry lift ${slug} --from ${slug}\` to apply it now.`
     : 'Takes effect on the next deploy of each environment it covers.'
 }
 
@@ -251,16 +252,16 @@ async function readFileValues(file: string): Promise<Record<string, string>> {
 }
 
 async function printResolved(scope: Scope, key: string | undefined): Promise<void> {
-  const { target } = scope
-  if (target.service === undefined || target.service === null) {
+  const { environment } = scope
+  if (environment?.service === undefined) {
     fail('--resolved needs --env <environment> and --service <name>.')
   }
   const data = await graphqlRequest<ResolvedServiceEnvQuery, ResolvedServiceEnvQueryVariables>(
     RESOLVED_SERVICE_ENV_QUERY,
     {
-      projectId: target.projectId!,
-      environmentSlug: target.environmentSlug!,
-      service: target.service,
+      projectId: environment.projectId,
+      environmentSlug: environment.slug,
+      service: environment.service,
     }
   )
   const { versionNumber, variables } = data.resolvedServiceEnv

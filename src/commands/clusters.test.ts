@@ -160,7 +160,7 @@ describe('clusters command', () => {
 
       await run(['types', '--cloud', 'ca_9mx4'])
 
-      expect(printed()).toContain("This cloud doesn't support clusters yet.")
+      expect(printed()).toContain('This cloud has no cluster types.')
     })
 
     it('prints the API error and exits non-zero', async () => {
@@ -300,7 +300,7 @@ describe('clusters command', () => {
         ExitError
       )
 
-      expect(printedErrors()).toContain("This cloud doesn't support clusters yet.")
+      expect(printedErrors()).toContain('The cluster configuration is not valid.')
       expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
 

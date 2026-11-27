@@ -106,7 +106,7 @@ describe('validate command', () => {
       plan: { services: [], routing: [], builds: [] },
     })
 
-    await validate(['-e', 'staging', '-f', 'other.yml'])
+    await validate(['--env', 'staging', '-f', 'other.yml'])
 
     expect(resolveYaml).toHaveBeenCalledWith({
       yamlPath: path.join(workingDir, 'other.yml'),

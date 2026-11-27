@@ -14,10 +14,10 @@ const isInteractive = vi.hoisted(() => vi.fn())
 const bastionMocks = vi.hoisted(() => ({
   activeOnly: vi.fn(),
   createBastionInteractive: vi.fn(),
-  fetchBastionCredentials: vi.fn(),
   selectBastion: vi.fn(),
 }))
-const tunnelMocks = vi.hoisted(() => ({ openDirectTunnel: vi.fn(), openSshTunnel: vi.fn() }))
+const tunnelMocks = vi.hoisted(() => ({ openDirectTunnel: vi.fn() }))
+const bastionTunnel = vi.hoisted(() => ({ openBastionTunnel: vi.fn() }))
 const cloudMocks = vi.hoisted(() => ({
   resolveCloud: vi.fn((id?: string) => Promise.resolve({ id: id ?? 'cloud_1', provider: 'AWS' })),
   selectNetwork: vi.fn(),
@@ -32,6 +32,7 @@ vi.mock('../lib/client', () => ({
 vi.mock('../lib/bastion-prompts', () => bastionMocks)
 vi.mock('../lib/interactive-prompts', () => cloudMocks)
 vi.mock('../lib/ssh-tunnel', () => tunnelMocks)
+vi.mock('../lib/bastion-tunnel', () => bastionTunnel)
 vi.mock('../lib/terminal', () => ({ isInteractive }))
 
 const { registerDatabasesCommand } = await import('./databases')
@@ -68,10 +69,6 @@ const publicDatabase = {
 
 const credentials = {
   databaseCredentials: { success: true, username: 'gantry_admin', password: 'Zq8#v2Lm!' },
-}
-
-const bastion = {
-  bastion: { id: 'r3bq9m', publicIp: '203.0.113.10' },
 }
 
 async function run(args: string[]): Promise<void> {
@@ -195,7 +192,7 @@ describe('databases command', () => {
 
       await run(['engines', '--cloud', 'cloud-1'])
 
-      expect(logLines()).toEqual(["This cloud doesn't support databases yet."])
+      expect(logLines()).toEqual(['This cloud has no database types.'])
     })
 
     it('exits non-zero when the API fails', async () => {
@@ -637,7 +634,7 @@ describe('databases command', () => {
 
       await expect(run([...createArgs, '--engine', 'mysql'])).rejects.toThrow('process.exit(1)')
 
-      expect(errorOutput()).toContain("This cloud doesn't support databases yet.")
+      expect(errorOutput()).toContain('The database configuration is not valid.')
       expect(graphqlRequest).toHaveBeenCalledTimes(1)
     })
 
@@ -1213,13 +1210,7 @@ describe('databases command', () => {
         return realOn(event, listener)
       }) as typeof process.on)
       close.mockResolvedValue(undefined)
-      bastionMocks.fetchBastionCredentials.mockResolvedValue({
-        privateKey: 'fake-bastion-private-key',
-        sshUser: 'ubuntu',
-        hostPublicKey: null,
-        hostKeyFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
-      })
-      tunnelMocks.openSshTunnel.mockResolvedValue({ localPort: 15432, close })
+      bastionTunnel.openBastionTunnel.mockResolvedValue({ localPort: 15432, close })
       tunnelMocks.openDirectTunnel.mockResolvedValue({ localPort: 13306, close })
     })
 
@@ -1233,8 +1224,8 @@ describe('databases command', () => {
       await pending
     }
 
-    it('tunnels through the named bastion, passes the host-key policy and closes on SIGINT', async () => {
-      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce(bastion)
+    it('tunnels through the named bastion and closes on SIGINT', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
 
       await runUntilSigint([
         'tunnel',
@@ -1248,36 +1239,14 @@ describe('databases command', () => {
 
       expect(bastionMocks.selectBastion).not.toHaveBeenCalled()
       expect(promptMocks.input).not.toHaveBeenCalled()
-      expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('ops-bastion')
-      expect(sentQuery(1)).toContain('query GetDatabaseTunnelBastion($slug: String!)')
-      expect(sentVariables(1)).toEqual({ slug: 'ops-bastion' })
-
-      const config = tunnelMocks.openSshTunnel.mock.calls[0]?.[0] as {
-        hostKey: { pauseOutput: () => void; resumeOutput: () => void }
-      }
-      expect(config).toEqual({
-        bastionHost: '203.0.113.10',
-        bastionUsername: 'ubuntu',
-        hostKey: {
-          hostId: 'bastion-r3bq9m@203.0.113.10',
-          label: 'ops-bastion',
-          expectedFingerprint: 'SHA256:ZLHH8qScCNumv6jTt1L8kj+sFVAHleXj5Y3NxKTXIWs',
-          trustHostKey: true,
-          pauseOutput: expect.any(Function) as unknown,
-          resumeOutput: expect.any(Function) as unknown,
-        },
-        privateKey: 'fake-bastion-private-key',
+      expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith({
+        slug: 'ops-bastion',
         remoteHost: 'primary.example.internal',
         remotePort: 5432,
         localPort: 15432,
+        trustHostKey: true,
+        spinner,
       })
-      spinner.stop.mockClear()
-      spinner.start.mockClear()
-      config.hostKey.pauseOutput()
-      expect(spinner.stop).toHaveBeenCalledTimes(1)
-      expect(spinner.start).not.toHaveBeenCalled()
-      config.hostKey.resumeOutput()
-      expect(spinner.start).toHaveBeenCalledTimes(1)
 
       expect(spinner.succeed).toHaveBeenCalledWith('Tunnel connected')
       expect(logLines()).toEqual([
@@ -1293,19 +1262,17 @@ describe('databases command', () => {
     })
 
     it('leaves trustHostKey unset without --trust-host-key', async () => {
-      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce(bastion)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
 
       await runUntilSigint(['tunnel', 'primary', '--bastion', 'ops-bastion', '--port', '15432'])
 
-      expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
-        expect.objectContaining({
-          hostKey: expect.objectContaining({ trustHostKey: undefined }) as unknown,
-        })
+      expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
+        expect.objectContaining({ trustHostKey: undefined })
       )
     })
 
     it('uses the bastion chosen from the network', async () => {
-      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce(bastion)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
       bastionMocks.selectBastion.mockResolvedValueOnce({ slug: 'net-bastion' })
 
       await runUntilSigint(['tunnel', 'primary', '--port', '15432'])
@@ -1315,11 +1282,13 @@ describe('databases command', () => {
         includeCreateOption: true,
         filter: bastionMocks.activeOnly,
       })
-      expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('net-bastion')
+      expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'net-bastion' })
+      )
     })
 
     it('creates a bastion when asked and waits for it', async () => {
-      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce(bastion)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
       bastionMocks.selectBastion.mockResolvedValueOnce('create')
       bastionMocks.createBastionInteractive.mockResolvedValueOnce({ slug: 'new-bastion' })
 
@@ -1330,7 +1299,9 @@ describe('databases command', () => {
         networkId: 'h4nw8r',
         waitForActive: true,
       })
-      expect(bastionMocks.fetchBastionCredentials).toHaveBeenCalledWith('new-bastion')
+      expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'new-bastion' })
+      )
     })
 
     it.each([
@@ -1338,11 +1309,10 @@ describe('databases command', () => {
       ['MARIADB', '3306'],
       ['POSTGRESQL', '5432'],
     ])('offers and tunnels to the %s default port', async (engine, port) => {
-      graphqlRequest
-        .mockResolvedValueOnce({
-          databases: [{ ...database, engine, endpoint: 'db.internal', port: null }],
-        })
-        .mockResolvedValueOnce(bastion)
+      graphqlRequest.mockResolvedValueOnce({
+        databases: [{ ...database, engine, endpoint: 'db.internal', port: null }],
+      })
+
       promptMocks.input.mockResolvedValueOnce(port)
 
       await runUntilSigint(['tunnel', 'primary', '--bastion', 'ops-bastion'])
@@ -1356,7 +1326,7 @@ describe('databases command', () => {
       expect(prompt.validate('65536')).toBe('Enter a valid port (1-65535)')
       expect(prompt.validate('abc')).toBe('Enter a valid port (1-65535)')
       expect(prompt.validate(port)).toBe(true)
-      expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
+      expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
         expect.objectContaining({ remotePort: Number(port), localPort: Number(port) })
       )
     })
@@ -1372,40 +1342,26 @@ describe('databases command', () => {
 
       expect(errorOutput()).toContain('Unknown database or cache engine.')
       expect(promptMocks.input).not.toHaveBeenCalled()
-      expect(tunnelMocks.openSshTunnel).not.toHaveBeenCalled()
+      expect(bastionTunnel.openBastionTunnel).not.toHaveBeenCalled()
     })
 
     it('offers the provider port for an unknown engine', async () => {
-      graphqlRequest
-        .mockResolvedValueOnce({
-          databases: [
-            {
-              ...database,
-              engine: 'SQLSERVER',
-              endpoint: 'db.internal',
-              port: 1433,
-            },
-          ],
-        })
-        .mockResolvedValueOnce(bastion)
+      graphqlRequest.mockResolvedValueOnce({
+        databases: [
+          {
+            ...database,
+            engine: 'SQLSERVER',
+            endpoint: 'db.internal',
+            port: 1433,
+          },
+        ],
+      })
+
       promptMocks.input.mockResolvedValueOnce('1433')
 
       await runUntilSigint(['tunnel', 'primary', '--bastion', 'ops-bastion'])
 
       expect(promptMocks.input).toHaveBeenCalledWith(expect.objectContaining({ default: '1433' }))
-    })
-
-    it('fails when the bastion has no public IP', async () => {
-      graphqlRequest
-        .mockResolvedValueOnce({ databases: [database] })
-        .mockResolvedValueOnce({ bastion: { id: 'r3bq9m', publicIp: null } })
-
-      await expect(
-        run(['tunnel', 'primary', '--bastion', 'ops-bastion', '--port', '15432'])
-      ).rejects.toThrow('process.exit(1)')
-
-      expect(spinner.fail).toHaveBeenCalledWith('Bastion host does not have a public IP address.')
-      expect(tunnelMocks.openSshTunnel).not.toHaveBeenCalled()
     })
 
     it.each([
@@ -1415,8 +1371,8 @@ describe('databases command', () => {
       ],
       ['ECONNREFUSED', 'ECONNREFUSED'],
     ])('reports an SSH failure (%s)', async (failure, message) => {
-      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce(bastion)
-      tunnelMocks.openSshTunnel.mockRejectedValueOnce(failure)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
+      bastionTunnel.openBastionTunnel.mockRejectedValueOnce(failure)
 
       await expect(
         run(['tunnel', 'primary', '--bastion', 'ops-bastion', '--port', '15432'])
@@ -1444,12 +1400,12 @@ describe('databases command', () => {
     })
 
     it('tunnels to the database picked from the prompt', async () => {
-      graphqlRequest.mockResolvedValueOnce({ databases: [database] }).mockResolvedValueOnce(bastion)
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
       promptMocks.select.mockResolvedValueOnce('db-id-1')
 
       await runUntilSigint(['tunnel', '--bastion', 'ops-bastion', '--port', '15432'])
 
-      expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
+      expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
         expect.objectContaining({ remoteHost: 'primary.example.internal' })
       )
     })
@@ -1536,7 +1492,7 @@ describe('databases command', () => {
           localPort: 13306,
         })
         expect(bastionMocks.selectBastion).not.toHaveBeenCalled()
-        expect(tunnelMocks.openSshTunnel).not.toHaveBeenCalled()
+        expect(bastionTunnel.openBastionTunnel).not.toHaveBeenCalled()
         expect(spinner.succeed).toHaveBeenCalledWith('Tunnel connected')
         expect(logLines()).toEqual([
           '  Host:     localhost',
@@ -1566,23 +1522,94 @@ describe('databases command', () => {
       })
 
       it('goes through the bastion when --bastion is given', async () => {
-        graphqlRequest
-          .mockResolvedValueOnce({ databases: [publicDatabase] })
-          .mockResolvedValueOnce(bastion)
+        graphqlRequest.mockResolvedValueOnce({ databases: [publicDatabase] })
 
         await runUntilSigint(['tunnel', 'reporting', '--bastion', 'ops-bastion', '--port', '13306'])
 
         expect(promptMocks.select).not.toHaveBeenCalled()
         expect(tunnelMocks.openDirectTunnel).not.toHaveBeenCalled()
-        expect(tunnelMocks.openSshTunnel).toHaveBeenCalledWith(
+        expect(bastionTunnel.openBastionTunnel).toHaveBeenCalledWith(
           expect.objectContaining({
-            bastionHost: '203.0.113.10',
+            slug: 'ops-bastion',
             remoteHost: 'reporting.abc123.us-east-1.rds.amazonaws.com',
             remotePort: 3306,
             localPort: 13306,
           })
         )
       })
+    })
+  })
+
+  describe('logs', () => {
+    let stdout: MockInstance
+    let stderr: MockInstance
+
+    const logPage = (...messages: string[]) => ({
+      databaseLogs: {
+        cursor: 'eyJhZnRlciI6MTc5Mjk5OTk5NTAwMCwiaWRzIjpbXX0',
+        lines: messages.map((message) => ({ timestamp: '2026-10-26T20:41:00.118Z', message })),
+      },
+    })
+
+    beforeEach(() => {
+      stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+      stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    })
+
+    it("prints a database's engine log by slug", async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [publicDatabase, database] })
+        .mockResolvedValueOnce(
+          logPage('FATAL:  password authentication failed for user "gantry_admin"')
+        )
+
+      await expect(run(['logs', 'primary'])).rejects.toThrow('process.exit(0)')
+
+      expect(sentQuery(1)).toContain('databaseLogs')
+      expect(sentVariables(1)).toEqual({
+        id: 'db-id-1',
+        since: '1h',
+        limit: undefined,
+        grep: undefined,
+        cursor: undefined,
+      })
+      expect(stdout.mock.calls.map((call) => String(call[0])).join('')).toContain(
+        'FATAL:  password authentication failed for user "gantry_admin"\n'
+      )
+    })
+
+    it('sends the window, limit and grep it is given', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockResolvedValueOnce(logPage())
+
+      await expect(
+        run(['logs', 'primary', '--since', '2d', '--limit', '20', '--grep', 'deadlock'])
+      ).rejects.toThrow('process.exit(0)')
+
+      expect(sentVariables(1)).toMatchObject({ since: '2d', limit: 20, grep: 'deadlock' })
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining('No log lines for primary in the last 2d.')
+      )
+    })
+
+    it('stops at an unknown slug without asking for logs', async () => {
+      graphqlRequest.mockResolvedValueOnce({ databases: [database] })
+
+      await expect(run(['logs', 'reporting'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('Database not found.')
+      expect(graphqlRequest).toHaveBeenCalledOnce()
+    })
+
+    it('exits 1 with the API message when the logs request fails', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce({ databases: [database] })
+        .mockRejectedValueOnce(new Error('There was an error while loading the logs.'))
+
+      await expect(run(['logs', 'primary'])).rejects.toThrow('process.exit(1)')
+
+      expect(errorOutput()).toContain('There was an error while loading the logs.')
     })
   })
 })

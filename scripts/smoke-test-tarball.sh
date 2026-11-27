@@ -22,17 +22,21 @@ contents="$(tar -tzf "$tarball" | grep -v '/$' | sort)"
 expected_fixed="package/LICENSE
 package/README.md
 package/dist/index.js
+package/dist/program.d.ts
+package/dist/program.js
 package/package.json
 package/schema/public-api.graphql"
 unexpected="$(printf '%s\n' "$contents" | grep -vxF "$expected_fixed" | grep -vxF package/CHANGELOG.md |
-  grep -vE '^package/dist/main-[A-Za-z0-9_-]+\.js$' || true)"
+  grep -vE '^package/dist/(main|chunk)-[A-Za-z0-9_-]+\.js$' || true)"
 [ -z "$unexpected" ] || fail "unexpected files in the tarball:
 $unexpected"
 for file in $expected_fixed; do
   printf '%s\n' "$contents" | grep -qxF "$file" || fail "missing $file"
 done
-[ "$(printf '%s\n' "$contents" | grep -cE '^package/dist/main-[A-Za-z0-9_-]+\.js$')" = "1" ] ||
-  fail "expected exactly one dist/main-*.js chunk"
+for chunk in main chunk; do
+  [ "$(printf '%s\n' "$contents" | grep -cE "^package/dist/${chunk}-[A-Za-z0-9_-]+\.js$")" = "1" ] ||
+    fail "expected exactly one dist/${chunk}-*.js file"
+done
 
 version="$(tar -xOzf "$tarball" package/package.json | jq -r .version)"
 [ -n "$version" ] && [ "$version" != "null" ] || fail "cannot read the version from package.json"
@@ -64,6 +68,12 @@ run --help | grep -q '^Usage: gantry' || fail "--help did not print usage"
 
 echo "smoke-test: gantry deployments --help"
 run deployments --help | grep -q '^Usage: gantry deployments' || fail "deployments --help did not print usage"
+
+echo "smoke-test: import @gantrydeploy/cli/program"
+(cd "$work/project" && env -i PATH="$PATH" HOME="$work/home" node --input-type=module -e "
+  const { buildProgram } = await import('@gantrydeploy/cli/program')
+  if (buildProgram().name() !== 'gantry') process.exit(1)
+") || fail "@gantrydeploy/cli/program did not export a working buildProgram"
 
 echo "smoke-test: gantry validate with no config fails cleanly"
 if (cd "$work/project" && run validate >/dev/null 2>&1); then

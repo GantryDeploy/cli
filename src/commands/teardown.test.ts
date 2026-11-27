@@ -30,7 +30,7 @@ vi.mock('readline', () => ({
   }),
 }))
 
-const { registerTeardownCommand } = await import('./teardown')
+const { registerTeardownCommand, routingSections, totalLine } = await import('./teardown')
 
 class ExitError extends Error {
   constructor(readonly code: number | undefined) {
@@ -50,6 +50,7 @@ function preview(overrides: Record<string, unknown> = {}) {
         { id: 'r2', resourceType: 'lambda-function', status: 'active' },
       ],
       totalResources: 2,
+      routing: [],
       teardownToken: 'tok_123',
       expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
       ...overrides,
@@ -122,6 +123,32 @@ describe('teardown command', () => {
       },
     })
     expect(mocks.spinner.succeed).toHaveBeenCalledWith('Teardown started successfully')
+  })
+
+  it('lists the routing the teardown removes or updates', async () => {
+    mocks.graphqlRequest
+      .mockResolvedValueOnce(
+        preview({
+          routing: [
+            {
+              edge: 'CDN',
+              name: '*.pvtest.api-testing.dev',
+              otherEnvironments: 0,
+              change: 'REMOVED',
+            },
+            { edge: 'LOAD_BALANCER', name: 'shop-alb', otherEnvironments: 2, change: 'UPDATED' },
+          ],
+        })
+      )
+      .mockResolvedValueOnce({ startTeardown: { success: true, teardownId: 't1' } })
+
+    await teardown()
+
+    const text = logged()
+    expect(text).toContain('CDN: *.pvtest.api-testing.dev')
+    expect(text).toContain('Load balancer: shop-alb (2 other environments still route through it)')
+    expect(text).toContain('Total: 2 resource(s), 1 routing removed, 1 routing updated')
+    expect(text).toContain('A CDN nothing else routes through is removed, with its DNS records.')
   })
 
   it('accepts the phrase regardless of case and surrounding whitespace', async () => {
@@ -231,5 +258,24 @@ describe('teardown command', () => {
       projectId: 'zx8n3d',
       environmentSlug: 'Staging',
     })
+  })
+})
+
+describe('routingSections', () => {
+  it('prints nothing for an environment with no routing', () => {
+    expect(routingSections([])).toEqual([])
+    expect(totalLine(3, [])).toBe('3 resource(s)')
+  })
+
+  it('names one other environment in the singular', () => {
+    expect(
+      routingSections([
+        { edge: 'LOAD_BALANCER', name: 'shop-alb', otherEnvironments: 1, change: 'UPDATED' },
+      ])
+    ).toEqual([
+      '  Routing to be updated:',
+      '    - Load balancer: shop-alb (1 other environment still routes through it)',
+      '',
+    ])
   })
 })

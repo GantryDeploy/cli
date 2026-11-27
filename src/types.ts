@@ -60,26 +60,3 @@ export interface NamedBuildConfig {
   /** Name of another build in setup.builds that must complete first */
   depends_on?: string
 }
-
-const ROUTE_HOP_LABELS: Record<string, string> = {
-  cloudfront: 'CloudFront',
-  alb: 'ALB',
-  ecs: 'ECS',
-  lambda: 'Lambda',
-  'lambda-edge': 'Lambda@Edge',
-  s3: 'S3',
-  'cloud-cdn': 'Cloud CDN',
-  gcs: 'GCS',
-  'global-lb': 'Global LB',
-  'cloud-run': 'Cloud Run',
-  gke: 'GKE',
-  cloudflare: 'Cloudflare',
-  r2: 'R2',
-  worker: 'Worker',
-}
-
-/** Render hops as the arrow-joined chain users read: `CloudFront → ALB → Lambda`. */
-export function formatRouteChain(hops: readonly string[], fallback: string): string {
-  if (hops.length === 0) return fallback
-  return hops.map((hop) => ROUTE_HOP_LABELS[hop] ?? hop).join(' → ')
-}

@@ -206,6 +206,49 @@ describe('interactive prompts', () => {
       ])
     })
 
+    it('returns the environment named by a slug without prompting, ignoring case', async () => {
+      respond({
+        environments: [
+          {
+            id: 'g3hm8p',
+            name: 'Production',
+            slug: 'production',
+            projectId: 'p9ue62',
+            isProduction: true,
+          },
+          {
+            id: 'e5rk2w',
+            name: 'Staging',
+            slug: 'staging',
+            projectId: 'p9ue62',
+            isProduction: false,
+          },
+        ],
+      })
+
+      await expect(selectEnvironment('p9ue62', 'Staging')).resolves.toBe('e5rk2w')
+      expect(select).not.toHaveBeenCalled()
+    })
+
+    it('lists the available slugs when the named environment does not exist', async () => {
+      respond({
+        environments: [
+          {
+            id: 'g3hm8p',
+            name: 'Production',
+            slug: 'production',
+            projectId: 'p9ue62',
+            isProduction: true,
+          },
+        ],
+      })
+
+      await expect(selectEnvironment('p9ue62', 'qa')).rejects.toThrow(ExitError)
+      expect(printError).toHaveBeenCalledWith(
+        "Environment 'qa' not found in this project. Available: production"
+      )
+    })
+
     it('exits when the project has no environments', async () => {
       respond({ environments: [] })
 

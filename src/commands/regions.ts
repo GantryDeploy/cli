@@ -2,12 +2,13 @@ import type { Command } from 'commander'
 
 import { formatApiError } from '../lib/client'
 import { toCloudProvider } from '../lib/clouds'
+import { addExamples } from '../lib/examples'
 import { fetchRegions, resolveCloud } from '../lib/interactive-prompts'
 import { createTable, printError } from '../lib/output'
 import { isInteractive } from '../lib/terminal'
 
 export function registerRegionsCommand(program: Command): void {
-  program
+  const regionsCmd = program
     .command('regions')
     .description('List the regions a cloud offers')
     .option('--cloud <id>', 'Cloud account ID')
@@ -46,4 +47,15 @@ export function registerRegionsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(regionsCmd, [
+    {
+      command: 'gantry regions --cloud c4xp9w',
+      description: 'List the regions of a cloud account',
+    },
+    {
+      command: 'gantry regions --provider aws',
+      description: 'List the regions of a cloud provider',
+    },
+  ])
 }

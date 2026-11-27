@@ -63,7 +63,8 @@ vi.mock(import('../lib/output'), async (importOriginal) => ({
 }))
 
 const { GantryApiError } = await import('../lib/client')
-const { envBlockedTitle, getPhaseDisplay, registerLiftCommand } = await import('./lift')
+const { envBlockedTitle, registerLiftCommand } = await import('./lift')
+const { getPhaseDisplay } = await import('../lib/deployment-poll')
 
 class ExitError extends Error {
   constructor(readonly code: number | undefined) {
@@ -79,6 +80,7 @@ const OBJECT_INPUTS: ObjectUploadInputs = {
   sourcePath: 'dist',
   includePatterns: null,
   excludePatterns: null,
+  source: null,
 }
 
 const OBJECT_RESULT: TaskResult = {
@@ -212,7 +214,7 @@ describe('lift command', () => {
       ClaimStep: () => ({ claimStep: { success: true, step: CLAIMED_STEP } }),
       CompleteCliStep: () => ({ completeCliStep: { success: true } }),
       FailCliStep: () => ({ failCliStep: { success: true } }),
-      GetLiftDeployment: () => ({ deployment: { id: 'dep_r', status: 'COMPLETE' } }),
+      GetRoutingDeployment: () => ({ deployment: { id: 'dep_r', status: 'COMPLETE' } }),
       VersionRouteUrls: () => ({
         versionRouteUrls: [{ url: 'https://shop.example.com', path: '/', serviceName: 'web' }],
       }),
@@ -227,9 +229,12 @@ describe('lift command', () => {
         ],
       }),
       CancelLiftDeployment: () => ({ cancelDeployment: { success: true } }),
+      GetCleanupItems: () => ({ cleanupItems: [] }),
     }
     mocks.graphqlRequest.mockImplementation((query: string, variables: Record<string, unknown>) => {
-      const operation = Object.keys(handlers).find((name) => query.includes(`${name}(`))
+      const operation = Object.keys(handlers).find(
+        (name) => query.includes(`${name}(`) || query.includes(`${name} {`)
+      )
       if (!operation) throw new Error(`Unexpected query: ${query}`)
       return Promise.resolve().then(() => handlers[operation](variables))
     })
@@ -276,7 +281,7 @@ describe('lift command', () => {
       fileResults: [{ path: 'index.html', hash: 'abc', success: true }],
     })
 
-    expect(calls('GetLiftDeployment')[0][1]).toEqual({ id: 'dep_r' })
+    expect(calls('GetRoutingDeployment')[0][1]).toEqual({ id: 'dep_r' })
     expect(mocks.printHeading).toHaveBeenCalledWith('DNS records')
     expect(mocks.printHeading).toHaveBeenCalledWith('Deployed routes')
     expect(logSpy).toHaveBeenCalledWith('  CNAME  shop.example.com  d1.cloudfront.net')
@@ -285,6 +290,46 @@ describe('lift command', () => {
     expect(process.exitCode).toBeUndefined()
     expect(mocks.removeStagingDir).toHaveBeenCalledWith(workingDir)
     expect(process.listeners('SIGINT')).not.toContain(sigintHandler())
+  })
+
+  it('ends by pointing at gantry cleanup when previous routing is still running', async () => {
+    handlers.GetCleanupItems = () => ({
+      cleanupItems: [
+        {
+          id: 'e7kq2m',
+          kind: 'PREVIOUS_ROUTING',
+          description: 'Previous routing for shop.example.com',
+          readyToRemove: false,
+          hostnames: [
+            {
+              hostname: 'shop.example.com',
+              dnsMoved: false,
+              dnsTarget: 'd-4f7a2b9c1e.execute-api.us-east-2.amazonaws.com',
+            },
+          ],
+        },
+      ],
+    })
+
+    await lift(['production', '--force'])
+
+    const hint = String(logSpy.mock.calls.at(-1)?.[0])
+    expect(hint).toContain('Previous routing for shop.example.com')
+    expect(hint).toContain('Run "gantry cleanup" once DNS has moved.')
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it('still succeeds when the cleanup check fails', async () => {
+    handlers.GetCleanupItems = () => {
+      throw new Error('network unreachable')
+    }
+
+    await lift(['production', '--force'])
+
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Could not check for infrastructure to clean up: network unreachable'
+    )
+    expect(process.exitCode).toBeUndefined()
   })
 
   it('runs setup commands, then builds named images in dependency order', async () => {
@@ -382,8 +427,9 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('FailCliStep')[0][1]).toEqual({ stepId: 'step_1', error: 'upload refused' })
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
     expect(calls('CompleteCliStep')).toHaveLength(0)
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(mocks.printError).toHaveBeenCalledWith(
       'Deployment failed: 1 of 1 service did not succeed'
     )
@@ -408,6 +454,7 @@ describe('lift command', () => {
 
     expect(calls('ClaimStep')).toHaveLength(1)
     expect(mocks.executeCliTask).not.toHaveBeenCalled()
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
     expect(mocks.printError).not.toHaveBeenCalled()
     expect(process.exitCode).toBeUndefined()
   })
@@ -426,6 +473,9 @@ describe('lift command', () => {
 
       expect(calls('ClaimStep')).toHaveLength(1)
       expect(mocks.executeCliTask).not.toHaveBeenCalled()
+      expect(calls('CancelLiftDeployment').map((call) => call[1] as unknown)).toEqual([
+        { id: 'dep_1' },
+      ])
       expect(mocks.printError).toHaveBeenCalledWith(
         'Deployment failed: 1 of 1 service did not succeed'
       )
@@ -454,7 +504,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(process.exitCode).toBeUndefined()
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
   })
 
   it('gives up after ten consecutive API failures while polling', async () => {
@@ -474,7 +524,7 @@ describe('lift command', () => {
   })
 
   it('exits with the routing failure', async () => {
-    handlers.GetLiftDeployment = () => ({
+    handlers.GetRoutingDeployment = () => ({
       deployment: { id: 'dep_r', status: 'FAILED', lastMessage: 'certificate pending' },
     })
 
@@ -483,12 +533,69 @@ describe('lift command', () => {
     expect(mocks.printError).toHaveBeenCalledWith('Routing failed - certificate pending')
   })
 
-  it('stops waiting on routing when its deployment disappears', async () => {
-    handlers.GetLiftDeployment = () => ({ deployment: null })
+  it.each([
+    [[], { skipPreDeploy: false, skipPostDeploy: false }],
+    [['--skip-pre-deploy'], { skipPreDeploy: true, skipPostDeploy: false }],
+    [['--skip-post-deploy'], { skipPreDeploy: false, skipPostDeploy: true }],
+    [['--skip-pre-deploy', '--skip-post-deploy'], { skipPreDeploy: true, skipPostDeploy: true }],
+  ])('sends the deploy command skips for %j', async (flags, skips) => {
+    await lift(['production', ...flags])
 
-    await lift(['production'])
+    expect(calls('StartLiftDeployment')[0][1]).toMatchObject({
+      options: { deleteStale: false, force: false, ...skips },
+    })
+  })
 
-    expect(mocks.printError).not.toHaveBeenCalled()
+  it('exits once the version is live with --post-deploy-async, leaving the commands running', async () => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_r',
+        status: 'RUNNING',
+        lastMessage: 'Running post-deploy commands',
+        postDeployState: 'QUEUED',
+        steps: [],
+      },
+    })
+
+    await lift(['production', '--post-deploy-async'])
+
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
+    expect(calls('VersionRouteUrls')).toHaveLength(1)
+    expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  it('refuses --skip-post-deploy with --post-deploy-async before deploying', async () => {
+    await expect(lift(['production', '--skip-post-deploy', '--post-deploy-async'])).rejects.toThrow(
+      /cannot be used with/
+    )
+
+    expect(calls('CreateVersion')).toHaveLength(0)
+  })
+
+  it('exits non-zero when post-deploy commands fail, saying the version is live', async () => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_r',
+        status: 'FAILED',
+        lastMessage: 'The post-deploy command exited with code 2.',
+        steps: [{ id: 'st_9', stepType: 'post-deploy', status: 'FAILED' }],
+      },
+    })
+    handlers.ReleaseOutput = () => ({ releaseOutput: { lines: [], cursor: null } })
+
+    await expect(lift(['production'])).rejects.toThrow(ExitError)
+
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Post-deploy commands failed, and the new version is live - The post-deploy command exited with code 2.'
+    )
+  })
+
+  it('exits non-zero when the routing deployment disappears', async () => {
+    handlers.GetRoutingDeployment = () => ({ deployment: null })
+
+    await expect(lift(['production'])).rejects.toThrow(ExitError)
+
+    expect(mocks.printError).toHaveBeenCalledWith('Routing deployment dep_r not found.')
     expect(calls('VersionRouteUrls')).toHaveLength(0)
   })
 
@@ -538,6 +645,67 @@ describe('lift command', () => {
     await expect(lift(['production'])).rejects.toThrow(ExitError)
 
     expect(mocks.printError).toHaveBeenCalledWith('Failed to start deployment')
+  })
+
+  describe('a build that already exists', () => {
+    const snapshot = JSON.stringify({ type: 'project', id: 'proj_1', environments: {} })
+
+    beforeEach(() => {
+      handlers.LiftBuild = () => ({
+        liftBuild: { success: true, versionId: 'ver_9', versionNumber: 12, yamlSnapshot: snapshot },
+      })
+      handlers.StartVersionDeployment = () => ({
+        startDeployment: { success: true, deploymentIds: ['dep_1'], versionId: 'ver_9' },
+      })
+    })
+
+    it.each([
+      [['--from', 'staging'], { from: 'staging' }],
+      [['--from', 'production'], { from: 'production' }],
+      [['--build', 'v12'], { buildNumber: 12 }],
+      [['--build', '12'], { buildNumber: 12 }],
+    ])('lifts %j without building or reading the local config', async (flags, source) => {
+      await lift(['production', ...flags])
+
+      expect(calls('LiftBuild')[0]?.[1]).toEqual({
+        input: { projectId: 'proj_1', environment: 'production', ...source },
+      })
+      expect(calls('StartVersionDeployment')[0]?.[1]).toMatchObject({
+        environment: 'production',
+        versionId: 'ver_9',
+        config: JSON.parse(snapshot) as unknown,
+      })
+      expect(mocks.resolveYaml).not.toHaveBeenCalled()
+      expect(calls('CreateVersion')).toHaveLength(0)
+      expect(mocks.printError).not.toHaveBeenCalled()
+    })
+
+    it('exits with the API message when the build cannot be lifted', async () => {
+      handlers.LiftBuild = () => ({
+        liftBuild: { success: false, message: 'staging has no live version to lift.' },
+      })
+
+      await expect(lift(['production', '--from', 'staging'])).rejects.toThrow(ExitError)
+
+      expect(mocks.printError).toHaveBeenCalledWith('staging has no live version to lift.')
+      expect(calls('StartVersionDeployment')).toHaveLength(0)
+    })
+
+    it.each([
+      [['--from', 'staging', '--build', '12'], '--from and --build cannot be used together.'],
+      [['--build', 'latest'], '--build must be a build number, such as 12 or v12.'],
+      [['--build', 'v0'], '--build must be a build number, such as 12 or v12.'],
+      [['--from', 'staging', '--force'], '--force cannot be used with --from.'],
+      [
+        ['--build', '12', '--file', 'other.yml', '--var', 'php=8.4'],
+        '--file, --var cannot be used with --build.',
+      ],
+    ])('refuses %j before calling the API', async (flags, message) => {
+      await expect(lift(['production', ...flags])).rejects.toThrow(ExitError)
+
+      expect(mocks.printError).toHaveBeenCalledWith(message)
+      expect(mocks.graphqlRequest).not.toHaveBeenCalled()
+    })
   })
 
   it('cancels every deployment on the first Ctrl+C and exits 130 on the second', async () => {
@@ -659,7 +827,7 @@ describe('lift command', () => {
     __typename: 'LocalBuildCliInputs',
     stepId: 'step_local-build',
     serviceName: 'web',
-    versionNumber: 3,
+    versionTag: 'v3',
     projectId: 'p9ue62',
     projectSlug: 'shop',
     buildCommands: ['npm run build'],
@@ -679,6 +847,7 @@ describe('lift command', () => {
     registryEndpoint: 'https://123.dkr.ecr.us-east-1.amazonaws.com',
     registryUsername: 'AWS',
     registryPassword: 'dG9rZW4=',
+    source: null,
   }
 
   const ARTIFACT_UPLOAD_INPUTS: ArtifactUploadInputs = {
@@ -690,8 +859,9 @@ describe('lift command', () => {
     region: 'us-east-1',
     maxArtifactBytes: 52428800,
     aws: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
-    sourcePath: 'dist',
+    packageSourcePath: 'dist',
     excludePatterns: null,
+    source: null,
   }
 
   it.each<[string, CliInputs]>([
@@ -761,7 +931,7 @@ describe('lift command', () => {
       outputs: {
         containerPush: {
           imageUri: CONTAINER_PUSH_INPUTS.imageUri,
-          localImageTag: CONTAINER_PUSH_INPUTS.localImageTag,
+          localImageTag: 'p9ue62-shop-web:v3',
           success: true,
         },
       },
@@ -819,6 +989,228 @@ describe('lift command', () => {
     expect(calls('CompleteCliStep')).toHaveLength(1)
     expect(mocks.printError).not.toHaveBeenCalled()
     expect(process.exitCode).toBeUndefined()
+  })
+
+  const STILL_CLAIMED = [deployment({ steps: [{ ...PENDING_STEP, cliStatus: 'CLAIMED' }] })]
+
+  it('fails the service with the task error and cancels the deployment when the step failure cannot be recorded', async () => {
+    mocks.executeCliTask.mockRejectedValue(new Error('docker push denied: unauthorized'))
+    handlers.FailCliStep = () => {
+      throw new GantryApiError('Gantry API is temporarily unavailable. (HTTP 503)', undefined, 503)
+    }
+    sequence([], [deployment({ steps: [PENDING_STEP] })], STILL_CLAIMED)
+
+    await lift(['production'])
+
+    expect(calls('FailCliStep')[0][1]).toEqual({
+      stepId: 'step_1',
+      error: 'docker push denied: unauthorized',
+    })
+    expect(calls('CancelLiftDeployment')[0][1]).toEqual({ id: 'dep_1' })
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Deployment failed: 1 of 1 service did not succeed'
+    )
+    expect(process.exitCode).toBe(1)
+  })
+
+  it.each([
+    [
+      'is rejected',
+      () => ({ failCliStep: { success: false, message: 'Step is not claimed by a CLI.' } }),
+    ],
+    [
+      'fails',
+      () => {
+        throw new Error('fetch failed')
+      },
+    ],
+  ])(
+    'cancels the deployment when a claim request fails and the step failure %s',
+    async (_case, failCliStep) => {
+      handlers.ClaimStep = () => {
+        throw new GantryApiError(
+          'Gantry API encountered an internal error. (HTTP 500)',
+          undefined,
+          500
+        )
+      }
+      handlers.FailCliStep = failCliStep
+      sequence([], [deployment({ steps: [PENDING_STEP] })], STILL_CLAIMED)
+
+      await lift(['production'])
+
+      expect(calls('FailCliStep')[0][1]).toEqual({
+        stepId: 'step_1',
+        error: 'The CLI could not claim the step.',
+      })
+      expect(calls('CancelLiftDeployment')[0][1]).toEqual({ id: 'dep_1' })
+      expect(mocks.executeCliTask).not.toHaveBeenCalled()
+      expect(process.exitCode).toBe(1)
+    }
+  )
+
+  it('times out a service after five minutes on a claimed step this CLI is not running', async () => {
+    let failedAt = 0
+    handlers.FailCliStep = () => {
+      failedAt = Date.now()
+      return { failCliStep: { success: true } }
+    }
+    const start = Date.now()
+    sequence([], STILL_CLAIMED)
+
+    await lift(['production'])
+
+    expect(mocks.executeCliTask).not.toHaveBeenCalled()
+    expect(calls('FailCliStep').map((call) => call[1] as unknown)).toEqual([
+      { stepId: 'step_1', error: 'The CLI stopped waiting for the step to finish.' },
+    ])
+    expect(failedAt - start).toBeGreaterThanOrEqual(5 * 60 * 1000)
+    expect(failedAt - start).toBeLessThan(6 * 60 * 1000)
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Deployment failed: 1 of 1 service did not succeed'
+    )
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('does not time out a server step that runs unchanged for longer than five minutes', async () => {
+    const start = Date.now()
+    byVersionScript(() =>
+      Date.now() - start < 8 * 60 * 1000
+        ? [
+            deployment({
+              lastMessage: 'Creating database',
+              steps: [
+                { ...PENDING_STEP, status: 'PROCESSING', executor: 'WORKER', cliStatus: null },
+              ],
+            }),
+          ]
+        : [deployment({ status: 'COMPLETE' }), ROUTING_PENDING]
+    )
+
+    await lift(['production'])
+
+    expect(calls('FailCliStep')).toHaveLength(0)
+    expect(calls('CancelLiftDeployment')).toHaveLength(0)
+    expect(mocks.printError).not.toHaveBeenCalled()
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it('fails the step when the API does not accept its result', async () => {
+    handlers.CompleteCliStep = () => ({
+      completeCliStep: { success: false, message: 'The step outputs are invalid.' },
+    })
+    sequence(
+      [],
+      [deployment({ steps: [PENDING_STEP] })],
+      [deployment({ status: 'FAILED', lastMessage: 'There was an error while uploading.' })]
+    )
+
+    await lift(['production'])
+
+    expect(calls('FailCliStep')[0][1]).toEqual({
+      stepId: 'step_1',
+      error: 'The step outputs are invalid.',
+    })
+    expect(process.exitCode).toBe(1)
+  })
+
+  function twoServices() {
+    handlers.StartLiftDeployment = () => ({
+      startDeployment: {
+        success: true,
+        deployment: { id: 'dep_1', projectName: 'Shop' },
+        deploymentIds: ['dep_1', 'dep_2'],
+        versionId: 'ver_1',
+      },
+    })
+    handlers.ClaimStep = ({ stepId }) => ({
+      claimStep: {
+        success: true,
+        step: { ...PENDING_STEP, id: stepId, cliInputs: { ...OBJECT_INPUTS, stepId } },
+      },
+    })
+  }
+
+  it("runs a second service's step while the first service's step is still running", async () => {
+    twoServices()
+    const completedAt = new Map<string, number>()
+    handlers.CompleteCliStep = ({ stepId }) => {
+      completedAt.set(stepId as string, Date.now())
+      return { completeCliStep: { success: true } }
+    }
+    mocks.executeCliTask.mockImplementation((inputs: ObjectUploadInputs) =>
+      inputs.stepId === 'step_web'
+        ? new Promise((resolve) =>
+            setTimeout(
+              () => {
+                resolve(OBJECT_RESULT)
+              },
+              3 * 60 * 1000
+            )
+          )
+        : Promise.resolve(OBJECT_RESULT)
+    )
+    const start = Date.now()
+    byVersionScript(() => [
+      completedAt.has('step_web')
+        ? deployment({ status: 'COMPLETE' })
+        : deployment({ steps: [{ ...PENDING_STEP, id: 'step_web' }] }),
+      completedAt.has('step_worker')
+        ? deployment({ id: 'dep_2', serviceName: 'worker', status: 'COMPLETE' })
+        : deployment({
+            id: 'dep_2',
+            serviceName: 'worker',
+            steps: [{ ...PENDING_STEP, id: 'step_worker' }],
+          }),
+      ROUTING_PENDING,
+    ])
+
+    await lift(['production'])
+
+    expect(calls('ClaimStep').map((call) => call[1] as unknown)).toEqual([
+      { stepId: 'step_web' },
+      { stepId: 'step_worker' },
+    ])
+    expect(completedAt.get('step_worker')).toBeLessThan(start + 60 * 1000)
+    expect(completedAt.get('step_web')).toBeGreaterThanOrEqual(start + 3 * 60 * 1000)
+    expect(mocks.printError).not.toHaveBeenCalled()
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it('reports a service that failed while another service is still running its step', async () => {
+    twoServices()
+    let webDone = false
+    mocks.executeCliTask.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () => {
+              webDone = true
+              resolve(OBJECT_RESULT)
+            },
+            3 * 60 * 1000
+          )
+        )
+    )
+    let workerSettledWhileWebRan = false
+    byVersionScript(() => {
+      if (calls('ClaimStep').length > 0 && !webDone) workerSettledWhileWebRan = true
+      return [
+        webDone
+          ? deployment({ status: 'COMPLETE' })
+          : deployment({ steps: [{ ...PENDING_STEP, id: 'step_web' }] }),
+        deployment({ id: 'dep_2', serviceName: 'worker', status: 'FAILED', lastMessage: 'OOM' }),
+      ]
+    })
+
+    await lift(['production'])
+
+    expect(workerSettledWhileWebRan).toBe(true)
+    expect(calls('ClaimStep')).toHaveLength(1)
+    expect(mocks.printError).toHaveBeenCalledWith(
+      'Deployment failed: 1 of 2 services did not succeed'
+    )
   })
 
   it('reports a setup command that cannot start', async () => {
@@ -888,8 +1280,26 @@ describe('lift command', () => {
     expect(args).toContain('NODE_ENV=production')
   })
 
+  it('tags the image with the version id on a preview, whose builds have no number', async () => {
+    withSetup({ builds: { api: { dockerfile: 'Dockerfile' } } })
+    handlers.CreateVersion = () => ({
+      createVersion: {
+        success: true,
+        versionId: 'kq3v9a',
+        message: null,
+        versionNumber: null,
+        projectId: 'p9ue62',
+        projectSlug: 'shop',
+      },
+    })
+
+    await lift(['production'])
+
+    const args = mocks.runDocker.mock.calls[0]?.[0] as string[]
+    expect(args[args.indexOf('-t') + 1]).toBe('p9ue62-shop-api:kq3v9a')
+  })
+
   it.each([
-    { versionNumber: null, projectId: 'p9ue62', projectSlug: 'shop' },
     { versionNumber: 3, projectId: null, projectSlug: 'shop' },
     { versionNumber: 3, projectId: 'p9ue62', projectSlug: null },
   ])(
@@ -916,7 +1326,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('DeploymentsByVersion')).toHaveLength(0)
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(mocks.printError).not.toHaveBeenCalled()
     expect(process.exitCode).toBeUndefined()
   })
@@ -942,7 +1352,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(mocks.printError).not.toHaveBeenCalled()
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
   })
 
   it('gives up after ten consecutive network errors without an HTTP status', async () => {
@@ -980,7 +1390,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(mocks.printError).toHaveBeenCalledWith(
       'Deployment failed: 2 of 2 services did not succeed'
     )
@@ -995,7 +1405,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
     expect(mocks.printError).not.toHaveBeenCalled()
   })
 
@@ -1004,7 +1414,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(calls('DeploymentsByVersion').length).toBeGreaterThan(50)
     expect(mocks.printHeading).not.toHaveBeenCalled()
     expect(mocks.printError).not.toHaveBeenCalled()
@@ -1021,7 +1431,7 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('CancelLiftDeployment')[0][1]).toEqual({ id: 'dep_1' })
-    expect(calls('GetLiftDeployment')).toHaveLength(0)
+    expect(calls('GetRoutingDeployment')).toHaveLength(0)
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
@@ -1029,7 +1439,7 @@ describe('lift command', () => {
     handlers.CancelLiftDeployment = () => {
       throw new Error('Deployment already complete')
     }
-    handlers.GetLiftDeployment = () => {
+    handlers.GetRoutingDeployment = () => {
       sigintHandler()()
       return { deployment: { id: 'dep_r', status: 'RUNNING' } }
     }
@@ -1037,23 +1447,32 @@ describe('lift command', () => {
     await lift(['production'])
 
     expect(calls('CancelLiftDeployment')).toHaveLength(1)
-    expect(calls('GetLiftDeployment')).toHaveLength(1)
+    expect(calls('GetRoutingDeployment')).toHaveLength(1)
     expect(calls('VersionRouteUrls')).toHaveLength(0)
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
-  it('settles on a cancelled routing deployment without fetching URLs', async () => {
-    handlers.GetLiftDeployment = () => ({ deployment: { id: 'dep_r', status: 'CANCELLED' } })
+  it.each([
+    ['CANCELLED', 'Routing was cancelled'],
+    ['SKIPPED', 'Routing was skipped - A newer deployment already replaced this one.'],
+  ])('exits non-zero on a %s routing deployment without fetching URLs', async (status, error) => {
+    handlers.GetRoutingDeployment = () => ({
+      deployment: {
+        id: 'dep_r',
+        status,
+        lastMessage: status === 'SKIPPED' ? 'A newer deployment already replaced this one.' : null,
+      },
+    })
 
-    await lift(['production'])
+    await expect(lift(['production'])).rejects.toThrow(ExitError)
 
     expect(calls('VersionRouteUrls')).toHaveLength(0)
-    expect(mocks.printError).not.toHaveBeenCalled()
+    expect(mocks.printError).toHaveBeenCalledWith(error)
   })
 
   it('retries routing polls and tolerates failed URL and DNS lookups', async () => {
     let call = 0
-    handlers.GetLiftDeployment = () => {
+    handlers.GetRoutingDeployment = () => {
       call++
       if (call === 1) throw new Error('socket hang up')
       return { deployment: { id: 'dep_r', status: 'COMPLETE', lastMessage: 'Routes applied' } }
@@ -1067,7 +1486,7 @@ describe('lift command', () => {
 
     await lift(['production'])
 
-    expect(calls('GetLiftDeployment')).toHaveLength(2)
+    expect(calls('GetRoutingDeployment')).toHaveLength(2)
     expect(mocks.printHeading).not.toHaveBeenCalled()
     expect(mocks.printError).not.toHaveBeenCalled()
   })

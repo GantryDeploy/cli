@@ -76,10 +76,12 @@ describe('run command', () => {
     const program = new Command().enablePositionalOptions()
     program.exitOverride()
     registerRunCommand(program)
-    const error: unknown = await program.parseAsync(['node', 'gantry', 'run', ...args]).then(
-      () => undefined,
-      (caught: unknown) => caught
-    )
+    const error: unknown = await program
+      .parseAsync(['node', 'gantry', 'run', '--env', 'dev', ...args])
+      .then(
+        () => undefined,
+        (caught: unknown) => caught
+      )
     if (!(error instanceof ExitError)) throw new Error('expected the command to exit')
     return error
   }

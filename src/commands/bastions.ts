@@ -17,9 +17,13 @@ import {
   nonDestroyed,
   selectBastion,
 } from '../lib/bastion-prompts'
+import { privateBastionTransport } from '../lib/bastion-transports'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
+
+import { joinCommand } from './shell'
 
 interface TempKeyFile {
   keyPath: string
@@ -65,23 +69,45 @@ function assertEd25519PublicKey(hostPublicKey: string): void {
   }
 }
 
+/** How `ssh` reaches a bastion: its public address, or the bastion's slug through `gantry bastions proxy`. */
+export interface SshRoute {
+  host: string
+  proxyCommand: string | null
+}
+
+export function sshRoute(bastion: Pick<Bastion, 'slug' | 'publicAccess' | 'publicIp'>): SshRoute {
+  if (bastion.publicAccess) {
+    if (!bastion.publicIp) throw new Error('Bastion host does not have a public IP address yet.')
+    return { host: bastion.publicIp, proxyCommand: null }
+  }
+  return { host: bastion.slug, proxyCommand: `gantry bastions proxy ${bastion.slug}` }
+}
+
 export function manualConnectHints(
   keyFile: string,
-  publicIp: string,
+  route: SshRoute,
   sshUser: string,
   hostPublicKey: string | null
 ): string[] {
   const hint = (label: string, command: string) => `  ${`${label}:`.padEnd(17)}${command}`
-  if (!hostPublicKey) return [hint('Connect', `ssh -i ${keyFile} ${sshUser}@${publicIp}`)]
+  const proxy = route.proxyCommand ? ` -o ProxyCommand='${route.proxyCommand}'` : ''
+  if (!hostPublicKey) {
+    return [hint('Connect', `ssh -i ${keyFile}${proxy} ${sshUser}@${route.host}`)]
+  }
 
   assertEd25519PublicKey(hostPublicKey)
   return [
-    hint('Trust host key', `echo '${publicIp} ${hostPublicKey}' >> ~/.ssh/known_hosts`),
+    hint('Trust host key', `echo '${route.host} ${hostPublicKey}' >> ~/.ssh/known_hosts`),
     hint(
       'Connect',
-      `ssh -i ${keyFile} -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 ${sshUser}@${publicIp}`
+      `ssh -i ${keyFile}${proxy} -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 ${sshUser}@${route.host}`
     ),
   ]
+}
+
+/** Runs this same CLI as the ProxyCommand, so it works without `gantry` on PATH. */
+export function selfProxyCommand(slug: string): string {
+  return joinCommand([process.execPath, process.argv[1], 'bastions', 'proxy', slug])
 }
 
 /**
@@ -111,6 +137,15 @@ export function hostKeyCheckingArgs(
   ]
 }
 
+interface CreateBastionOptions {
+  cloud?: string
+  network?: string
+  name?: string
+  slug?: string
+  public?: boolean
+  allowCidr?: string[]
+}
+
 function withTrailingNewline(value: string): string {
   return value.endsWith('\n') ? value : `${value}\n`
 }
@@ -122,7 +157,7 @@ function isFileExistsError(error: unknown): boolean {
 export function registerBastionsCommand(program: Command): void {
   const bastionsCmd = program.command('bastions').description('Manage bastion hosts')
 
-  bastionsCmd
+  const listCmd = bastionsCmd
     .command('list')
     .description('List all bastion hosts')
     .action(async () => {
@@ -135,7 +170,7 @@ export function registerBastionsCommand(program: Command): void {
         }
 
         const table = createTable({
-          head: ['Slug', 'Name', 'Status', 'Public IP', 'Created'],
+          head: ['Slug', 'Name', 'Status', 'Access', 'Created'],
         })
 
         for (const bastion of bastions) {
@@ -143,7 +178,7 @@ export function registerBastionsCommand(program: Command): void {
             bastion.slug,
             bastion.name,
             bastion.status.toUpperCase(),
-            bastion.publicIp ?? '—',
+            bastion.publicAccess ? (bastion.publicIp ?? 'public') : 'private',
             formatDate(bastion.createdAt),
           ])
         }
@@ -155,8 +190,9 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
-    .command('ssh [slug]')
+  const sshCmd = bastionsCmd
+    .command('ssh')
+    .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Connect to a bastion host via SSH')
     .option('-u, --user <user>', "SSH username (defaults to the bastion's user)")
     .action(async (slug: string | undefined, options: { user?: string }) => {
@@ -184,18 +220,15 @@ export function registerBastionsCommand(program: Command): void {
           process.exit(1)
         }
 
-        const { publicIp } = bastion
-        if (!publicIp) {
-          printError('Bastion host does not have a public IP address yet.')
-          process.exit(1)
-        }
+        const route = sshRoute(bastion)
+        if (route.proxyCommand) privateBastionTransport(bastion.provider).assertReady()
 
         const credentials = await fetchBastionCredentials(bastion.slug)
 
         const { keyPath, cleanup } = createTempKeyFile(credentials.privateKey)
 
         console.log(
-          `Connecting to ${sanitizeTerminal(bastion.name)} (${sanitizeTerminal(publicIp)})...`
+          `Connecting to ${sanitizeTerminal(bastion.name)} (${sanitizeTerminal(route.host)})...`
         )
 
         let sshProcess: ReturnType<typeof spawn>
@@ -205,8 +238,11 @@ export function registerBastionsCommand(program: Command): void {
             [
               '-i',
               keyPath,
-              ...hostKeyCheckingArgs(keyPath, publicIp, credentials.hostPublicKey),
-              `${options.user ?? credentials.sshUser}@${publicIp}`,
+              ...(route.proxyCommand
+                ? ['-o', `ProxyCommand=${selfProxyCommand(bastion.slug)}`]
+                : []),
+              ...hostKeyCheckingArgs(keyPath, route.host, credentials.hostPublicKey),
+              `${options.user ?? credentials.sshUser}@${route.host}`,
             ],
             {
               stdio: 'inherit',
@@ -233,8 +269,9 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
-    .command('key [slug]')
+  const keyCmd = bastionsCmd
+    .command('key')
+    .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Display the SSH private key for a bastion host')
     .option('-o, --output <path>', 'Write the key to a new file (mode 0600) instead of stdout')
     .action(async (slug: string | undefined, options: { output?: string }) => {
@@ -258,11 +295,11 @@ export function registerBastionsCommand(program: Command): void {
         }
 
         const { privateKey, sshUser, hostPublicKey } = await fetchBastionCredentials(bastion.slug)
-        const { publicIp } = bastion
         const keyFile = options.output ? resolve(options.output) : `~/.ssh/${bastion.slug}.pem`
-        const connectHints = publicIp
-          ? manualConnectHints(keyFile, publicIp, sshUser, hostPublicKey)
-          : []
+        const connectHints =
+          bastion.publicAccess && !bastion.publicIp
+            ? []
+            : manualConnectHints(keyFile, sshRoute(bastion), sshUser, hostPublicKey)
 
         if (options.output) {
           const outputPath = keyFile
@@ -304,14 +341,47 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
+  const proxyCmd = bastionsCmd
+    .command('proxy')
+    .argument('<slug>', 'Bastion slug')
+    .description(
+      "Connect stdin and stdout to a private bastion's SSH port, for use as an ssh ProxyCommand"
+    )
+    .action(async (slug: string) => {
+      // stdout carries the SSH stream, so every message goes to stderr.
+      let exitCode: number
+      try {
+        const bastion = await fetchBastion(slug)
+        if (!bastion) throw new Error(`Bastion host not found: ${slug}`)
+        exitCode = await privateBastionTransport(bastion.provider).proxy(slug)
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+      process.exit(exitCode)
+    })
+
+  const createCmd = bastionsCmd
     .command('create')
     .description('Create a new bastion host')
     .option('--cloud <id>', 'Cloud account ID')
-    .option('--network <id>', 'Network ID (must have public subnets)')
+    .option('--network <id>', 'Network ID')
     .option('--name <name>', 'Bastion name')
     .option('--slug <slug>', 'Bastion slug (auto-generated from name if omitted)')
-    .action(async (options: { cloud?: string; network?: string; name?: string; slug?: string }) => {
+    .option(
+      '--public',
+      'Give the bastion a public address that takes SSH. Without it the bastion has no inbound access and is reached through the CLI. Fixed at create.'
+    )
+    .option(
+      '--allow-cidr <cidr>',
+      'CIDR block allowed to SSH to a public bastion (repeatable; default: any address)',
+      (cidr: string, previous: string[] | undefined) => [...(previous ?? []), cidr]
+    )
+    .action(async (options: CreateBastionOptions) => {
+      if (options.allowCidr && !options.public) {
+        printError('--allow-cidr applies only with --public.')
+        process.exit(1)
+      }
       try {
         const bastion = await createBastionInteractive({
           cloudAccountId: options.cloud,
@@ -319,6 +389,8 @@ export function registerBastionsCommand(program: Command): void {
           name: options.name,
           slug: options.slug,
           waitForActive: false,
+          publicAccess: options.public === true,
+          allowedCidrs: options.allowCidr,
         })
 
         printSuccess(`Bastion created: ${bastion.name} (${bastion.slug})`)
@@ -328,8 +400,9 @@ export function registerBastionsCommand(program: Command): void {
       }
     })
 
-  bastionsCmd
-    .command('destroy [slug]')
+  const destroyCmd = bastionsCmd
+    .command('destroy')
+    .argument('[slug]', 'Bastion slug (prompts to pick one when omitted)')
     .description('Destroy a bastion host')
     .action(async (slug: string | undefined) => {
       try {
@@ -366,4 +439,45 @@ export function registerBastionsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(bastionsCmd, [
+    { command: 'gantry bastions list', description: "List the team's bastion hosts" },
+    { command: 'gantry bastions ssh ops-bastion', description: 'Connect to a bastion over SSH' },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry bastions list', description: "List the team's bastion hosts" },
+  ])
+  addExamples(sshCmd, [
+    { command: 'gantry bastions ssh', description: 'Pick a bastion and connect to it' },
+    {
+      command: 'gantry bastions ssh ops-bastion --user ubuntu',
+      description: 'Connect to a bastion as a different user',
+    },
+  ])
+  addExamples(keyCmd, [
+    {
+      command: 'gantry bastions key ops-bastion --output ~/.ssh/ops-bastion.pem',
+      description: "Save a bastion's private key to a new file",
+    },
+  ])
+  addExamples(proxyCmd, [
+    {
+      command: 'gantry bastions proxy ops-bastion',
+      description: "Relay a private bastion's SSH port, as an ssh ProxyCommand runs it",
+    },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry bastions create',
+      description: 'Create a bastion, prompting for each setting',
+    },
+    {
+      command:
+        'gantry bastions create --cloud c4xp9w --network n8kd2q --name "Ops bastion" --public --allow-cidr 203.0.113.0/24',
+      description: 'Create a public bastion that takes SSH from one office range',
+    },
+  ])
+  addExamples(destroyCmd, [
+    { command: 'gantry bastions destroy ops-bastion', description: 'Destroy a bastion host' },
+  ])
 }

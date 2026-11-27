@@ -228,6 +228,16 @@ describe('client', () => {
         expect(mockFetch).toHaveBeenCalledTimes(10)
       })
 
+      it('makes one attempt on HTTP 503 when the caller retries on its own', async () => {
+        mockFetch.mockResolvedValue(textResponse('Service Unavailable', 503))
+
+        await expect(
+          runWithTimers(graphqlRequest('query { test }', undefined, { retry: false }))
+        ).rejects.toThrow('HTTP 503')
+
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      })
+
       it('does not retry HTTP 400', async () => {
         mockFetch.mockResolvedValue(textResponse('Bad Request', 400))
 

@@ -12,9 +12,11 @@ import type {
   GetDeploymentVersionsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { selectEnvironment, selectProject } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
+import { versionTag } from '../lib/version-tag'
 
 const DEPLOYMENT_QUERY = /* GraphQL */ `
   query GetDeployment($id: String!) {
@@ -69,8 +71,9 @@ const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
 export function registerDeploymentsCommand(program: Command): void {
   const deploymentsCmd = program.command('deployments').description('Manage deployments')
 
-  deploymentsCmd
-    .command('show <id>')
+  const showCmd = deploymentsCmd
+    .command('show')
+    .argument('<id>', 'Deployment ID')
     .description('Show deployment details')
     .action(async (id: string) => {
       try {
@@ -99,18 +102,18 @@ export function registerDeploymentsCommand(program: Command): void {
       }
     })
 
-  deploymentsCmd
+  const listCmd = deploymentsCmd
     .command('list')
     .description('List deployments for a version')
     .option('--version <id>', 'Version ID')
     .option('--project <id>', 'Project ID (used to find version interactively)')
-    .option('--environment <id>', 'Environment ID (used to find version interactively)')
-    .action(async (options: { version?: string; project?: string; environment?: string }) => {
+    .option('-e, --env <environment>', 'Environment name (used to find version interactively)')
+    .action(async (options: { version?: string; project?: string; env?: string }) => {
       try {
         let versionId = options.version
         if (!versionId) {
           const projectId = options.project ?? (await selectProject())
-          const environmentId = options.environment ?? (await selectEnvironment(projectId))
+          const environmentId = await selectEnvironment(projectId, options.env)
 
           const versionsData = await graphqlRequest<
             GetDeploymentVersionsQuery,
@@ -125,7 +128,7 @@ export function registerDeploymentsCommand(program: Command): void {
           versionId = await select({
             message: 'Select a version:',
             choices: versionsData.versionsByProject.map((v) => ({
-              name: `v${String(v.number)}${v.gitRef ? ` (${v.gitRef})` : ''}`,
+              name: `${versionTag(v.id, v.number)}${v.gitRef ? ` (${v.gitRef})` : ''}`,
               value: v.id,
             })),
           })
@@ -164,8 +167,9 @@ export function registerDeploymentsCommand(program: Command): void {
       }
     })
 
-  deploymentsCmd
-    .command('cancel <id>')
+  const cancelCmd = deploymentsCmd
+    .command('cancel')
+    .argument('<id>', 'Deployment ID')
     .description('Cancel a deployment')
     .action(async (id: string) => {
       try {
@@ -186,4 +190,28 @@ export function registerDeploymentsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(deploymentsCmd, [
+    {
+      command: 'gantry deployments list --version v3hz7k',
+      description: "List a version's deployments",
+    },
+    { command: 'gantry deployments show d5mr8t', description: "Show a deployment's steps" },
+  ])
+  addExamples(showCmd, [
+    { command: 'gantry deployments show d5mr8t', description: "Show a deployment's steps" },
+  ])
+  addExamples(listCmd, [
+    {
+      command: 'gantry deployments list --version v3hz7k',
+      description: "List a version's deployments",
+    },
+    {
+      command: 'gantry deployments list --project p9ue62 --env staging',
+      description: 'Pick the version from a project environment',
+    },
+  ])
+  addExamples(cancelCmd, [
+    { command: 'gantry deployments cancel d5mr8t', description: 'Cancel a deployment in progress' },
+  ])
 }

@@ -311,7 +311,7 @@ function skipString(document: string, start: number): number {
  * was never established.
  *
  * Never retries 4xx responses, authentication errors, or connection refused /
- * host not found.
+ * host not found. Pass `retry: false` from a caller that runs its own retry loop.
  */
 export async function graphqlRequest<
   TData,
@@ -322,7 +322,7 @@ export async function graphqlRequest<
   variables?: TVariables,
   // `gantry login` verifies a token before it is written to disk, so it has one
   // in hand that `loadToken` cannot see yet.
-  options?: { token?: string; idempotent?: false }
+  options?: { token?: string; idempotent?: false; retry?: false }
 ): Promise<TData> {
   const token = options?.token ?? loadToken()
 
@@ -335,9 +335,10 @@ export async function graphqlRequest<
   const apiUrl = getApiUrl()
   const mutation = isMutationDocument(query)
   const idempotencyKey = mutation && options?.idempotent !== false ? randomUUID() : undefined
+  const attempts = options?.retry === false ? 1 : MAX_RETRIES
   let lastError: Error | undefined
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       return await executeGraphqlRequest<TData>(apiUrl, token, query, variables, idempotencyKey)
     } catch (error) {
@@ -347,7 +348,7 @@ export async function graphqlRequest<
         throw error
       }
 
-      if (attempt < MAX_RETRIES - 1) {
+      if (attempt < attempts - 1) {
         const delay = getRetryDelay(attempt)
         await sleep(delay)
       }

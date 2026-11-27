@@ -251,7 +251,7 @@ describe('filesystems command', () => {
         run(['create', '--cloud', 'cloud_2', '--network', 'q8vm3t', '--name', 'Uploads'])
       ).rejects.toThrow(ExitError)
 
-      expect(printedErrors()).toContain("This cloud doesn't support filesystems yet.")
+      expect(printedErrors()).toContain('The filesystem configuration is not valid.')
       expect(select).not.toHaveBeenCalled()
       expect(graphqlRequest).not.toHaveBeenCalled()
     })

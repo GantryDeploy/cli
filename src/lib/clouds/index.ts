@@ -27,8 +27,12 @@ export function toCloudProvider(value: string): CloudProviderEnum {
   return match
 }
 
-export function unsupportedCloud(feature: string): string {
-  return `This cloud doesn't support ${feature} yet.`
+export function invalidConfiguration(resource: string): string {
+  return `The ${resource} configuration is not valid.`
+}
+
+export function noTypesForCloud(resource: string): string {
+  return `This cloud has no ${resource} types.`
 }
 
 /** Resource rows report their cloud in lowercase (`aws`), cloud accounts as the enum (`AWS`). */

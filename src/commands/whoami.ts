@@ -2,6 +2,7 @@ import type { Command } from 'commander'
 
 import type { WhoAmIQuery, WhoAmIQueryVariables } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { printError } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
 
@@ -23,7 +24,7 @@ const WHOAMI_QUERY = /* GraphQL */ `
 `
 
 export function registerWhoamiCommand(program: Command): void {
-  program
+  const whoamiCmd = program
     .command('whoami')
     .description('Display information about the authenticated user/token')
     .action(async () => {
@@ -59,4 +60,8 @@ export function registerWhoamiCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(whoamiCmd, [
+    { command: 'gantry whoami', description: 'Show the token in use, and the teams it covers' },
+  ])
 }

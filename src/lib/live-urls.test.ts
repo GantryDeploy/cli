@@ -1,128 +1,160 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildLiveUrlLines } from './live-urls'
-import type { VersionRouteUrl } from './live-urls'
-
-const route = (
-  over: Partial<VersionRouteUrl> & Pick<VersionRouteUrl, 'url' | 'domain'>
-): VersionRouteUrl => ({
-  path: '/*',
-  serviceName: 'web',
-  ...over,
-})
 
 describe('buildLiveUrlLines', () => {
-  it('renders a catch-all-only domain as a single primary line', () => {
+  it('lists every path of a hostname as written, including the root, in aligned columns', () => {
     const lines = buildLiveUrlLines([
-      route({ url: 'https://app.example.com', domain: 'app.example.com', path: '/*' }),
-    ])
-
-    expect(lines).toEqual(['  https://app.example.com  → web'])
-  })
-
-  it('nests sub-paths under the catch-all root with their cache label', () => {
-    const lines = buildLiveUrlLines([
-      route({
-        url: 'https://nextjs.example.com/_next/static',
-        domain: 'nextjs.example.com',
-        path: '/_next/static/*',
-        serviceName: 'web-zip',
-        cache: 'cached 1y',
-      }),
-      route({
-        url: 'https://nextjs.example.com',
-        domain: 'nextjs.example.com',
-        path: '/*',
-        serviceName: 'web-zip',
-        cache: 'no-cache',
-      }),
+      {
+        url: 'https://parent.pvtest.api-testing.dev',
+        domain: 'parent.pvtest.api-testing.dev',
+        path: '/',
+        serviceName: 'site',
+        cache: 'cached 5m',
+        firewall: 'edge-waf',
+      },
+      {
+        url: 'https://parent.pvtest.api-testing.dev/b',
+        domain: 'parent.pvtest.api-testing.dev',
+        path: '/b/*',
+        serviceName: 'site-b',
+        cache: 'cached 5m',
+        firewall: 'edge-waf',
+      },
     ])
 
     expect(lines).toEqual([
-      '  https://nextjs.example.com  → web-zip',
-      '    /_next/static/*  web-zip  (cached 1y)',
+      '  https://parent.pvtest.api-testing.dev',
+      '    /      site     cached 5m   firewall: edge-waf',
+      '    /b/*   site-b   cached 5m   firewall: edge-waf',
     ])
   })
 
-  it('shows a sub-path as its own top-level URL when this version owns no catch-all (cross-project domain)', () => {
-    // Another project owns the root of site.example.com; this version owns only /blog.
+  it('labels a path with no cache setting as not cached and no firewall as none', () => {
     const lines = buildLiveUrlLines([
-      route({
-        url: 'https://site.example.com/blog',
-        domain: 'site.example.com',
-        path: '/blog/*',
-        serviceName: 'blog',
-        cache: 'cached 5m',
-      }),
-    ])
-
-    expect(lines).toEqual(['  https://site.example.com/blog  → blog  (cached 5m)'])
-    expect(lines.some((l) => l.trim() === 'site.example.com')).toBe(false)
-  })
-
-  it('lists every sub-path as a top-level URL when a domain has multiple non-root paths', () => {
-    const lines = buildLiveUrlLines([
-      route({
-        url: 'https://shop.example.com/api',
+      {
+        url: 'https://shop.example.com/checkout',
         domain: 'shop.example.com',
-        path: '/api/*',
+        path: '/checkout',
         serviceName: 'api',
-      }),
-      route({
-        url: 'https://shop.example.com/blog',
-        domain: 'shop.example.com',
-        path: '/blog/*',
-        serviceName: 'blog',
-      }),
+        cache: null,
+        firewall: null,
+      },
     ])
 
-    expect(lines).toHaveLength(2)
-    expect(lines[0]).toMatch(/^ {2}https:\/\/shop\.example\.com\/api {2,}→ api$/)
-    expect(lines[1]).toBe('  https://shop.example.com/blog  → blog')
-    expect(new Set(lines.map((l) => l.indexOf('→'))).size).toBe(1)
+    expect(lines).toEqual([
+      '  https://shop.example.com',
+      '    /checkout   api   not cached   firewall: none',
+    ])
   })
 
-  it('groups multiple domains independently, mixing nested and top-level layouts', () => {
+  it('groups each hostname separately, aligning columns within each', () => {
     const lines = buildLiveUrlLines([
-      route({
+      {
         url: 'https://a.example.com',
         domain: 'a.example.com',
         path: '/*',
-        serviceName: 'web-a',
-      }),
-      route({
+        serviceName: 'web',
+        cache: 'not cached',
+        firewall: 'shop-waf',
+      },
+      {
         url: 'https://a.example.com/assets',
         domain: 'a.example.com',
         path: '/assets/*',
-        serviceName: 'web-a',
+        serviceName: 'web',
         cache: 'cached 1y',
-      }),
-      route({
+        firewall: 'shop-waf',
+      },
+      {
         url: 'https://b.example.com/blog',
         domain: 'b.example.com',
         path: '/blog/*',
         serviceName: 'blog',
-      }),
+        cache: 'cached 5m',
+        firewall: null,
+      },
     ])
 
-    expect(lines).toHaveLength(3)
-    expect(lines[0]).toMatch(/^ {2}https:\/\/a\.example\.com {2,}→ web-a$/)
-    expect(lines[1]).toBe('    /assets/*  web-a  (cached 1y)')
-    expect(lines[2]).toBe('  https://b.example.com/blog  → blog')
-    // Both top-level lines put the service column at the same offset.
-    expect(new Set([lines[0], lines[2]].map((l) => l.indexOf('→'))).size).toBe(1)
+    expect(lines).toEqual([
+      '  https://a.example.com',
+      '    /*          web   not cached   firewall: shop-waf',
+      '    /assets/*   web   cached 1y    firewall: shop-waf',
+      '  https://b.example.com',
+      '    /blog/*   blog   cached 5m   firewall: none',
+    ])
   })
 
-  it('omits the cache annotation when a route has none', () => {
+  it('takes the hostname from the URL when the route has no domain', () => {
     const lines = buildLiveUrlLines([
-      route({
-        url: 'https://app.example.com/blog',
-        domain: 'app.example.com',
-        path: '/blog/*',
-        serviceName: 'blog',
-      }),
+      { url: 'https://app.example.com/docs', path: '/docs/*', serviceName: 'docs' },
     ])
 
-    expect(lines).toEqual(['  https://app.example.com/blog  → blog'])
+    expect(lines[0]).toBe('  https://app.example.com')
+  })
+
+  it('marks locked routes and names the hostname to set up once', () => {
+    const lines = buildLiveUrlLines([
+      {
+        url: 'https://shop.example.com',
+        domain: 'shop.example.com',
+        path: '/',
+        serviceName: 'web',
+        cache: null,
+        firewall: 'edge-waf',
+        originLock: 'cloudflare',
+      },
+      {
+        url: 'https://shop.example.com/api',
+        domain: 'shop.example.com',
+        path: '/api/*',
+        serviceName: 'api',
+        cache: null,
+        firewall: 'edge-waf',
+        originLock: 'cloudflare',
+      },
+      {
+        url: 'https://status.example.com',
+        domain: 'status.example.com',
+        path: '/',
+        serviceName: 'status',
+        cache: null,
+        firewall: null,
+        originLock: null,
+      },
+    ])
+
+    expect(lines).toEqual([
+      '  https://shop.example.com',
+      '    /        web   not cached   firewall: edge-waf   locked: cloudflare',
+      '    /api/*   api   not cached   firewall: edge-waf   locked: cloudflare',
+      '  https://status.example.com',
+      '    /   status   not cached   firewall: none',
+      '',
+      '  Locked hostnames refuse requests without their header. Run gantry origin-lock show shop.example.com to set it up in Cloudflare.',
+    ])
+  })
+
+  it('leaves the hostname as a placeholder when more than one is locked', () => {
+    const lines = buildLiveUrlLines([
+      {
+        url: 'https://shop.example.com',
+        domain: 'shop.example.com',
+        path: '/',
+        serviceName: 'web',
+        originLock: 'cloudflare',
+      },
+      {
+        url: 'https://admin.example.com',
+        domain: 'admin.example.com',
+        path: '/',
+        serviceName: 'admin',
+        originLock: 'cloudflare',
+      },
+    ])
+
+    expect(lines.filter((line) => line.includes('Locked hostnames'))).toEqual([
+      '  Locked hostnames refuse requests without their header. Run gantry origin-lock show <hostname> to set it up in Cloudflare.',
+    ])
   })
 })

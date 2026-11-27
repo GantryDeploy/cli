@@ -12,9 +12,21 @@ import type {
   AwsEfsPerformanceModeEnum,
   AwsEfsThroughputModeEnum,
   AwsFilesystemSettingsInput,
+  AwsFirewallAction,
+  AwsFirewallBotCategory,
+  AwsFirewallConditionField,
+  AwsFirewallConditionInput,
+  AwsFirewallManagedGroup,
+  AwsFirewallMatchCombine,
+  AwsFirewallMatchInput,
+  AwsFirewallRateAggregate,
+  AwsFirewallRuleInput,
+  AwsFirewallRuleKind,
+  AwsFirewallTextOperator,
   AwsNatGatewayOptionEnum,
   AwsNetworkSettingsInput,
 } from '../../generated/graphql'
+import { isRecord } from '../is-record'
 import { notANumberMessage, parseNumber } from '../numbers'
 import { isInteractive } from '../terminal'
 
@@ -366,4 +378,333 @@ export async function awsCertificateRegions(
     )
   }
   return { ok: true, value: regions }
+}
+
+const AWS_FIREWALL_RULE_KINDS = {
+  MANAGED_GROUP: true,
+  RATE_LIMIT: true,
+  BOT_CONTROL: true,
+  CUSTOM: true,
+} as const satisfies Record<AwsFirewallRuleKind, true>
+
+const AWS_FIREWALL_MANAGED_GROUPS = {
+  IP_REPUTATION: true,
+  COMMON: true,
+  KNOWN_BAD_INPUTS: true,
+  SQL: true,
+  LINUX: true,
+  PHP: true,
+  WORDPRESS: true,
+} as const satisfies Record<AwsFirewallManagedGroup, true>
+
+const AWS_FIREWALL_ACTIONS = {
+  BLOCK: true,
+  ALLOW: true,
+  COUNT: true,
+  CAPTCHA: true,
+  CHALLENGE: true,
+} as const satisfies Record<AwsFirewallAction, true>
+
+const AWS_FIREWALL_RATE_AGGREGATES = {
+  IP: 'per IP',
+  FORWARDED_IP: 'per forwarded IP',
+} as const satisfies Record<AwsFirewallRateAggregate, string>
+
+const AWS_FIREWALL_COMBINES = {
+  ALL: ' and ',
+  ANY: ' or ',
+} as const satisfies Record<AwsFirewallMatchCombine, string>
+
+const AWS_FIREWALL_CONDITION_FIELDS = {
+  PATH: true,
+  IP: true,
+  COUNTRY: true,
+  HEADER: true,
+  METHOD: true,
+  QUERY_PARAM: true,
+  BODY_SIZE: true,
+} as const satisfies Record<AwsFirewallConditionField, true>
+
+const AWS_FIREWALL_TEXT_OPERATORS = {
+  EXACT: '=',
+  STARTS_WITH: 'starts with',
+  ENDS_WITH: 'ends with',
+  CONTAINS: 'contains',
+  REGEX: 'matches',
+} as const satisfies Record<AwsFirewallTextOperator, string>
+
+const AWS_FIREWALL_BOT_CATEGORIES = {
+  ADVERTISING: true,
+  AI: true,
+  ARCHIVER: true,
+  CONTENT_FETCHER: true,
+  EMAIL_CLIENT: true,
+  HTTP_LIBRARY: true,
+  LINK_CHECKER: true,
+  MISCELLANEOUS: true,
+  MONITORING: true,
+  PAGE_PREVIEW: true,
+  SCRAPING_FRAMEWORK: true,
+  SEARCH_ENGINE: true,
+  SECURITY: true,
+  SEO: true,
+  SOCIAL_MEDIA: true,
+  WEBHOOKS: true,
+  AUTOMATED_BROWSER: true,
+  KNOWN_BOT_DATA_CENTER: true,
+  NON_BROWSER_USER_AGENT: true,
+} as const satisfies Record<AwsFirewallBotCategory, true>
+
+/** Stored rules and rules files spell enum values in kebab case (`rate-limit`). */
+function kebab(value: string): string {
+  return value.toLowerCase().replaceAll('_', '-')
+}
+
+class AwsFirewallRulesShapeError extends Error {}
+
+function refuse(at: string, message: string): never {
+  throw new AwsFirewallRulesShapeError(`${at}: ${message}.`)
+}
+
+function readRecord(value: unknown, at: string): Record<string, unknown> {
+  if (!isRecord(value)) refuse(at, 'must be an object')
+  return value
+}
+
+function readText(fields: Record<string, unknown>, key: string, at: string): string {
+  const value = fields[key]
+  if (typeof value !== 'string') refuse(at, `${key} must be text`)
+  return value
+}
+
+function readBoolean(fields: Record<string, unknown>, key: string, at: string): boolean {
+  const value = fields[key]
+  if (typeof value !== 'boolean') refuse(at, `${key} must be true or false`)
+  return value
+}
+
+function readInteger(fields: Record<string, unknown>, key: string, at: string): number {
+  const value = fields[key]
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    refuse(at, `${key} must be a whole number`)
+  }
+  return value
+}
+
+function readTexts(fields: Record<string, unknown>, key: string, at: string): string[] {
+  const value = fields[key]
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    refuse(at, `${key} must be a list of text`)
+  }
+  return value
+}
+
+function toEnum<T extends string>(raw: unknown, values: Record<T, unknown>): T | undefined {
+  return (Object.keys(values) as T[]).find((value) => kebab(value) === raw)
+}
+
+function readEnum<T extends string>(
+  fields: Record<string, unknown>,
+  key: string,
+  at: string,
+  values: Record<T, unknown>
+): T {
+  const value = toEnum(fields[key], values)
+  if (!value) refuse(at, `${key} must be ${Object.keys(values).map(kebab).join(', ')}`)
+  return value
+}
+
+function readEnums<T extends string>(
+  fields: Record<string, unknown>,
+  key: string,
+  at: string,
+  values: Record<T, unknown>
+): T[] {
+  const raw = fields[key]
+  const read = Array.isArray(raw) ? raw.map((item) => toEnum(item, values)) : []
+  if (!Array.isArray(raw) || read.some((value) => value === undefined)) {
+    refuse(at, `${key} must be a list of ${Object.keys(values).map(kebab).join(', ')}`)
+  }
+  return read.filter((value) => value !== undefined)
+}
+
+interface Read<T> {
+  input: T
+  summary: string
+}
+
+function textComparison(subject: string, operator: AwsFirewallTextOperator, value: string): string {
+  return `${subject} ${AWS_FIREWALL_TEXT_OPERATORS[operator]} ${value}`
+}
+
+function pathSummary(operator: AwsFirewallTextOperator, value: string): string {
+  if (operator === 'EXACT') return value
+  if (operator === 'STARTS_WITH') return `${value}*`
+  if (operator === 'ENDS_WITH') return `*${value}`
+  if (operator === 'CONTAINS') return `*${value}*`
+  return `path matching ${value}`
+}
+
+function readCondition(value: unknown, at: string): Read<AwsFirewallConditionInput> {
+  const fields = readRecord(value, at)
+  const field = readEnum(fields, 'field', at, AWS_FIREWALL_CONDITION_FIELDS)
+  const negate = fields.negate === undefined ? undefined : readBoolean(fields, 'negate', at)
+
+  let read: Read<AwsFirewallConditionInput>
+  if (field === 'PATH' || field === 'HEADER' || field === 'QUERY_PARAM') {
+    const operator = readEnum(fields, 'operator', at, AWS_FIREWALL_TEXT_OPERATORS)
+    const text = readText(fields, 'value', at)
+    if (field === 'PATH') {
+      read = { input: { field, operator, value: text }, summary: pathSummary(operator, text) }
+    } else {
+      const name = readText(fields, 'name', at)
+      const subject = field === 'HEADER' ? `header ${name}` : `query ${name}`
+      read = {
+        input: { field, name, operator, value: text },
+        summary: textComparison(subject, operator, text),
+      }
+    }
+  } else if (field === 'IP') {
+    const cidrs = readTexts(fields, 'cidrs', at)
+    read = { input: { field, cidrs }, summary: `IP in ${cidrs.join(', ')}` }
+  } else if (field === 'COUNTRY') {
+    const countries = readTexts(fields, 'countries', at)
+    read = { input: { field, countries }, summary: `country in ${countries.join(', ')}` }
+  } else if (field === 'METHOD') {
+    const methods = readTexts(fields, 'methods', at)
+    read = { input: { field, methods }, summary: `method ${methods.join(', ')}` }
+  } else {
+    const greaterThan = readInteger(fields, 'greaterThan', at)
+    read = {
+      input: { field, greaterThan },
+      summary: `body over ${greaterThan.toLocaleString('en-US')} bytes`,
+    }
+  }
+
+  if (negate === undefined) return read
+  return {
+    input: { ...read.input, negate },
+    summary: negate ? `not ${read.summary}` : read.summary,
+  }
+}
+
+function readMatch(value: unknown, at: string): Read<AwsFirewallMatchInput> {
+  const fields = readRecord(value, `${at} match`)
+  const combine = readEnum(fields, 'combine', `${at} match`, AWS_FIREWALL_COMBINES)
+  const raw = fields.conditions
+  if (!Array.isArray(raw)) refuse(`${at} match`, 'conditions must be a list')
+  const conditions = raw.map((condition, index) =>
+    readCondition(condition, `${at} condition ${String(index + 1)}`)
+  )
+  return {
+    input: { combine, conditions: conditions.map((c) => c.input) },
+    summary: conditions.map((c) => c.summary).join(AWS_FIREWALL_COMBINES[combine]),
+  }
+}
+
+function readRule(value: unknown, at: string): Read<AwsFirewallRuleInput> {
+  const fields = readRecord(value, at)
+  const kind = readEnum(fields, 'kind', at, AWS_FIREWALL_RULE_KINDS)
+  const base = {
+    ...(fields.id === undefined ? {} : { id: readText(fields, 'id', at) }),
+    name: readText(fields, 'name', at),
+    enabled: readBoolean(fields, 'enabled', at),
+    kind,
+  }
+
+  if (kind === 'MANAGED_GROUP') {
+    const group = readEnum(fields, 'group', at, AWS_FIREWALL_MANAGED_GROUPS)
+    const countRules = fields.countRules === undefined ? [] : readTexts(fields, 'countRules', at)
+    return {
+      input: { ...base, managedGroup: { group, countRules } },
+      summary:
+        countRules.length > 0 ? `${kebab(group)}, counting ${countRules.join(', ')}` : kebab(group),
+    }
+  }
+
+  if (kind === 'RATE_LIMIT') {
+    const limit = readInteger(fields, 'limit', at)
+    const windowSeconds = readInteger(fields, 'windowSeconds', at)
+    const aggregate = readEnum(fields, 'aggregate', at, AWS_FIREWALL_RATE_AGGREGATES)
+    const action = readEnum(fields, 'action', at, AWS_FIREWALL_ACTIONS)
+    const match = fields.match === undefined ? undefined : readMatch(fields.match, at)
+    const scope = match ? ` on ${match.summary}` : ''
+    return {
+      input: {
+        ...base,
+        rateLimit: {
+          limit,
+          windowSeconds,
+          aggregate,
+          action,
+          ...(match ? { match: match.input } : {}),
+        },
+      },
+      summary: `${limit.toLocaleString('en-US')} per ${String(windowSeconds / 60)} min ${AWS_FIREWALL_RATE_AGGREGATES[aggregate]}${scope} → ${kebab(action)}`,
+    }
+  }
+
+  if (kind === 'BOT_CONTROL') {
+    const block = readEnums(fields, 'block', at, AWS_FIREWALL_BOT_CATEGORIES)
+    return {
+      input: { ...base, botControl: { block } },
+      summary: block.length > 0 ? `blocks ${block.map(kebab).join(', ')}` : 'counts every category',
+    }
+  }
+
+  const match = readMatch(fields.match, at)
+  const action = readEnum(fields, 'action', at, AWS_FIREWALL_ACTIONS)
+  return {
+    input: { ...base, custom: { match: match.input, action } },
+    summary: `${match.summary} → ${kebab(action)}`,
+  }
+}
+
+function readRules(list: unknown): Result<Read<AwsFirewallRuleInput>[]> {
+  if (!Array.isArray(list)) return { ok: false, message: 'It must be a list of rules.' }
+  try {
+    return {
+      ok: true,
+      value: list.map((rule, index) => readRule(rule, `Rule ${String(index + 1)}`)),
+    }
+  } catch (error) {
+    if (error instanceof AwsFirewallRulesShapeError) return { ok: false, message: error.message }
+    throw error
+  }
+}
+
+/**
+ * Reads a rules file (the list `firewalls rules --json` prints) into the input
+ * `setFirewallRules` takes. A rule without an `id` is new.
+ */
+export function parseAwsFirewallRules(list: unknown): Result<AwsFirewallRuleInput[]> {
+  const read = readRules(list)
+  return read.ok ? { ok: true, value: read.value.map((rule) => rule.input) } : read
+}
+
+/** The rule list an AWS firewall stores, in evaluation order. */
+export function awsFirewallStoredRules(rules: Record<string, unknown>): unknown[] {
+  if (!Array.isArray(rules.rules)) {
+    throw new Error('The firewall rules are not in the expected shape.')
+  }
+  return rules.rules
+}
+
+export interface AwsFirewallRuleRow {
+  name: string
+  kind: string
+  enabled: boolean
+  summary: string
+}
+
+/** An AWS firewall's rules in evaluation order, with a one-line summary of each. */
+export function awsFirewallRuleRows(rules: Record<string, unknown>): AwsFirewallRuleRow[] {
+  const read = readRules(awsFirewallStoredRules(rules))
+  if (!read.ok) throw new Error('The firewall rules are not in the expected shape.')
+  return read.value.map(({ input, summary }) => ({
+    name: input.name,
+    kind: kebab(input.kind),
+    enabled: input.enabled,
+    summary,
+  }))
 }

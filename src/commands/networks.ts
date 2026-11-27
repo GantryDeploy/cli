@@ -10,6 +10,7 @@ import type {
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, isAws } from '../lib/clouds'
 import { awsOption, buildAwsNetworkSettings, type AwsNetworkFlags } from '../lib/clouds/aws'
+import { addExamples } from '../lib/examples'
 import { resolveCloud, selectRegion } from '../lib/interactive-prompts'
 import { buildNetworkSubnets } from '../lib/network-create'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
@@ -58,7 +59,7 @@ interface NetworkCreateFlags extends AwsNetworkFlags {
 export function registerNetworksCommand(program: Command): void {
   const networksCmd = program.command('networks').description('Manage networks')
 
-  networksCmd
+  const listCmd = networksCmd
     .command('list')
     .description('List all networks')
     .action(async () => {
@@ -95,7 +96,7 @@ export function registerNetworksCommand(program: Command): void {
       }
     })
 
-  networksCmd
+  const createCmd = networksCmd
     .command('create')
     .description('Create a new network')
     .option('--cloud <id>', 'Cloud account ID')
@@ -178,4 +179,31 @@ export function registerNetworksCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(networksCmd, [
+    { command: 'gantry networks list', description: "List the team's networks" },
+    {
+      command: 'gantry networks create',
+      description: 'Create a network, prompting for each setting',
+    },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry networks list', description: "List the team's networks" },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry networks create',
+      description: 'Create a network, prompting for each setting',
+    },
+    {
+      command:
+        'gantry networks create --cloud c4xp9w --region us-east-1 --name Production --cidr 10.20.0.0/16 --subnet public:10.20.0.0/24:us-east-1a --subnet private:10.20.16.0/20:us-east-1a',
+      description: 'Create a network with one public and one private subnet',
+    },
+    {
+      command:
+        'gantry networks create --cloud c4xp9w --region us-east-1 --name Staging --cidr 10.30.0.0/16 --aws-nat single',
+      description: 'On AWS, share one NAT gateway across the zones',
+    },
+  ])
 }

@@ -1,0 +1,603 @@
+import type {
+  CancelLiftDeploymentMutation,
+  CancelLiftDeploymentMutationVariables,
+  ClaimStepMutation,
+  ClaimStepMutationVariables,
+  CompleteCliStepMutation,
+  CompleteCliStepMutationVariables,
+  DeploymentPhase,
+  DeploymentsByVersionQuery,
+  DeploymentsByVersionQueryVariables,
+  FailCliStepMutation,
+  FailCliStepMutationVariables,
+} from '../generated/graphql'
+
+import { formatApiError, GantryApiError, graphqlRequest } from './client'
+import { isTerminalStatus } from './deployment-status'
+import { followReleaseOutput } from './release-output'
+import { redact, sanitizeTerminal } from './sanitize'
+import { executeCliTask } from './tasks'
+import type { TaskContext } from './tasks'
+
+const CLAIM_STEP_MUTATION = /* GraphQL */ `
+  mutation ClaimStep($stepId: String!) {
+    claimStep(stepId: $stepId) {
+      success
+      message
+      step {
+        id
+        stepType
+        cliTask
+        cliInputs {
+          __typename
+          ... on LocalBuildCliInputs {
+            stepId
+            serviceName
+            versionTag
+            projectId
+            projectSlug
+            buildCommands
+            dockerfile
+            buildArgs {
+              name
+              value
+            }
+            workingDir
+            dockerTarget
+            namedBuildName
+            architecture
+          }
+          ... on ObjectUploadCliInputs {
+            stepId
+            sourcePath
+            includePatterns
+            excludePatterns
+            source {
+              bucketName
+              region
+              keyPrefix
+              aws {
+                accessKeyId
+                secretAccessKey
+                sessionToken
+              }
+            }
+          }
+          ... on ContainerPushCliInputs {
+            stepId
+            imageUri
+            localImageTag
+            registryEndpoint
+            registryUsername
+            registryPassword
+            source {
+              imageUri
+              registryEndpoint
+              registryUsername
+              registryPassword
+            }
+          }
+          ... on ArtifactUploadCliInputs {
+            stepId
+            provider
+            bucketName
+            objectKey
+            region
+            maxArtifactBytes
+            packageSourcePath: sourcePath
+            excludePatterns
+            aws {
+              accessKeyId
+              secretAccessKey
+              sessionToken
+            }
+            source {
+              bucketName
+              objectKey
+              region
+              aws {
+                accessKeyId
+                secretAccessKey
+                sessionToken
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+const CANCEL_DEPLOYMENT_MUTATION = /* GraphQL */ `
+  mutation CancelLiftDeployment($id: String!) {
+    cancelDeployment(id: $id) {
+      success
+      message
+    }
+  }
+`
+
+const COMPLETE_CLI_STEP_MUTATION = /* GraphQL */ `
+  mutation CompleteCliStep(
+    $stepId: String!
+    $outputs: CliTaskOutputsInput!
+    $fileResults: [FileUploadResultInput!]
+  ) {
+    completeCliStep(stepId: $stepId, outputs: $outputs, fileResults: $fileResults) {
+      success
+      message
+    }
+  }
+`
+
+const FAIL_CLI_STEP_MUTATION = /* GraphQL */ `
+  mutation FailCliStep($stepId: String!, $error: String!) {
+    failCliStep(stepId: $stepId, error: $error) {
+      success
+      message
+    }
+  }
+`
+
+export const DEPLOYMENTS_BY_VERSION_QUERY = /* GraphQL */ `
+  query DeploymentsByVersion($versionId: String!) {
+    deploymentsByVersion(versionId: $versionId) {
+      id
+      status
+      scope
+      deploymentType
+      lastMessage
+      serviceName
+      steps {
+        id
+        stepType
+        status
+        phase
+        executor
+        cliTask
+        cliStatus
+        sequence
+      }
+    }
+  }
+`
+
+export type VersionDeployment = DeploymentsByVersionQuery['deploymentsByVersion'][number]
+
+type VersionDeploymentStep = NonNullable<VersionDeployment['steps']>[number]
+
+const UNATTENDED_STEP_TIMEOUT_MS = 5 * 60 * 1000
+
+export const POLL_INTERVAL_MS = 2000
+
+function findCliStep(
+  steps: VersionDeploymentStep[] | null,
+  cliStatuses: readonly string[]
+): VersionDeploymentStep | null {
+  if (!steps) return null
+
+  return (
+    steps.find(
+      (s) =>
+        (s.status === 'AWAITING_CLI' || s.status === 'MANIFEST_REQUIRED') &&
+        s.cliStatus !== null &&
+        cliStatuses.includes(s.cliStatus) &&
+        s.executor === 'CLI' &&
+        s.cliTask
+    ) ?? null
+  )
+}
+
+const PHASE_LABELS: Record<DeploymentPhase, string> = {
+  BUILDING: 'Building',
+  SETUP: 'Setup',
+  UPLOADING: 'Uploading',
+  DEPLOYING: 'Deploying',
+  GO_LIVE: 'Go Live',
+  POST_DEPLOY: 'Cleanup',
+}
+
+export function getPhaseDisplay(deployment: VersionDeployment): string {
+  if (!deployment.steps || deployment.steps.length === 0) {
+    return deployment.status.toUpperCase()
+  }
+
+  const activeStep = deployment.steps.find(
+    (s) =>
+      s.status === 'PROCESSING' ||
+      s.status === 'AWAITING_CLI' ||
+      s.status === 'QUEUED' ||
+      s.status === 'MANIFEST_REQUIRED'
+  )
+
+  if (activeStep) {
+    return PHASE_LABELS[activeStep.phase]
+  }
+
+  return deployment.status.toUpperCase()
+}
+
+/**
+ * Tells the server this CLI gave up on a step, cancelling the deployment when the step failure
+ * cannot be recorded. Never throws.
+ *
+ * @returns true when the step failure was recorded, so the deployment reports FAILED on its own.
+ */
+async function abandonStep(stepId: string, deploymentId: string, error: string): Promise<boolean> {
+  try {
+    const { failCliStep } = await graphqlRequest<FailCliStepMutation, FailCliStepMutationVariables>(
+      FAIL_CLI_STEP_MUTATION,
+      { stepId, error }
+    )
+    if (failCliStep.success) return true
+  } catch {
+    // Cancelling the deployment below still releases it.
+  }
+  await cancelDeployment(deploymentId)
+  return false
+}
+
+/** Best effort. Never throws. */
+export async function cancelDeployment(deploymentId: string): Promise<void> {
+  try {
+    await graphqlRequest<CancelLiftDeploymentMutation, CancelLiftDeploymentMutationVariables>(
+      CANCEL_DEPLOYMENT_MUTATION,
+      { id: deploymentId }
+    )
+  } catch {
+    // Nothing further the CLI can do.
+  }
+}
+
+async function handleCliStep(
+  step: VersionDeploymentStep,
+  deploymentId: string,
+  targetLabel: string,
+  taskContext: TaskContext,
+  updateTitle: (title: string) => void
+): Promise<{ refusal: string } | null> {
+  updateTitle(`${targetLabel}: Claiming step ${String(step.cliTask)}...`)
+
+  let claimResult: ClaimStepMutation
+  try {
+    claimResult = await graphqlRequest<ClaimStepMutation, ClaimStepMutationVariables>(
+      CLAIM_STEP_MUTATION,
+      { stepId: step.id }
+    )
+  } catch (error) {
+    // The claim may have committed before the request failed.
+    if (await abandonStep(step.id, deploymentId, 'The CLI could not claim the step.')) return null
+    throw error
+  }
+
+  const claimedStep = claimResult.claimStep.step
+  if (!claimResult.claimStep.success || !claimedStep) {
+    const refusal = sanitizeTerminal(
+      claimResult.claimStep.message ?? 'The step could not be claimed.'
+    )
+    updateTitle(`${targetLabel}: ${refusal}`)
+    return { refusal }
+  }
+
+  updateTitle(`${targetLabel}: ${String(claimedStep.cliTask)}...`)
+
+  try {
+    if (!claimedStep.cliInputs) {
+      throw new Error('Claimed step is missing its CLI inputs')
+    }
+    const { outputs, fileResults } = await executeCliTask(claimedStep.cliInputs, taskContext)
+
+    updateTitle(`${targetLabel}: Completing ${String(claimedStep.cliTask)}...`)
+
+    const { completeCliStep } = await graphqlRequest<
+      CompleteCliStepMutation,
+      CompleteCliStepMutationVariables
+    >(COMPLETE_CLI_STEP_MUTATION, {
+      stepId: claimedStep.id,
+      outputs,
+      fileResults: fileResults ?? null,
+    })
+    if (!completeCliStep.success) {
+      throw new Error(completeCliStep.message ?? 'The step result was not accepted.')
+    }
+  } catch (taskError) {
+    const errorMessage = taskError instanceof Error ? taskError.message : 'Unknown error'
+    if (await abandonStep(claimedStep.id, deploymentId, redact(errorMessage))) return null
+    throw taskError
+  }
+  return null
+}
+
+/** One batch query per cycle drives every service's subtask. */
+async function pollAllDeployments(
+  versionId: string,
+  taskContext: TaskContext,
+  titleUpdaters: Map<string, (title: string) => void>,
+  outputWriters: Map<string, (line: string) => void>,
+  resolvers: Map<string, () => void>,
+  rejecters: Map<string, (error: Error) => void>,
+  isCancelling: () => boolean
+): Promise<void> {
+  const MAX_CONSECUTIVE_NETWORK_ERRORS = 10
+  const followRelease = followReleaseOutput(versionId, (deploymentId, line) => {
+    outputWriters.get(deploymentId)?.(line)
+  })
+  let consecutiveNetworkErrors = 0
+  const completedDeployments = new Set<string>()
+  // Deployments whose CLI step this process is running.
+  const runningSteps = new Set<string>()
+  const refusedClaims = new Map<string, string>()
+  // When each deployment started waiting on a CLI step that this process is not running.
+  const unattendedSince = new Map<string, number>()
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite poll loop; exits via return statements below
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+
+    if (isCancelling()) {
+      for (const [id, resolve] of resolvers) {
+        if (!completedDeployments.has(id)) {
+          titleUpdaters.get(id)?.(`${id}: Cancelled`)
+          completedDeployments.add(id)
+          resolve()
+        }
+      }
+      return
+    }
+
+    try {
+      const result = await graphqlRequest<
+        DeploymentsByVersionQuery,
+        DeploymentsByVersionQueryVariables
+      >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId }, { retry: false })
+
+      consecutiveNetworkErrors = 0
+
+      // Read before judging statuses, so a release's last lines print before its service settles.
+      try {
+        await followRelease(result.deploymentsByVersion)
+      } catch {
+        // The output stays stored; the next poll reads from the same cursor.
+      }
+
+      for (const deployment of result.deploymentsByVersion) {
+        const id = deployment.id
+        if (!resolvers.has(id) || completedDeployments.has(id)) continue
+        // The running step owns the title, and the status this poll read predates its result.
+        if (runningSteps.has(id)) continue
+        const updateTitle = (title: string) => titleUpdaters.get(id)?.(title)
+
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty serviceName should fall back to the deployment id for display
+        const targetLabel = sanitizeTerminal(deployment.serviceName || id)
+        const phaseDisplay = getPhaseDisplay(deployment)
+        const message = deployment.lastMessage
+          ? ` - ${sanitizeTerminal(deployment.lastMessage)}`
+          : ''
+
+        updateTitle(`${targetLabel}: ${phaseDisplay}${message}`)
+
+        if (!isCancelling()) {
+          const pendingStep = findCliStep(deployment.steps, ['PENDING'])
+
+          if (pendingStep) {
+            // A refused step that is still unclaimed a poll later has no CLI driving it.
+            const refusal = refusedClaims.get(pendingStep.id)
+            if (refusal) {
+              updateTitle(`${targetLabel}: Failed - ${refusal}`)
+              completedDeployments.add(id)
+              rejecters.get(id)?.(new Error(`${targetLabel}: ${refusal}`))
+              void cancelDeployment(id)
+              continue
+            }
+
+            runningSteps.add(id)
+            unattendedSince.delete(id)
+            void handleCliStep(pendingStep, id, targetLabel, taskContext, updateTitle)
+              .then(
+                (claim) => {
+                  if (claim) refusedClaims.set(pendingStep.id, claim.refusal)
+                },
+                (error: unknown) => {
+                  if (completedDeployments.has(id)) return
+                  const reason = formatApiError(error)
+                  updateTitle(`${targetLabel}: Failed - ${reason}`)
+                  completedDeployments.add(id)
+                  rejecters.get(id)?.(new Error(`${targetLabel}: ${reason}`))
+                }
+              )
+              .finally(() => {
+                runningSteps.delete(id)
+              })
+            continue
+          }
+
+          // A claim this process lost track of, or one another CLI holds and never finishes.
+          const unattendedStep = findCliStep(deployment.steps, ['CLAIMED'])
+          if (!unattendedStep) {
+            unattendedSince.delete(id)
+          } else {
+            const since = unattendedSince.get(id) ?? Date.now()
+            unattendedSince.set(id, since)
+            if (Date.now() - since >= UNATTENDED_STEP_TIMEOUT_MS) {
+              updateTitle(`${targetLabel}: Timed out`)
+              completedDeployments.add(id)
+              rejecters.get(id)?.(
+                new Error(
+                  `${targetLabel}: Timed out after 5 minutes waiting on a step this CLI is not running`
+                )
+              )
+              void abandonStep(
+                unattendedStep.id,
+                id,
+                'The CLI stopped waiting for the step to finish.'
+              )
+              continue
+            }
+          }
+        }
+
+        if (isTerminalStatus(deployment.status)) {
+          const normalized = deployment.status
+
+          if (normalized === 'COMPLETE') {
+            updateTitle(`${targetLabel}: Complete`)
+            completedDeployments.add(id)
+            resolvers.get(id)?.()
+          } else if (normalized === 'FAILED') {
+            updateTitle(`${targetLabel}: Failed${message}`)
+            completedDeployments.add(id)
+            rejecters.get(id)?.(new Error(`${targetLabel}: Deployment failed${message}`))
+          } else if (normalized === 'CANCELLED') {
+            updateTitle(`${targetLabel}: Cancelled`)
+            completedDeployments.add(id)
+            resolvers.get(id)?.()
+          } else if (normalized === 'SKIPPED') {
+            updateTitle(`${targetLabel}: Skipped${message}`)
+            completedDeployments.add(id)
+            resolvers.get(id)?.()
+          }
+        }
+      }
+
+      const allTargetsDone = [...resolvers.keys()].every((id) => completedDeployments.has(id))
+      if (allTargetsDone) {
+        return
+      }
+    } catch (error) {
+      consecutiveNetworkErrors++
+      const formattedError = formatApiError(error)
+
+      const statusLabel =
+        error instanceof GantryApiError && error.statusCode
+          ? ` (HTTP ${String(error.statusCode)})`
+          : ''
+
+      if (consecutiveNetworkErrors >= MAX_CONSECUTIVE_NETWORK_ERRORS) {
+        for (const id of resolvers.keys()) {
+          if (!completedDeployments.has(id)) {
+            const targetLabel = id
+            completedDeployments.add(id)
+            rejecters.get(id)?.(
+              new Error(
+                `${targetLabel}: Deployment status unknown - CLI could not reach Gantry API after ${String(MAX_CONSECUTIVE_NETWORK_ERRORS)} attempts. Last error${statusLabel}: ${formattedError}`
+              )
+            )
+          }
+        }
+        return
+      }
+
+      const backoffDelay = Math.min(2000 * Math.pow(2, consecutiveNetworkErrors - 1), 60_000)
+      await new Promise((resolve) => setTimeout(resolve, backoffDelay))
+
+      for (const id of resolvers.keys()) {
+        if (!completedDeployments.has(id)) {
+          titleUpdaters.get(id)?.(
+            `${id}: Retrying (${String(consecutiveNetworkErrors)}/${String(MAX_CONSECUTIVE_NETWORK_ERRORS)})... ${formattedError}`
+          )
+        }
+      }
+    }
+  }
+}
+
+/** Service names by deployment ID, leaving out the routing and teardown deployments. */
+export async function serviceDeploymentNames(versionId: string): Promise<Map<string, string>> {
+  const names = new Map<string, string>()
+  try {
+    const result = await graphqlRequest<
+      DeploymentsByVersionQuery,
+      DeploymentsByVersionQueryVariables
+    >(DEPLOYMENTS_BY_VERSION_QUERY, { versionId })
+    for (const deployment of result.deploymentsByVersion) {
+      if (
+        deployment.serviceName &&
+        deployment.scope !== 'project-env' &&
+        deployment.deploymentType !== 'teardown'
+      ) {
+        names.set(deployment.id, sanitizeTerminal(deployment.serviceName))
+      }
+    }
+  } catch {
+    // Subtasks show IDs until the first poll names them.
+  }
+  return names
+}
+
+export interface ServiceFailure {
+  id: string
+  name: string
+  message: string
+}
+
+/**
+ * One subtask per service deployment. A single poller settles them all and claims and runs the
+ * CLI steps the deployments wait on.
+ */
+export function serviceDeploymentSubtasks<Ctx>(params: {
+  versionId: string
+  deploymentIds: string[]
+  names: Map<string, string>
+  taskContext: TaskContext
+  isCancelling: () => boolean
+  onFailure: (ctx: Ctx, failure: ServiceFailure) => void
+}): {
+  title: string
+  rendererOptions: { outputBar: number; persistentOutput: boolean }
+  task: (ctx: Ctx, subtask: { title: string; output: string }) => Promise<void>
+}[] {
+  const { versionId, deploymentIds, names, taskContext, isCancelling, onFailure } = params
+  const titleUpdaters = new Map<string, (title: string) => void>()
+  const outputWriters = new Map<string, (line: string) => void>()
+  const resolvers = new Map<string, () => void>()
+  const rejecters = new Map<string, (error: Error) => void>()
+  // Created up front: the poller can settle a service before listr starts its subtask.
+  const outcomes = new Map(
+    deploymentIds.map((id) => {
+      const outcome = new Promise<void>((resolve, reject) => {
+        resolvers.set(id, resolve)
+        rejecters.set(id, reject)
+      })
+      outcome.catch(() => undefined)
+      return [id, outcome] as const
+    })
+  )
+
+  const subtasks = deploymentIds.map((id) => ({
+    title: `${names.get(id) ?? id}: Waiting...`,
+    // Keeps every release command line on screen, beneath its service.
+    rendererOptions: { outputBar: Infinity, persistentOutput: true },
+    task: async (ctx: Ctx, subtask: { title: string; output: string }) => {
+      titleUpdaters.set(id, (title: string) => {
+        subtask.title = sanitizeTerminal(title)
+      })
+      outputWriters.set(id, (line: string) => {
+        subtask.output = sanitizeTerminal(line)
+      })
+
+      try {
+        await outcomes.get(id)
+      } catch (error) {
+        onFailure(ctx, {
+          id,
+          name: names.get(id) ?? id,
+          message: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      }
+    },
+  }))
+
+  // Not awaited: the poller settles each service's outcome.
+  void pollAllDeployments(
+    versionId,
+    taskContext,
+    titleUpdaters,
+    outputWriters,
+    resolvers,
+    rejecters,
+    isCancelling
+  )
+
+  return subtasks
+}

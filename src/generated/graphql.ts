@@ -2,17 +2,6 @@
 type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
 /** Internal type. DO NOT USE DIRECTLY. */
 export type Incremental<T> = T | { [P in keyof T]?: P extends ' $fragmentName' | '__typename' ? T[P] : never };
-export type ActivationInput = {
-  /** Environment slug (e.g. "production") */
-  environment: string;
-  /** Project ID */
-  projectId: string;
-  /** Target version (rollback/promote) or canary version (canary) */
-  versionId?: string | null | undefined;
-  /** Canary weight, 0–100 */
-  weight?: number | null | undefined;
-};
-
 export type ArtifactUploadCliOutputsInput = {
   bucketName: string;
   objectKey: string;
@@ -21,6 +10,7 @@ export type ArtifactUploadCliOutputsInput = {
   zipSize: number;
 };
 
+/** Fixed response an application load balancer sends when no route matches. */
 export type AwsAlbDefaultActionInput = {
   /** e.g. text/html or application/json */
   contentType: string;
@@ -32,18 +22,24 @@ export type AwsAlbDefaultActionInput = {
 
 /** Burstable performance setting for T-series instances */
 export type AwsBurstablePerformanceEnum =
+  /** Burstable instance types are never launched. */
   | 'EXCLUDED'
+  /** Burstable instance types may be launched. */
   | 'INCLUDED'
+  /** Only burstable instance types are launched. */
   | 'REQUIRED';
 
 /** Catalog filters that only apply to AWS */
 export type AwsCacheCatalogFilterInput = {
+  /** Only versions available in this deployment mode */
   deploymentMode?: AwsCacheDeploymentModeEnum | null | undefined;
 };
 
 /** Cache deployment mode */
 export type AwsCacheDeploymentModeEnum =
+  /** A cluster of nodes of a fixed size */
   | 'NODE_BASED'
+  /** ElastiCache Serverless, which scales capacity on demand */
   | 'SERVERLESS';
 
 /** Cache settings only AWS has */
@@ -68,16 +64,21 @@ export type AwsCacheSettingsInput = {
   replicasPerNodeGroup?: number | null | undefined;
 };
 
+/** A capacity provider the ECS cluster runs tasks on. */
 export type AwsCapacityProviderInput = {
   /** Managed instances only */
   instanceRequirements?: AwsInstanceRequirementsInput | null | undefined;
+  /** Kind of capacity provider */
   type: AwsCapacityProviderTypeEnum;
 };
 
 /** Type of capacity provider */
 export type AwsCapacityProviderTypeEnum =
+  /** Serverless Fargate tasks at the on-demand price. */
   | 'FARGATE'
+  /** Fargate tasks on spare capacity, cheaper but stopped when AWS reclaims it. */
   | 'FARGATE_SPOT'
+  /** EC2 instances that ECS launches and manages. Needs a network. */
   | 'MANAGED_INSTANCES';
 
 /** Certificate settings only AWS has */
@@ -88,16 +89,20 @@ export type AwsCertificateSettingsInput = {
 
 /** Container orchestrator a cluster runs */
 export type AwsClusterOrchestratorEnum =
+  /** Amazon ECS. */
   | 'ECS';
 
 /** Cluster settings for an AWS cloud account */
 export type AwsClusterSettingsInput = {
+  /** Where the cluster runs tasks */
   capacityProviders: Array<AwsCapacityProviderInput>;
+  /** Container orchestrator to run */
   orchestrator: AwsClusterOrchestratorEnum;
 };
 
 /** Catalog filters that only apply to AWS */
 export type AwsDatabaseCatalogFilterInput = {
+  /** Only entries available in this deployment mode */
   deploymentMode?: AwsDatabaseDeploymentModeEnum | null | undefined;
   /** rds or aurora. Required when filtering by engine. */
   flavor?: string | null | undefined;
@@ -105,7 +110,9 @@ export type AwsDatabaseCatalogFilterInput = {
 
 /** Database deployment mode */
 export type AwsDatabaseDeploymentModeEnum =
+  /** A server of a fixed instance class */
   | 'PROVISIONED'
+  /** Aurora Serverless v2, which scales capacity between a minimum and a maximum */
   | 'SERVERLESS';
 
 /** Settings only AWS servers have. Service, deployment mode, database name, encryption and master username are fixed at creation. */
@@ -128,9 +135,11 @@ export type AwsDatabaseSettingsInput = {
   maxCapacity?: number | null | undefined;
   /** Serverless only, in steps of 0.5 */
   minCapacity?: number | null | undefined;
+  /** Turn on Performance Insights for the server */
   performanceInsightsEnabled?: boolean | null | undefined;
   /** Serverless with a minimum capacity of 0 only, 300 to 86400 */
   secondsUntilAutoPause?: number | null | undefined;
+  /** Encrypt storage at rest */
   storageEncrypted?: boolean | null | undefined;
   /** gp3, io1 or io2, RDS only */
   storageType?: string | null | undefined;
@@ -140,13 +149,18 @@ export type AwsDatabaseSettingsInput = {
 
 /** EFS performance mode */
 export type AwsEfsPerformanceModeEnum =
+  /** Lowest latency per operation. The right choice for most workloads. */
   | 'GENERAL_PURPOSE'
+  /** Higher total throughput for many clients, with more latency per operation */
   | 'MAX_IO';
 
 /** EFS throughput mode */
 export type AwsEfsThroughputModeEnum =
+  /** Throughput grows with the amount of data stored, with burst credits */
   | 'BURSTING'
+  /** Throughput scales with the workload, billed by use */
   | 'ELASTIC'
+  /** A fixed throughput set by provisionedThroughputMibps */
   | 'PROVISIONED';
 
 /** Settings only EFS filesystems have */
@@ -163,21 +177,244 @@ export type AwsFilesystemSettingsInput = {
   throughputMode?: AwsEfsThroughputModeEnum | null | undefined;
 };
 
+/** What an AWS firewall rule does with a request it matches. */
+export type AwsFirewallAction =
+  /** Lets the request through without checking later rules. */
+  | 'ALLOW'
+  /** Refuses the request. */
+  | 'BLOCK'
+  /** Asks the visitor to solve a CAPTCHA. */
+  | 'CAPTCHA'
+  /** Runs a silent browser challenge. */
+  | 'CHALLENGE'
+  /** Counts the request and goes on to the next rule. */
+  | 'COUNT';
+
+/** A Bot Control category or signal a firewall can block. Verified bots, such as major search engines, pass every category except AI. */
+export type AwsFirewallBotCategory =
+  /** Bots used for advertising. */
+  | 'ADVERTISING'
+  /** AI bots, verified or not. */
+  | 'AI'
+  /** Bots that capture content to build archives. */
+  | 'ARCHIVER'
+  /** Requests from a browser that looks automated. */
+  | 'AUTOMATED_BROWSER'
+  /** Bots that fetch content, such as feeds, for a user. */
+  | 'CONTENT_FETCHER'
+  /** Bots that check links in emails. */
+  | 'EMAIL_CLIENT'
+  /** Requests from HTTP libraries, which can include API calls. */
+  | 'HTTP_LIBRARY'
+  /** Requests from data centers bots typically use. */
+  | 'KNOWN_BOT_DATA_CENTER'
+  /** Bots that check for broken links. */
+  | 'LINK_CHECKER'
+  /** Bots that match no other category. */
+  | 'MISCELLANEOUS'
+  /** Uptime and performance monitors. */
+  | 'MONITORING'
+  /** Requests whose user agent is not a browser, including API clients. */
+  | 'NON_BROWSER_USER_AGENT'
+  /** Bots that build link previews when a page is shared. */
+  | 'PAGE_PREVIEW'
+  /** Bots from web scraping frameworks. */
+  | 'SCRAPING_FRAMEWORK'
+  /** Unverified search engine crawlers. */
+  | 'SEARCH_ENGINE'
+  /** Bots that scan for vulnerabilities. */
+  | 'SECURITY'
+  /** Search engine optimization crawlers. */
+  | 'SEO'
+  /** Bots that social platforms use to summarize shared pages. */
+  | 'SOCIAL_MEDIA'
+  /** Bots that deliver webhook callbacks. */
+  | 'WEBHOOKS';
+
+/** Settings of a bot-control rule. */
+export type AwsFirewallBotControlRuleInput = {
+  /** Categories to block; the others are counted. AWS bills Bot Control per request it inspects. */
+  block: Array<AwsFirewallBotCategory>;
+};
+
+/** The part of a request an AWS firewall condition looks at. */
+export type AwsFirewallConditionField =
+  /** The size of the request body, compared with greaterThan. */
+  | 'BODY_SIZE'
+  /** The country the request comes from, checked against countries. */
+  | 'COUNTRY'
+  /** The header called name, compared with operator and value. */
+  | 'HEADER'
+  /** The client IP address, checked against cidrs. */
+  | 'IP'
+  /** The HTTP method, checked against methods. */
+  | 'METHOD'
+  /** The URL path, compared with operator and value. */
+  | 'PATH'
+  /** The query parameter called name, compared with operator and value. */
+  | 'QUERY_PARAM';
+
+/** One test on a request. The field decides which of the other settings it reads: operator and value for path; name, operator and value for header and query-param; cidrs for ip; countries for country; methods for method; greaterThan for body-size. */
+export type AwsFirewallConditionInput = {
+  /** IPv4 or IPv6 ranges in CIDR notation */
+  cidrs?: Array<string> | null | undefined;
+  /** Two-letter ISO country codes */
+  countries?: Array<string> | null | undefined;
+  /** Part of the request to test */
+  field: AwsFirewallConditionField;
+  /** Match a body larger than this many bytes */
+  greaterThan?: number | null | undefined;
+  /** HTTP methods, such as POST */
+  methods?: Array<string> | null | undefined;
+  /** Header or query parameter name */
+  name?: string | null | undefined;
+  /** Match the requests the test does not */
+  negate?: boolean | null | undefined;
+  /** How the text is compared to value */
+  operator?: AwsFirewallTextOperator | null | undefined;
+  /** Text to compare against */
+  value?: string | null | undefined;
+};
+
+/** Settings of a custom rule. */
+export type AwsFirewallCustomRuleInput = {
+  /** What happens to a matching request */
+  action: AwsFirewallAction;
+  /** Requests the rule acts on */
+  match: AwsFirewallMatchInput;
+};
+
+/** An AWS managed rule group a firewall can turn on. */
+export type AwsFirewallManagedGroup =
+  /** Core rules against common web exploits, such as the OWASP Top 10. */
+  | 'COMMON'
+  /** Blocks addresses Amazon threat intelligence flags as bots. */
+  | 'IP_REPUTATION'
+  /** Blocks request patterns known to exploit vulnerabilities. */
+  | 'KNOWN_BAD_INPUTS'
+  /** Blocks exploits of Linux-specific vulnerabilities. */
+  | 'LINUX'
+  /** Blocks exploits of PHP-specific vulnerabilities. */
+  | 'PHP'
+  /** Blocks SQL injection attempts. */
+  | 'SQL'
+  /** Blocks exploits of WordPress-specific vulnerabilities. */
+  | 'WORDPRESS';
+
+/** Settings of a managed-group rule. */
+export type AwsFirewallManagedGroupRuleInput = {
+  /** Names of rules in the group that count matching requests instead of blocking */
+  countRules?: Array<string> | null | undefined;
+  /** Managed rule group to turn on */
+  group: AwsFirewallManagedGroup;
+};
+
+/** How an AWS firewall match combines its conditions. */
+export type AwsFirewallMatchCombine =
+  /** A request matches when every condition does. */
+  | 'ALL'
+  /** A request matches when at least one condition does. */
+  | 'ANY';
+
+/** Which requests a rule applies to. */
+export type AwsFirewallMatchInput = {
+  /** How the conditions combine */
+  combine: AwsFirewallMatchCombine;
+  /** From 1 to 10 conditions */
+  conditions: Array<AwsFirewallConditionInput>;
+};
+
+/** Which address an AWS rate limit counts requests by. */
+export type AwsFirewallRateAggregate =
+  /** The client address in the X-Forwarded-For header. */
+  | 'FORWARDED_IP'
+  /** The address the request comes from. */
+  | 'IP';
+
+/** Settings of a rate-limit rule. */
+export type AwsFirewallRateLimitRuleInput = {
+  /** What happens to a client over the limit. Allow is not valid here. */
+  action: AwsFirewallAction;
+  /** Address requests are counted by */
+  aggregate: AwsFirewallRateAggregate;
+  /** Requests one client can send in the window, from 10 to 2,000,000,000 */
+  limit: number;
+  /** Only matching requests count toward the limit. Left out, every request counts. */
+  match?: AwsFirewallMatchInput | null | undefined;
+  /** Window the requests are counted over: 60, 120, 300 or 600 */
+  windowSeconds: number;
+};
+
+/** One rule of an AWS firewall. The section named by kind holds its settings. */
+export type AwsFirewallRuleInput = {
+  /** Settings when kind is BOT_CONTROL */
+  botControl?: AwsFirewallBotControlRuleInput | null | undefined;
+  /** Settings when kind is CUSTOM */
+  custom?: AwsFirewallCustomRuleInput | null | undefined;
+  /** Whether the rule is evaluated */
+  enabled: boolean;
+  /** ID of an existing rule to keep. Left out, the rule is new and gets an ID. */
+  id?: string | null | undefined;
+  /** What the rule does */
+  kind: AwsFirewallRuleKind;
+  /** Settings when kind is MANAGED_GROUP */
+  managedGroup?: AwsFirewallManagedGroupRuleInput | null | undefined;
+  /** Display name */
+  name: string;
+  /** Settings when kind is RATE_LIMIT */
+  rateLimit?: AwsFirewallRateLimitRuleInput | null | undefined;
+};
+
+/** What an AWS firewall rule does. The section of the same name holds its settings. */
+export type AwsFirewallRuleKind =
+  /** Blocks the Bot Control categories it names. */
+  | 'BOT_CONTROL'
+  /** Acts on requests that match its conditions. */
+  | 'CUSTOM'
+  /** Turns on an AWS managed rule group. */
+  | 'MANAGED_GROUP'
+  /** Acts on a client that sends too many requests. */
+  | 'RATE_LIMIT';
+
+/** The rules of an AWS firewall. */
+export type AwsFirewallRulesInput = {
+  /** Every rule, in the order the firewall evaluates them. Up to 100. */
+  rules: Array<AwsFirewallRuleInput>;
+};
+
+/** How an AWS firewall condition compares a request's text to its value. */
+export type AwsFirewallTextOperator =
+  /** The text contains the value. */
+  | 'CONTAINS'
+  /** The text ends with the value. */
+  | 'ENDS_WITH'
+  /** The text equals the value. */
+  | 'EXACT'
+  /** The text matches the value as a regular expression. */
+  | 'REGEX'
+  /** The text starts with the value. */
+  | 'STARTS_WITH';
+
 /** Which EC2 instances a managed instances capacity provider may launch */
 export type AwsInstanceRequirementsInput = {
   /** e.g. c5.* or m5.large */
   allowedInstanceTypes?: Array<string> | null | undefined;
+  /** Whether burstable T-series instances may be launched */
   burstablePerformance?: AwsBurstablePerformanceEnum | null | undefined;
   /** arm64 or x86_64 */
   cpuArchitecture?: string | null | undefined;
   /** e.g. amazon-web-services, intel, amd */
   cpuManufacturers?: Array<string> | null | undefined;
+  /** Memory per instance, in MiB */
   memoryMib?: IntRangeInput | null | undefined;
+  /** vCPUs per instance */
   vcpuCount?: IntRangeInput | null | undefined;
 };
 
 /** Load balancer settings for an AWS cloud account */
 export type AwsLoadBalancerSettingsInput = {
+  /** Application load balancers only: accept traffic only from CloudFront, alongside allowedCidrs */
+  cdnOnly?: boolean | null | undefined;
   /** Application load balancers only: response when no route matches */
   defaultAction?: AwsAlbDefaultActionInput | null | undefined;
   /** Application load balancers only: ACM certificate for HTTPS traffic */
@@ -186,8 +423,11 @@ export type AwsLoadBalancerSettingsInput = {
 
 /** NAT gateways an AWS network gets: none, one, or one per availability zone */
 export type AwsNatGatewayOptionEnum =
+  /** No NAT gateway. Private subnets have no outbound internet access. */
   | 'NONE'
+  /** One NAT gateway in each availability zone. */
   | 'PER_AZ'
+  /** One NAT gateway shared by every private subnet. */
   | 'SINGLE';
 
 /** Network settings only AWS has */
@@ -200,42 +440,72 @@ export type AwsNetworkSettingsInput = {
 
 /** Status of a bastion host */
 export type BastionStatusEnum =
+  /** The bastion is running and takes connections. */
   | 'ACTIVE'
+  /** The bastion is destroyed. */
   | 'DELETED'
+  /** Destroying the bastion failed. */
   | 'DELETE_FAILED'
+  /** The bastion is being destroyed. */
   | 'DELETING'
+  /** Provisioning the bastion failed. */
   | 'FAILED'
+  /** The bastion is waiting to be provisioned. */
   | 'PENDING'
+  /** The bastion is being provisioned. */
   | 'PROVISIONING';
 
 /** Cache engine type */
 export type CacheEngineEnum =
+  /** Memcached, a key-value cache with no persistence */
   | 'MEMCACHED'
+  /** Redis OSS */
   | 'REDIS'
+  /** Valkey, an open-source in-memory store that Redis clients can use */
   | 'VALKEY';
 
 /** Status of a cache */
 export type CacheStatusEnum =
+  /** Ready for connections */
   | 'ACTIVE'
+  /** The last change did not complete */
   | 'FAILED'
+  /** Being created or changed */
   | 'PENDING';
 
 /** Certificate status values */
 export type CertificateStatusEnum =
+  /** Issued and usable in every region. */
   | 'ACTIVE'
+  /** Deleted. */
   | 'DELETED'
+  /** Being deleted. */
   | 'DELETING'
+  /** Past its expiry date. */
   | 'EXPIRED'
+  /** Validation failed in every region. */
   | 'FAILED'
+  /** Issued in some regions and failed in the others. */
   | 'PARTIAL'
+  /** Requested and not yet issued in any region. */
   | 'PENDING'
+  /** Waiting for its DNS validation records to resolve in at least one region. */
   | 'VALIDATING';
+
+/** What a cleanup item is */
+export type CleanupKindEnum =
+  /** Routing that served hostnames before they moved to new routing, kept until public DNS points at the new one. */
+  | 'PREVIOUS_ROUTING';
 
 /** The status of CLI execution for a step */
 export type CliStatus =
+  /** A CLI claimed the step and is running it. */
   | 'CLAIMED'
+  /** The CLI finished the step. */
   | 'COMPLETE'
+  /** The CLI reported a failure. `cliError` says why. */
   | 'FAILED'
+  /** No CLI has claimed the step yet. */
   | 'PENDING';
 
 /** Results of a CLI task. Set exactly one field, matching the step's cliTask. */
@@ -248,17 +518,26 @@ export type CliTaskOutputsInput = {
 
 /** Supported cloud providers */
 export type CloudProviderEnum =
+  /** Amazon Web Services. */
   | 'AWS'
+  /** Microsoft Azure. */
   | 'AZURE'
+  /** Cloudflare. */
   | 'CLOUDFLARE'
+  /** DigitalOcean. */
   | 'DIGITALOCEAN'
+  /** Google Cloud. */
   | 'GCP'
+  /** Vultr. */
   | 'VULTR';
 
 /** Status of a cluster */
 export type ClusterStatusEnum =
+  /** The cluster is ready to run services. */
   | 'ACTIVE'
+  /** Provisioning the cluster failed. */
   | 'FAILED'
+  /** The cluster is being provisioned. */
   | 'PENDING';
 
 export type ContainerPushCliOutputsInput = {
@@ -267,17 +546,23 @@ export type ContainerPushCliOutputsInput = {
   success: boolean;
 };
 
+/** A new bastion to create in a network. */
 export type CreateBastionInput = {
+  /** CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address. */
+  allowedCidrs?: Array<string> | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
   /** User-friendly name */
   name: string;
-  /** Network ID - must have public subnets */
+  /** Network ID */
   networkId: string;
+  /** Give the bastion a public address that takes SSH from allowedCidrs. Without it the bastion has no inbound access and is reached through startBastionSession. Fixed at create. */
+  publicAccess?: boolean;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
 };
 
+/** A new cache to create in a network */
 export type CreateCacheInput = {
   /** Required when the cloud account is AWS */
   aws?: AwsCacheSettingsInput | null | undefined;
@@ -299,15 +584,21 @@ export type CreateCacheInput = {
   slug: string;
 };
 
+/** A certificate to request. */
 export type CreateCertificateInput = {
+  /** Other hostnames to cover. */
   additionalDomains?: Array<string> | null | undefined;
   /** Required when the cloud account is AWS */
   aws?: AwsCertificateSettingsInput | null | undefined;
+  /** Cloud account to issue the certificate in. */
   cloudAccountId: string;
+  /** Domain to tie the certificate to. */
   domainId?: string | null | undefined;
+  /** Main hostname to cover. A wildcard such as `*.example.com` is allowed. */
   primaryDomain: string;
 };
 
+/** A new cluster to create. */
 export type CreateClusterInput = {
   /** Required when the cloud account is AWS */
   aws?: AwsClusterSettingsInput | null | undefined;
@@ -317,6 +608,7 @@ export type CreateClusterInput = {
   name: string;
   /** Network ID - required for managed instances */
   networkId?: string | null | undefined;
+  /** Cloud region to create the cluster in */
   region: string;
   /** URL-friendly identifier for CLI and API references */
   slug: string;
@@ -324,6 +616,7 @@ export type CreateClusterInput = {
 
 /** A new database server. Send the settings section for the cloud account it runs in. */
 export type CreateDatabaseInput = {
+  /** Settings for a server in an AWS cloud account */
   aws?: AwsDatabaseSettingsInput | null | undefined;
   /** Days of automatic backups. Defaults to 7. */
   backupRetentionDays?: number | null | undefined;
@@ -331,6 +624,7 @@ export type CreateDatabaseInput = {
   cloudAccountId: string;
   /** Database engine */
   engine: DatabaseEngineEnum;
+  /** Engine version, e.g. 16.4 */
   engineVersion?: string | null | undefined;
   /** Keep a standby copy in a second zone */
   highAvailability?: boolean | null | undefined;
@@ -348,22 +642,33 @@ export type CreateDatabaseInput = {
   storageGb?: number | null | undefined;
 };
 
+/** A root domain to register with the team. */
 export type CreateDomainInput = {
   /** Root domain FQDN (e.g., example.com) */
   name: string;
 };
 
+/** An environment to add to a project. */
 export type CreateEnvironmentInput = {
+  /** Cloud account the environment deploys into. */
   cloudAccountId: string;
+  /** Colour shown for the environment in the console. */
   color?: string | null | undefined;
+  /** Whether this is a production environment. */
   isProduction?: boolean;
+  /** Display name. */
   name: string;
+  /** Network the environment deploys into. */
   networkId?: string | null | undefined;
+  /** Project to add the environment to. */
   projectId: string;
+  /** Cloud region the environment deploys into, such as `us-east-1`. */
   region: string;
+  /** Slug that names the environment under `environments` in `gantry.yml`. */
   slug: string;
 };
 
+/** A new shared filesystem to create in a network */
 export type CreateFilesystemInput = {
   /** Required when the cloud account is AWS */
   aws?: AwsFilesystemSettingsInput | null | undefined;
@@ -377,7 +682,21 @@ export type CreateFilesystemInput = {
   slug: string;
 };
 
+/** A new firewall to create. It starts with no rules. */
+export type CreateFirewallInput = {
+  /** Display name */
+  name: string;
+  /** Cloud the rules are written for */
+  provider: CloudProviderEnum;
+  /** Identifier that gantry.yml routes use to name the firewall */
+  slug: string;
+};
+
+/** A new load balancer to create. */
 export type CreateLoadBalancerInput = {
+  /** Addresses (CIDRs) that may reach the load balancer. Empty accepts its visibility default. */
+  allowedCidrs?: Array<string> | null | undefined;
+  /** Only for an AWS cloud account */
   aws?: AwsLoadBalancerSettingsInput | null | undefined;
   /** Cloud account ID */
   cloudAccountId: string;
@@ -391,91 +710,219 @@ export type CreateLoadBalancerInput = {
   slug: string;
   /** Load balancer type */
   type: LoadBalancerTypeEnum;
+  /** Who can reach it. An internal load balancer goes in the network's private subnets and can't change to public later. */
+  visibility?: LoadBalancerVisibility;
 };
 
+/** A new network to create. */
 export type CreateNetworkInput = {
   /** Only for an AWS cloud account */
   aws?: AwsNetworkSettingsInput | null | undefined;
   /** Address range, e.g. 10.0.0.0/16 */
   cidr: string;
+  /** Cloud account ID */
   cloudAccountId: string;
   /** When true, databases and caches get no network-wide ingress. Defaults to false. */
   leastPrivilegeMode?: boolean | null | undefined;
+  /** User-friendly name */
   name: string;
+  /** Cloud region to create the network in */
   region: string;
+  /** URL-friendly identifier for CLI and API references */
   slug: string;
+  /** Subnets to create in the network */
   subnets: Array<NetworkSubnetInput>;
 };
 
+/** A project to create. */
 export type CreateProjectInput = {
+  /** Cloud the project deploys to. */
   cloudProvider: CloudProviderEnum;
+  /** Display name. The slug is made from it. */
   name: string;
+  /** Free-text label for grouping projects. */
   tag?: string | null | undefined;
 };
 
+/** A new secret to store in a cloud account */
 export type CreateSecretInput = {
+  /** Cloud account to store the secret in */
   cloudAccountId: string;
+  /** What the secret is for */
   description?: string | null | undefined;
+  /** Keys and values to store */
   keyValuePairs: Array<SecretKeyValueInput>;
+  /** Name, unique in the cloud account */
   name: string;
+};
+
+/** The environment whose staged version takes all traffic. */
+export type CutoverInput = {
+  /** Also complete the release, dropping the previous version */
+  complete?: boolean | null | undefined;
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Project ID */
+  projectId: string;
 };
 
 /** Database engine type */
 export type DatabaseEngineEnum =
+  /** MariaDB */
   | 'MARIADB'
+  /** MySQL */
   | 'MYSQL'
+  /** PostgreSQL */
   | 'POSTGRESQL';
 
 /** Status of a database */
 export type DatabaseStatusEnum =
+  /** Ready for connections */
   | 'ACTIVE'
+  /** The last change did not complete */
   | 'FAILED'
+  /** Being created or changed */
   | 'PENDING';
 
 /** IN_PLACE sets a new password on the same user. STAGED (Advanced Deployments) creates the user in the other slot, which the next deploy switches to */
 export type DatabaseUserRotationMode =
+  /** Set a new password on the same user now. Running instances fail to connect until they restart. */
   | 'IN_PLACE'
+  /** Create the user in the other slot. The next deploy switches to it while the current user keeps working. */
   | 'STAGED';
 
+/** Options that change how a deploy runs. */
 export type DeploymentOptionsInput = {
   /** Delete stale files after upload */
   deleteStale?: boolean | null | undefined;
   /** Force re-upload all files */
   force?: boolean | null | undefined;
+  /** Go live without running the post-deploy commands. The deployment records the skip. */
+  skipPostDeploy?: boolean | null | undefined;
+  /** Deploy without running the services' pre-deploy commands. The deployment records the skip. */
+  skipPreDeploy?: boolean | null | undefined;
 };
 
 /** The phase of a deployment step */
 export type DeploymentPhase =
+  /** Builds the code and container images, run by the CLI. */
   | 'BUILDING'
+  /** Provisions and updates the compute for the version. */
   | 'DEPLOYING'
+  /** Points routing and DNS at the version. */
   | 'GO_LIVE'
+  /** Runs post-deploy commands and finishes the deployment. */
   | 'POST_DEPLOY'
+  /** Creates what the version needs before it deploys, such as queues. */
   | 'SETUP'
+  /** Uploads artifacts, images and static files, run by the CLI. */
   | 'UPLOADING';
 
 /** The status of a deployment */
 export type DeploymentStatus =
+  /** Waiting on something outside the deployment, such as a certificate that has not validated yet. It resumes on its own. */
   | 'BLOCKED'
+  /** Cancelled before it finished. */
   | 'CANCELLED'
+  /** A cancel was requested and open steps are being stopped. */
   | 'CANCELLING'
+  /** Every step finished. */
   | 'COMPLETE'
+  /** A step failed. `lastMessage` says what failed. */
   | 'FAILED'
+  /** The steps are planned and the first ones are starting. */
   | 'INITIALIZING'
+  /** Queued and not picked up yet. */
   | 'PENDING'
+  /** Gantry is working out the steps the deployment needs. */
   | 'PLANNING'
+  /** Steps are running. */
   | 'RUNNING'
+  /** Ended with nothing to do, for example because a newer deployment replaced it. */
   | 'SKIPPED';
 
 /** The status of a deployment step */
 export type DeploymentStepStatus =
+  /** Waiting for the CLI to claim and run the step. */
   | 'AWAITING_CLI'
+  /** Stopped because the deployment was cancelled. */
   | 'CANCELLED'
+  /** Finished. */
   | 'COMPLETE'
+  /** Failed. `error` or `cliError` says why. */
   | 'FAILED'
+  /** Waiting for the CLI to send the list of files it will upload. */
   | 'MANIFEST_REQUIRED'
+  /** Waiting for the steps it depends on. */
   | 'PENDING'
+  /** Gantry is running the step. */
   | 'PROCESSING'
+  /** Ready and queued for Gantry to run. */
   | 'QUEUED';
+
+/** One env var to store */
+export type EnvVarInput = {
+  /** Variable name */
+  key: string;
+  /** Variable value */
+  value: string;
+};
+
+/** Where a stored env var applies. Narrower scopes win over broader ones. */
+export type EnvVarScopeEnum =
+  /** Every service deployed to one cloud account */
+  | 'CLOUD_ACCOUNT'
+  /** One project environment, or one service there when `service` is set */
+  | 'ENVIRONMENT'
+  /** Every service deployed to one network */
+  | 'NETWORK'
+  /** Every service in one project */
+  | 'PROJECT'
+  /** Every service the team deploys */
+  | 'TEAM';
+
+/** Where a value in a service env came from, lowest precedence first. */
+export type EnvVarSourceEnum =
+  /** Injected by a database, cache, bucket or filesystem binding */
+  | 'BINDING'
+  /** Stored at the cloud account scope */
+  | 'CLOUD_ACCOUNT'
+  /** Stored at the environment scope */
+  | 'ENVIRONMENT'
+  /** The environment's `env` for the service in gantry.yml */
+  | 'ENVIRONMENT_YAML'
+  /** Stored at the network scope */
+  | 'NETWORK'
+  /** Copied from a preview's parent environment, by the template's inherit_env */
+  | 'PARENT_ENVIRONMENT'
+  /** A preview template's `overrides` env in gantry.yml */
+  | 'PREVIEW_TEMPLATE'
+  /** Stored at the project scope */
+  | 'PROJECT'
+  /** The service's `secrets` in gantry.yml */
+  | 'SECRET'
+  /** Stored for this service only in the environment */
+  | 'SERVICE_OVERRIDE'
+  /** The service's `env` in gantry.yml */
+  | 'SERVICE_YAML'
+  /** Stored at the team scope */
+  | 'TEAM';
+
+/** The scope a stored env var operation applies to */
+export type EnvVarTargetInput = {
+  /** Required for CLOUD_ACCOUNT */
+  cloudAccountId?: string | null | undefined;
+  /** Required for ENVIRONMENT */
+  environmentSlug?: string | null | undefined;
+  /** Required for NETWORK */
+  networkId?: string | null | undefined;
+  /** Required for PROJECT and ENVIRONMENT */
+  projectId?: string | null | undefined;
+  /** Where the variables apply */
+  scope: EnvVarScopeEnum;
+  /** ENVIRONMENT only: a service name, for an override that applies to that service only */
+  service?: string | null | undefined;
+};
 
 export type FileManifestItem = {
   /** MD5 hash of the file content */
@@ -495,26 +942,82 @@ export type FileUploadResultInput = {
 
 /** Status of a filesystem */
 export type FilesystemStatusEnum =
+  /** Ready to mount */
   | 'ACTIVE'
+  /** The last change did not complete */
   | 'FAILED'
+  /** Being created or changed */
   | 'PENDING';
 
+/** State of a firewall's deployment in one cloud account */
+export type FirewallPlacementStatus =
+  /** A hostname in the cloud account uses the firewall. */
+  | 'ACTIVE'
+  /** No hostname in the cloud account uses the firewall, and it is being removed. */
+  | 'DRAINING'
+  /** The firewall was removed from the cloud account. */
+  | 'RELEASED';
+
+/** An inclusive range of whole numbers. */
 export type IntRangeInput = {
+  /** Highest allowed value. Omit for no limit. */
   max?: number | null | undefined;
+  /** Lowest allowed value */
   min: number;
+};
+
+/** Set exactly one source: from or buildNumber. */
+export type LiftBuildInput = {
+  /** Project build number to lift */
+  buildNumber?: number | null | undefined;
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Environment slug whose live build is lifted */
+  from?: string | null | undefined;
+  /** Project ID */
+  projectId: string;
+};
+
+/** A preview to create, or to redeploy when it exists. */
+export type LiftPreviewEnvironmentInput = {
+  /** The preview's name. An existing preview with this name is redeployed. Without one, a new preview is created and named by its id. */
+  name?: string | null | undefined;
+  /** Project id. Must match the `id` in the YAML. */
+  projectId: string;
+  /** Services to deploy, in place of the template's `services` for this lift. */
+  services?: Array<string> | null | undefined;
+  /** Branch and commit to record on the preview. */
+  sourceRef?: PreviewSourceRefInput | null | undefined;
+  /** Template name from `previews:`. */
+  template: string;
+  /** Variable values that win over every other source. */
+  variables?: Array<VariableOverrideInput> | null | undefined;
+  /** The `gantry.yml` content. */
+  yaml: string;
 };
 
 /** Status of a load balancer */
 export type LoadBalancerStatusEnum =
+  /** The load balancer is ready to take routes. */
   | 'ACTIVE'
+  /** Provisioning the load balancer failed. */
   | 'FAILED'
+  /** The load balancer is being provisioned. */
   | 'PENDING';
 
 /** Type of load balancer */
 export type LoadBalancerTypeEnum =
+  /** A regional HTTP and HTTPS load balancer inside a network. */
   | 'APPLICATION'
-  | 'GATEWAY_HTTP'
+  /** An HTTP and HTTPS load balancer with no region. */
   | 'GLOBAL';
+
+/** Who can reach a load balancer */
+export type LoadBalancerVisibility =
+  /** Takes traffic only from inside its network. A CDN cannot sit in front of it; route a hostname to it with cdn: false. */
+  | 'INTERNAL'
+  /** Takes traffic from the internet. */
+  | 'PUBLIC';
 
 export type LocalBuildCliOutputsInput = {
   buildCommands?: string | null | undefined;
@@ -523,9 +1026,13 @@ export type LocalBuildCliOutputsInput = {
   success: boolean;
 };
 
+/** A subnet to create in the network. */
 export type NetworkSubnetInput = {
+  /** Address range inside the network's range, e.g. 10.0.1.0/24 */
   cidr: string;
+  /** Subnet name, unique in the network */
   name: string;
+  /** Public or private */
   type: SubnetTypeEnum;
   /** Availability zone */
   zone?: string | null | undefined;
@@ -538,25 +1045,137 @@ export type ObjectUploadCliOutputsInput = {
   uploadedFiles: number;
 };
 
-export type PromoteVersionInput = {
-  /** Source version ID to promote from */
-  sourceVersionId: string;
-  /** Target environment ID to promote to */
-  targetEnvironmentId: string;
+/** The proxy a hostname is locked to */
+export type OriginLockProviderEnum =
+  /** Cloudflare adds the header */
+  | 'CLOUDFLARE'
+  /** Any proxy you run adds the header */
+  | 'HEADER';
+
+/** Where a deploy's post-deploy commands are. Queued and started mean the version is live. */
+export type PostDeployState =
+  /** The version is live and the commands are about to start. */
+  | 'QUEUED'
+  /** The deploy asked to skip the post-deploy commands. */
+  | 'SKIPPED'
+  /** The commands are running. */
+  | 'STARTED';
+
+/** Where the preview was lifted from, read from local git. */
+export type PreviewSourceRefInput = {
+  /** Branch checked out when the preview was lifted. */
+  branch?: string | null | undefined;
+  /** Commit checked out when the preview was lifted. */
+  commit?: string | null | undefined;
 };
 
-export type ResolveProjectInput = {
-  environment?: string | null | undefined;
+/** The environment a release operation acts on. */
+export type ReleaseEnvironmentInput = {
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Project ID */
   projectId: string;
+};
+
+/** A version's part in the environment's release */
+export type ReleaseRole =
+  /** The new version, taking part of the traffic. */
+  | 'CANARY'
+  /** The version taking the stable traffic. */
+  | 'LIVE'
+  /** The version a cutover replaced, kept so an abort can put it back. */
+  | 'PREVIOUS'
+  /** The new version, running with no traffic. */
+  | 'STAGED';
+
+/** Where the release in progress stands: staged at 0%, split across both versions, cut over with the previous version kept, or none. */
+export type ReleaseState =
+  /** The new version takes all traffic, and the previous one is kept until the release completes. */
+  | 'CUT_OVER'
+  /** No release is in progress. One version takes all traffic. */
+  | 'NONE'
+  /** The new version takes part of the traffic. */
+  | 'SPLIT'
+  /** The new version runs beside the live one with no traffic. */
+  | 'STAGED';
+
+/** A `gantry.yml` to resolve against a project. */
+export type ResolveProjectInput = {
+  /** Environment slug to resolve. Without it, every environment in the YAML. */
+  environment?: string | null | undefined;
+  /** Project id. Must match the `id` in the YAML. */
+  projectId: string;
+  /** Variable values that win over every other source. */
   variables?: Array<VariableOverrideInput> | null | undefined;
+  /** The `gantry.yml` content. */
   yaml: string;
 };
 
+/** The environment to roll back, and optionally the version to make live. */
+export type RollbackInput = {
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Project ID */
+  projectId: string;
+  /** Version to make live. Defaults to the latest earlier version with an older build than the environment's current one. */
+  versionId?: string | null | undefined;
+};
+
+/** One key and its value */
 export type SecretKeyValueInput = {
+  /** Key name. Must not be empty. */
   key: string;
+  /** Value stored under the key */
   value: string;
 };
 
+/** Env vars to store at a scope */
+export type SetEnvVarsInput = {
+  /** Required for CLOUD_ACCOUNT */
+  cloudAccountId?: string | null | undefined;
+  /** Required for ENVIRONMENT */
+  environmentSlug?: string | null | undefined;
+  /** Required for NETWORK */
+  networkId?: string | null | undefined;
+  /** Required for PROJECT and ENVIRONMENT */
+  projectId?: string | null | undefined;
+  /** Where the variables apply */
+  scope: EnvVarScopeEnum;
+  /** ENVIRONMENT only: a service name, for an override that applies to that service only */
+  service?: string | null | undefined;
+  /** Variables to store */
+  variables: Array<EnvVarInput>;
+};
+
+/** A firewall's complete rule list, replacing the current one. Send the section of the firewall's cloud. */
+export type SetFirewallRulesInput = {
+  /** Rules of an AWS firewall */
+  aws?: AwsFirewallRulesInput | null | undefined;
+  /** Firewall ID */
+  id: string;
+};
+
+/** The firewall to attach to a load balancer, or none. */
+export type SetLoadBalancerFirewallInput = {
+  /** Firewall ID to attach. Null detaches the current firewall. */
+  firewallId?: string | null | undefined;
+  /** Load balancer ID */
+  id: string;
+};
+
+/** How much traffic the new version of a canary release takes. */
+export type ShiftTrafficInput = {
+  /** Also complete the release, dropping the previous version. Only at 100. */
+  complete?: boolean | null | undefined;
+  /** Environment slug (e.g. "production") */
+  environment: string;
+  /** Share of traffic, 0 to 100, the new version takes */
+  percent: number;
+  /** Project ID */
+  projectId: string;
+};
+
+/** The environment to tear down, with the token and phrase that confirm it. */
 export type StartTeardownInput = {
   /** Confirmation phrase typed by user */
   confirmationPhrase: string;
@@ -570,7 +1189,9 @@ export type StartTeardownInput = {
 
 /** Who executes the step - Gantry (cloud) or the CLI (local) */
 export type StepExecutor =
+  /** The CLI runs the step on the machine that started the deploy. */
   | 'CLI'
+  /** Gantry runs the step in the cloud. */
   | 'WORKER';
 
 export type SubmitManifestInput = {
@@ -584,12 +1205,62 @@ export type SubmitManifestInput = {
   stepId: string;
 };
 
+/** Whether a subnet is reachable from the internet */
 export type SubnetTypeEnum =
+  /** No inbound route from the internet. */
   | 'PRIVATE'
+  /** Has a route to and from the internet. */
   | 'PUBLIC';
+
+/** The preview to tear down. */
+export type TeardownPreviewEnvironmentInput = {
+  /** The preview's name: its `--as` name, or its id. */
+  name: string;
+  /** Project id. */
+  projectId: string;
+  /** Template name from `previews:`. */
+  template: string;
+};
+
+/** What a teardown does to routing the environment uses. */
+export type TeardownRoutingChangeEnum =
+  /** Nothing else routes through it. A CDN is removed with its DNS records; a load balancer drops its rules for the environment. */
+  | 'REMOVED'
+  /** Other environments still route through it, and keep their routes. */
+  | 'UPDATED';
+
+/** What serves the routing a teardown changes. */
+export type TeardownRoutingEdgeEnum =
+  /** A CDN, identified by its hostnames. */
+  | 'CDN'
+  /** A hostname served directly by its service. */
+  | 'DIRECT'
+  /** A gateway, identified by its hostnames. */
+  | 'GATEWAY'
+  /** A load balancer, identified by its name. */
+  | 'LOAD_BALANCER';
+
+/** Env vars to remove from a scope */
+export type UnsetEnvVarsInput = {
+  /** Required for CLOUD_ACCOUNT */
+  cloudAccountId?: string | null | undefined;
+  /** Required for ENVIRONMENT */
+  environmentSlug?: string | null | undefined;
+  /** Names of the variables to remove */
+  keys: Array<string>;
+  /** Required for NETWORK */
+  networkId?: string | null | undefined;
+  /** Required for PROJECT and ENVIRONMENT */
+  projectId?: string | null | undefined;
+  /** Where the variables apply */
+  scope: EnvVarScopeEnum;
+  /** ENVIRONMENT only: a service name, for an override that applies to that service only */
+  service?: string | null | undefined;
+};
 
 /** Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly. */
 export type UpdateDatabaseInput = {
+  /** Settings for a server in an AWS cloud account */
   aws?: AwsDatabaseSettingsInput | null | undefined;
   /** Days of automatic backups. 0 turns backups off and deletes existing ones. */
   backupRetentionDays?: number | null | undefined;
@@ -603,59 +1274,33 @@ export type UpdateDatabaseInput = {
   storageGb?: number | null | undefined;
 };
 
-export type UpdateSecretInput = {
-  description?: string | null | undefined;
+/** A new name for a firewall. */
+export type UpdateFirewallInput = {
+  /** Firewall ID */
   id: string;
+  /** New display name */
+  name: string;
+};
+
+/** Changes to a secret. Fields left out stay as they are. */
+export type UpdateSecretInput = {
+  /** New description */
+  description?: string | null | undefined;
+  /** Secret ID */
+  id: string;
+  /** Every key and value the secret should hold. Replaces the current set. */
   keyValuePairs?: Array<SecretKeyValueInput> | null | undefined;
+  /** New name, unique in the cloud account */
   name?: string | null | undefined;
 };
 
+/** A variable value given for this resolution only. */
 export type VariableOverrideInput = {
+  /** Variable name. */
   name: string;
+  /** Value as a string. It is converted to the variable's declared type. */
   value: string;
 };
-
-export type GetActivationDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetActivationDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null } | null };
-
-export type AbortCanaryMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type AbortCanaryMutation = { abortCanary: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type PromoteBlueGreenMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type PromoteBlueGreenMutation = { promoteBlueGreen: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type PromoteCanaryMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type PromoteCanaryMutation = { promoteCanary: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type RollbackDeploymentMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type RollbackDeploymentMutation = { rollbackDeployment: { success: boolean, message: string | null, deploymentId: string | null } };
-
-export type SetCanaryMutationVariables = Exact<{
-  input: ActivationInput;
-}>;
-
-
-export type SetCanaryMutation = { setCanary: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type GetCachesQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -695,12 +1340,17 @@ export type CreateCacheMutationVariables = Exact<{
 
 export type CreateCacheMutation = { createCache: { success: boolean, message: string | null, deploymentId: string | null, cache: { id: string, name: string, slug: string, engine: CacheEngineEnum, status: CacheStatusEnum } | null } };
 
-export type GetCacheTunnelBastionQueryVariables = Exact<{
-  slug: string;
+export type GetCleanupItemsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetCleanupItemsQuery = { cleanupItems: Array<{ id: string, kind: CleanupKindEnum, description: string, readyToRemove: boolean, hostnames: Array<{ hostname: string, dnsMoved: boolean, dnsTarget: string | null }> }> };
+
+export type CleanUpMutationVariables = Exact<{
+  ids: Array<string | number> | string | number;
 }>;
 
 
-export type GetCacheTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
+export type CleanUpMutation = { cleanUp: { success: boolean, message: string | null, removed: Array<string> } };
 
 export type GetCloudsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -725,6 +1375,17 @@ export type CreateClusterMutationVariables = Exact<{
 
 
 export type CreateClusterMutation = { createCluster: { success: boolean, message: string | null, deploymentId: string | null, cluster: { id: string, name: string, slug: string, provider: string, status: ClusterStatusEnum, region: string } | null } };
+
+export type DatabaseLogsQueryVariables = Exact<{
+  id: string;
+  since?: string | null | undefined;
+  limit?: number | null | undefined;
+  grep?: string | null | undefined;
+  cursor?: string | null | undefined;
+}>;
+
+
+export type DatabaseLogsQuery = { databaseLogs: { cursor: string, lines: Array<{ timestamp: string, message: string }> } };
 
 export type GetDatabasesQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -811,12 +1472,55 @@ export type GetDatabaseOperationQueryVariables = Exact<{
 
 export type GetDatabaseOperationQuery = { deployment: { status: DeploymentStatus, lastMessage: string | null } | null };
 
-export type GetDatabaseTunnelBastionQueryVariables = Exact<{
-  slug: string;
+export type ReleaseStatusQueryVariables = Exact<{
+  projectId: string;
+  environment: string;
 }>;
 
 
-export type GetDatabaseTunnelBastionQuery = { bastion: { id: string, publicIp: string | null } | null };
+export type ReleaseStatusQuery = { releaseStatus: { strategy: string, state: ReleaseState, since: string, holdExpiresAt: string | null, versions: Array<{ versionId: string, number: number | null, role: ReleaseRole, weight: number, createdAt: string }> } | null };
+
+export type CutoverMutationVariables = Exact<{
+  input: CutoverInput;
+}>;
+
+
+export type CutoverMutation = { cutover: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type ShiftTrafficMutationVariables = Exact<{
+  input: ShiftTrafficInput;
+}>;
+
+
+export type ShiftTrafficMutation = { shiftTraffic: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type AbortReleaseMutationVariables = Exact<{
+  input: ReleaseEnvironmentInput;
+}>;
+
+
+export type AbortReleaseMutation = { abortRelease: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type CompleteReleaseMutationVariables = Exact<{
+  input: ReleaseEnvironmentInput;
+}>;
+
+
+export type CompleteReleaseMutation = { completeRelease: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type RollbackMutationVariables = Exact<{
+  input: RollbackInput;
+}>;
+
+
+export type RollbackMutation = { rollback: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type ReapplyRoutingMutationVariables = Exact<{
+  input: ReleaseEnvironmentInput;
+}>;
+
+
+export type ReapplyRoutingMutation = { reapplyRouting: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type GetDeploymentQueryVariables = Exact<{
   id: string;
@@ -838,7 +1542,7 @@ export type GetDeploymentVersionsQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentVersionsQuery = { versionsByProject: Array<{ id: string, number: number, gitRef: string | null, createdAt: string }> };
+export type GetDeploymentVersionsQuery = { versionsByProject: Array<{ id: string, number: number | null, gitRef: string | null, createdAt: string }> };
 
 export type CancelDeploymentMutationVariables = Exact<{
   id: string;
@@ -865,6 +1569,43 @@ export type CreateCertificateMutationVariables = Exact<{
 
 
 export type CreateCertificateMutation = { createCertificate: { success: boolean, message: string | null, certificate: { id: string, primaryDomain: string, status: CertificateStatusEnum, createdAt: string } | null } };
+
+export type EnvVarsQueryVariables = Exact<{
+  input: EnvVarTargetInput;
+}>;
+
+
+export type EnvVarsQuery = { envVars: Array<{ key: string, value: string, updatedAt: string }> };
+
+export type SetEnvVarsMutationVariables = Exact<{
+  input: SetEnvVarsInput;
+}>;
+
+
+export type SetEnvVarsMutation = { setEnvVars: { success: boolean, message: string | null, created: Array<string>, updated: Array<string>, removed: Array<string> } };
+
+export type ReplaceEnvVarsMutationVariables = Exact<{
+  input: SetEnvVarsInput;
+}>;
+
+
+export type ReplaceEnvVarsMutation = { replaceEnvVars: { success: boolean, message: string | null, created: Array<string>, updated: Array<string>, removed: Array<string> } };
+
+export type UnsetEnvVarsMutationVariables = Exact<{
+  input: UnsetEnvVarsInput;
+}>;
+
+
+export type UnsetEnvVarsMutation = { unsetEnvVars: { success: boolean, message: string | null, created: Array<string>, updated: Array<string>, removed: Array<string> } };
+
+export type ResolvedServiceEnvQueryVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+}>;
+
+
+export type ResolvedServiceEnvQuery = { resolvedServiceEnv: { versionNumber: number | null, variables: Array<{ key: string, value: string, source: EnvVarSourceEnum, overrides: Array<EnvVarSourceEnum> }> } };
 
 export type GetEnvironmentsQueryVariables = Exact<{
   projectId?: string | null | undefined;
@@ -902,6 +1643,39 @@ export type CreateFilesystemMutationVariables = Exact<{
 
 export type CreateFilesystemMutation = { createFilesystem: { success: boolean, message: string | null, filesystem: { id: string, name: string, slug: string, provider: string, status: FilesystemStatusEnum } | null } };
 
+export type GetFirewallsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetFirewallsQuery = { firewalls: Array<{ id: string, name: string, slug: string, provider: CloudProviderEnum, rules: Record<string, unknown>, placements: Array<{ id: string, cloudAccountId: string, status: FirewallPlacementStatus }>, uses: Array<{ hostname: string, projectId: string, projectName: string }> }> };
+
+export type CreateFirewallMutationVariables = Exact<{
+  input: CreateFirewallInput;
+}>;
+
+
+export type CreateFirewallMutation = { createFirewall: { success: boolean, message: string | null, firewall: { id: string, name: string, slug: string } | null } };
+
+export type UpdateFirewallMutationVariables = Exact<{
+  input: UpdateFirewallInput;
+}>;
+
+
+export type UpdateFirewallMutation = { updateFirewall: { success: boolean, message: string | null, firewall: { id: string, name: string, slug: string } | null } };
+
+export type SetFirewallRulesMutationVariables = Exact<{
+  input: SetFirewallRulesInput;
+}>;
+
+
+export type SetFirewallRulesMutation = { setFirewallRules: { success: boolean, message: string | null, firewall: { id: string, slug: string, placements: Array<{ status: FirewallPlacementStatus }> } | null } };
+
+export type DeleteFirewallMutationVariables = Exact<{
+  id: string;
+}>;
+
+
+export type DeleteFirewallMutation = { deleteFirewall: { success: boolean, message: string | null } };
+
 export type CreateVersionMutationVariables = Exact<{
   config: Record<string, unknown>;
   environment?: string | null | undefined;
@@ -921,74 +1695,10 @@ export type StartLiftDeploymentMutationVariables = Exact<{
 
 export type StartLiftDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null, deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, serviceName: string | null, environmentName: string | null } | null } };
 
-export type GetLiftDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetLiftDeploymentQuery = { deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, serviceName: string | null, environmentName: string | null, steps: Array<{ id: string, stepType: string, status: DeploymentStepStatus, phase: DeploymentPhase, executor: StepExecutor, cliTask: string | null, cliStatus: CliStatus | null, sequence: number }> | null } | null };
-
-export type CancelLiftDeploymentMutationVariables = Exact<{
-  id: string;
-}>;
-
-
-export type CancelLiftDeploymentMutation = { cancelDeployment: { success: boolean, message: string | null, deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, updatedAt: string } | null } };
-
-export type ClaimStepMutationVariables = Exact<{
-  stepId: string;
-}>;
-
-
-export type ClaimStepMutation = { claimStep: { success: boolean, message: string | null, step: { id: string, stepType: string, cliTask: string | null, cliInputs:
-        | { __typename: 'ArtifactUploadCliInputs', stepId: string, provider: string, bucketName: string, objectKey: string, region: string, maxArtifactBytes: number, sourcePath: string, excludePatterns: Array<string> | null, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null }
-        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string, registryEndpoint: string, registryUsername: string, registryPassword: string | null }
-        | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionNumber: number, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, architecture: string | null, buildArgs: Array<{ name: string, value: string }> | null }
-        | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null }
-       | null } | null } };
-
-export type CompleteCliStepMutationVariables = Exact<{
-  stepId: string;
-  outputs: CliTaskOutputsInput;
-  fileResults?: Array<FileUploadResultInput> | FileUploadResultInput | null | undefined;
-}>;
-
-
-export type CompleteCliStepMutation = { completeCliStep: { success: boolean, message: string | null } };
-
-export type FailCliStepMutationVariables = Exact<{
-  stepId: string;
-  error: string;
-}>;
-
-
-export type FailCliStepMutation = { failCliStep: { success: boolean, message: string | null } };
-
-export type DeploymentsByVersionQueryVariables = Exact<{
-  versionId: string;
-}>;
-
-
-export type DeploymentsByVersionQuery = { deploymentsByVersion: Array<{ id: string, status: DeploymentStatus, scope: string | null, deploymentType: string | null, lastMessage: string | null, serviceName: string | null, steps: Array<{ id: string, stepType: string, status: DeploymentStepStatus, phase: DeploymentPhase, executor: StepExecutor, cliTask: string | null, cliStatus: CliStatus | null, sequence: number }> | null }> };
-
-export type VersionRouteUrlsQueryVariables = Exact<{
-  versionId: string;
-}>;
-
-
-export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null }> };
-
-export type VersionDnsRecordsQueryVariables = Exact<{
-  versionId: string;
-}>;
-
-
-export type VersionDnsRecordsQuery = { versionDnsRecords: Array<{ hostname: string, recordType: string, name: string, value: string, managed: boolean, syncStatus: string }> };
-
 export type GetLoadBalancersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, region: string | null, endpoint: string | null, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
+export type GetLoadBalancersQuery = { loadBalancers: Array<{ id: string, name: string, slug: string, type: LoadBalancerTypeEnum, visibility: LoadBalancerVisibility, region: string | null, endpoint: string | null, status: LoadBalancerStatusEnum, cloudAccountId: string, createdAt: string }> };
 
 export type GetLoadBalancerTypesQueryVariables = Exact<{
   provider: CloudProviderEnum;
@@ -997,17 +1707,38 @@ export type GetLoadBalancerTypesQueryVariables = Exact<{
 
 export type GetLoadBalancerTypesQuery = { loadBalancerTypes: Array<{ type: LoadBalancerTypeEnum, displayName: string, provider: string, description: string, guidance: string, requiresNetwork: boolean, requiresRegion: boolean }> };
 
+export type SetLoadBalancerFirewallMutationVariables = Exact<{
+  input: SetLoadBalancerFirewallInput;
+}>;
+
+
+export type SetLoadBalancerFirewallMutation = { setLoadBalancerFirewall: { success: boolean, message: string | null, deploymentId: string | null } };
+
 export type CreateLoadBalancerMutationVariables = Exact<{
   input: CreateLoadBalancerInput;
 }>;
 
 
-export type CreateLoadBalancerMutation = { createLoadBalancer: { success: boolean, message: string | null, deploymentId: string | null, loadBalancer: { id: string, name: string, slug: string, type: LoadBalancerTypeEnum, status: LoadBalancerStatusEnum } | null } };
+export type CreateLoadBalancerMutation = { createLoadBalancer: { success: boolean, message: string | null, deploymentId: string | null, loadBalancer: { id: string, name: string, slug: string, type: LoadBalancerTypeEnum, visibility: LoadBalancerVisibility, status: LoadBalancerStatusEnum } | null } };
 
 export type VerifyLoginQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type VerifyLoginQuery = { whoami: { teamIds: Array<string>, kind: string, tokenName: string, authenticated: boolean } };
+
+export type ServiceLogsQueryVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+  function?: string | null | undefined;
+  since?: string | null | undefined;
+  limit?: number | null | undefined;
+  grep?: string | null | undefined;
+  cursor?: string | null | undefined;
+}>;
+
+
+export type ServiceLogsQuery = { serviceLogs: { cursor: string, lines: Array<{ timestamp: string, message: string }> } };
 
 export type GetNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1020,6 +1751,35 @@ export type CreateNetworkMutationVariables = Exact<{
 
 
 export type CreateNetworkMutation = { createNetwork: { success: boolean, message: string | null, deploymentId: string | null, network: { id: string, name: string, slug: string, region: string } | null } };
+
+export type GetOriginLockQueryVariables = Exact<{
+  hostname: string;
+}>;
+
+
+export type GetOriginLockQuery = { originLock: { hostname: string, provider: OriginLockProviderEnum, header: string, value: string } | null };
+
+export type LiftPreviewEnvironmentMutationVariables = Exact<{
+  input: LiftPreviewEnvironmentInput;
+}>;
+
+
+export type LiftPreviewEnvironmentMutation = { liftPreviewEnvironment: { ok: boolean, created: boolean | null, errors: Array<{ code: string, message: string, path: string, suggestion: string | null }>, preview: { id: string, slug: string, template: string, name: string, parentEnvironment: string, services: Array<string>, databases: string | null, urls: Array<string>, createdAt: string } | null, resolved: { environment: string, config: Record<string, unknown>, plan: { builds: Array<{ name: string, architecture: string }> } } | null } };
+
+export type PreviewEnvironmentsQueryVariables = Exact<{
+  projectId: string;
+  template?: string | null | undefined;
+}>;
+
+
+export type PreviewEnvironmentsQuery = { previewEnvironments: Array<{ id: string, slug: string, template: string, name: string, parentEnvironment: string, services: Array<string>, databases: string | null, urls: Array<string>, createdAt: string }> };
+
+export type TeardownPreviewEnvironmentMutationVariables = Exact<{
+  input: TeardownPreviewEnvironmentInput;
+}>;
+
+
+export type TeardownPreviewEnvironmentMutation = { teardownPreviewEnvironment: { success: boolean, message: string, teardownId: string | null } };
 
 export type GetProjectsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1047,52 +1807,6 @@ export type CreateProjectMutationVariables = Exact<{
 
 
 export type CreateProjectMutation = { createProject: { success: boolean, message: string | null, project: { id: string, name: string, slug: string, tag: string | null, cloudProvider: string | null, createdAt: string } | null } };
-
-export type PromoteVersionMutationVariables = Exact<{
-  input: PromoteVersionInput;
-}>;
-
-
-export type PromoteVersionMutation = { promoteVersion: { success: boolean, message: string | null, promotionId: string | null, newVersionId: string | null, newVersionNumber: number | null, yamlSnapshot: string | null } };
-
-export type StartPromotedDeploymentMutationVariables = Exact<{
-  environment: string;
-  config: Record<string, unknown>;
-  versionId?: string | null | undefined;
-  options?: DeploymentOptionsInput | null | undefined;
-}>;
-
-
-export type StartPromotedDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null, deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, startedAt: string, projectName: string | null, serviceName: string | null, environmentName: string | null } | null } };
-
-export type GetPromotedDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetPromotedDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, serviceName: string | null, environmentName: string | null } | null };
-
-export type GetPromoteTargetEnvironmentsQueryVariables = Exact<{
-  projectId: string;
-}>;
-
-
-export type GetPromoteTargetEnvironmentsQuery = { environments: Array<{ id: string, name: string, slug: string }> };
-
-export type TriggerRerouteMutationVariables = Exact<{
-  config: Record<string, unknown>;
-  environment: string;
-}>;
-
-
-export type TriggerRerouteMutation = { triggerReroute: { success: boolean, message: string | null, deploymentId: string | null, versionId: string | null, versionNumber: number | null } };
-
-export type GetRerouteDeploymentQueryVariables = Exact<{
-  id: string;
-}>;
-
-
-export type GetRerouteDeploymentQuery = { deployment: { id: string, teamId: string, environmentId: string | null, status: DeploymentStatus, lastMessage: string | null, startedAt: string, updatedAt: string, completedAt: string | null, projectName: string | null, projectId: string | null, environmentName: string | null, serviceName: string | null } | null };
 
 export type StartCommandRunMutationVariables = Exact<{
   projectId: string;
@@ -1158,13 +1872,24 @@ export type DeleteSecretMutationVariables = Exact<{
 
 export type DeleteSecretMutation = { deleteSecret: { success: boolean, message: string | null } };
 
+export type StartShellSessionMutationVariables = Exact<{
+  projectId: string;
+  environmentSlug: string;
+  service: string;
+  instance?: string | null | undefined;
+  command?: string | null | undefined;
+}>;
+
+
+export type StartShellSessionMutation = { startShellSession: { success: boolean, message: string | null, instanceId: string | null, aws: { region: string, sessionId: string, streamUrl: string, tokenValue: string, target: string } | null } };
+
 export type TeardownPreviewQueryVariables = Exact<{
   projectId: string;
   environmentSlug: string;
 }>;
 
 
-export type TeardownPreviewQuery = { teardownPreview: { environmentId: string, environmentName: string, totalResources: number, teardownToken: string, expiresAt: string, resources: Array<{ id: string, resourceType: string, resourceId: string | null, status: string }> } };
+export type TeardownPreviewQuery = { teardownPreview: { environmentId: string, environmentName: string, totalResources: number, teardownToken: string, expiresAt: string, resources: Array<{ id: string, resourceType: string, resourceId: string | null, status: string }>, routing: Array<{ edge: TeardownRoutingEdgeEnum, name: string, otherEnvironments: number, change: TeardownRoutingChangeEnum }> } };
 
 export type StartTeardownMutationVariables = Exact<{
   input: StartTeardownInput;
@@ -1179,7 +1904,7 @@ export type GetVersionsQueryVariables = Exact<{
 }>;
 
 
-export type GetVersionsQuery = { versionsByProject: Array<{ id: string, number: number, gitRef: string | null, createdAt: string }> };
+export type GetVersionsQuery = { versionsByProject: Array<{ id: string, number: number | null, gitRef: string | null, createdAt: string }> };
 
 export type WhoAmIQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1191,14 +1916,14 @@ export type GetBastionsQueryVariables = Exact<{
 }>;
 
 
-export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string }> };
+export type GetBastionsQuery = { bastions: Array<{ id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, provider: string, publicAccess: boolean, publicIp: string | null, createdAt: string }> };
 
 export type GetBastionQueryVariables = Exact<{
   slug: string;
 }>;
 
 
-export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null, createdAt: string } | null };
+export type GetBastionQuery = { bastion: { id: string, slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, provider: string, publicAccess: boolean, publicIp: string | null, createdAt: string } | null };
 
 export type GetBastionPrivateKeyQueryVariables = Exact<{
   slug: string;
@@ -1212,7 +1937,7 @@ export type CreateBastionMutationVariables = Exact<{
 }>;
 
 
-export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, publicIp: string | null } | null } };
+export type CreateBastionMutation = { createBastion: { success: boolean, message: string | null, deploymentId: string | null, bastion: { slug: string, name: string, status: BastionStatusEnum, networkId: string, cloudAccountId: string, sshUser: string, provider: string, publicAccess: boolean, publicIp: string | null } | null } };
 
 export type DestroyBastionMutationVariables = Exact<{
   slug: string;
@@ -1230,6 +1955,73 @@ export type GetBastionNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type GetBastionNetworksQuery = { networks: Array<{ id: string, name: string, slug: string, region: string, cloudAccountId: string, stackStatus: string | null }> };
+
+export type StartBastionSessionMutationVariables = Exact<{
+  slug: string;
+}>;
+
+
+export type StartBastionSessionMutation = { startBastionSession: { success: boolean, message: string | null, aws: { region: string, sessionId: string, streamUrl: string, tokenValue: string, target: string } | null } };
+
+export type GetTunnelBastionQueryVariables = Exact<{
+  slug: string;
+}>;
+
+
+export type GetTunnelBastionQuery = { bastion: { id: string, provider: string, publicAccess: boolean, publicIp: string | null } | null };
+
+export type StartVersionDeploymentMutationVariables = Exact<{
+  environment: string;
+  config: Record<string, unknown>;
+  versionId?: string | null | undefined;
+  options?: DeploymentOptionsInput | null | undefined;
+}>;
+
+
+export type StartVersionDeploymentMutation = { startDeployment: { success: boolean, message: string | null, deploymentIds: Array<string> | null, versionId: string | null } };
+
+export type ClaimStepMutationVariables = Exact<{
+  stepId: string;
+}>;
+
+
+export type ClaimStepMutation = { claimStep: { success: boolean, message: string | null, step: { id: string, stepType: string, cliTask: string | null, cliInputs:
+        | { __typename: 'ArtifactUploadCliInputs', stepId: string, provider: string, bucketName: string, objectKey: string, region: string, maxArtifactBytes: number, excludePatterns: Array<string> | null, packageSourcePath: string | null, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null, source: { bucketName: string, objectKey: string, region: string, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null } | null }
+        | { __typename: 'ContainerPushCliInputs', stepId: string, imageUri: string, localImageTag: string | null, registryEndpoint: string, registryUsername: string, registryPassword: string | null, source: { imageUri: string, registryEndpoint: string, registryUsername: string, registryPassword: string | null } | null }
+        | { __typename: 'LocalBuildCliInputs', stepId: string, serviceName: string, versionTag: string, projectId: string, projectSlug: string, buildCommands: Array<string> | null, dockerfile: string | null, workingDir: string | null, dockerTarget: string | null, namedBuildName: string | null, architecture: string | null, buildArgs: Array<{ name: string, value: string }> | null }
+        | { __typename: 'ObjectUploadCliInputs', stepId: string, sourcePath: string, includePatterns: Array<string> | null, excludePatterns: Array<string> | null, source: { bucketName: string, region: string, keyPrefix: string, aws: { accessKeyId: string, secretAccessKey: string, sessionToken: string } | null } | null }
+       | null } | null } };
+
+export type CancelLiftDeploymentMutationVariables = Exact<{
+  id: string;
+}>;
+
+
+export type CancelLiftDeploymentMutation = { cancelDeployment: { success: boolean, message: string | null } };
+
+export type CompleteCliStepMutationVariables = Exact<{
+  stepId: string;
+  outputs: CliTaskOutputsInput;
+  fileResults?: Array<FileUploadResultInput> | FileUploadResultInput | null | undefined;
+}>;
+
+
+export type CompleteCliStepMutation = { completeCliStep: { success: boolean, message: string | null } };
+
+export type FailCliStepMutationVariables = Exact<{
+  stepId: string;
+  error: string;
+}>;
+
+
+export type FailCliStepMutation = { failCliStep: { success: boolean, message: string | null } };
+
+export type DeploymentsByVersionQueryVariables = Exact<{
+  versionId: string;
+}>;
+
+
+export type DeploymentsByVersionQuery = { deploymentsByVersion: Array<{ id: string, status: DeploymentStatus, scope: string | null, deploymentType: string | null, lastMessage: string | null, serviceName: string | null, steps: Array<{ id: string, stepType: string, status: DeploymentStepStatus, phase: DeploymentPhase, executor: StepExecutor, cliTask: string | null, cliStatus: CliStatus | null, sequence: number }> | null }> };
 
 export type GetCloudChoicesQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1251,7 +2043,7 @@ export type GetEnvironmentChoicesQueryVariables = Exact<{
 }>;
 
 
-export type GetEnvironmentChoicesQuery = { environments: Array<{ id: string, name: string, projectId: string, isProduction: boolean }> };
+export type GetEnvironmentChoicesQuery = { environments: Array<{ id: string, name: string, slug: string, projectId: string, isProduction: boolean }> };
 
 export type GetSecretChoicesQueryVariables = Exact<{
   cloudAccountId?: string | null | undefined;
@@ -1272,12 +2064,55 @@ export type GetCloudRegionChoicesQueryVariables = Exact<{
 
 export type GetCloudRegionChoicesQuery = { cloudRegions: Array<{ code: string, name: string }> };
 
+export type LiftBuildMutationVariables = Exact<{
+  input: LiftBuildInput;
+}>;
+
+
+export type LiftBuildMutation = { liftBuild: { success: boolean, message: string | null, versionId: string | null, versionNumber: number | null, yamlSnapshot: string | null } };
+
+export type ReleaseOutputQueryVariables = Exact<{
+  versionId: string;
+  after?: string | null | undefined;
+}>;
+
+
+export type ReleaseOutputQuery = { releaseOutput: { cursor: string | null, lines: Array<{ message: string, deploymentId: string }> } };
+
+export type GetReleaseDeploymentQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetReleaseDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, versionId: string | null, steps: Array<{ stepType: string, status: DeploymentStepStatus }> | null } | null };
+
 export type ResolveProjectQueryVariables = Exact<{
   input: ResolveProjectInput;
 }>;
 
 
 export type ResolveProjectQuery = { resolveProject: { ok: boolean, blueprintReference: string | null, errors: Array<{ code: string, message: string, path: string, suggestion: string | null }>, environments: Array<{ environment: string, config: Record<string, unknown>, resolvedYaml: string, provenance: Array<{ name: string, type: string, value: string, source: string }>, plan: { services: Array<{ name: string, type: string, deploymentType: string, source: string, cluster: string | null }>, routing: Array<{ domain: string, entryType: string, loadBalancer: string | null, paths: Array<{ path: string, service: string, deploymentType: string, routeHops: Array<string> }> }>, builds: Array<{ name: string, architecture: string }> } }> } };
+
+export type GetRoutingDeploymentQueryVariables = Exact<{
+  id: string;
+}>;
+
+
+export type GetRoutingDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, postDeployState: PostDeployState | null, steps: Array<{ stepType: string, status: DeploymentStepStatus }> | null } | null };
+
+export type VersionRouteUrlsQueryVariables = Exact<{
+  versionId: string;
+}>;
+
+
+export type VersionRouteUrlsQuery = { versionRouteUrls: Array<{ url: string, domain: string | null, path: string, serviceName: string, cache: string | null, firewall: string | null, originLock: string | null }> };
+
+export type VersionDnsRecordsQueryVariables = Exact<{
+  versionId: string;
+}>;
+
+
+export type VersionDnsRecordsQuery = { versionDnsRecords: Array<{ hostname: string, recordType: string, name: string, value: string, managed: boolean, syncStatus: string }> };
 
 export type SubmitManifestMutationVariables = Exact<{
   input: SubmitManifestInput;

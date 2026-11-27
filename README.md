@@ -18,7 +18,7 @@ Use the CLI locally or in CI with a `gantry.yml` configuration file.
 
 - **Check and inspect** a config before anything is deployed - validate it, see the composed result after blueprints and variables resolve, and see which services and routes a deploy would produce.
 - **Deploy** - build each service, upload what changed, provision the infrastructure the config asks for, and route traffic to the new version.
-- **Control releases** - promote a version between environments, roll back, or shift traffic gradually.
+- **Control releases** - ship a build from one environment to another, roll back, or shift traffic gradually.
 - **Manage infrastructure** - networks, clusters, databases, caches, filesystems, load balancers, domains, secrets.
 - **Access running services** - run a one-off command in a live service, or open a local tunnel to a database or cache through a bastion, so nothing private needs a public address.
 
@@ -95,6 +95,36 @@ vendor/*
 
 `.git` and the `.gantry` staging directory are never copied.
 
+## Releases
+
+`gantry lift <env>` builds the project and ships it. Two flags ship a build that already exists instead, with the configuration it was built with:
+
+```sh
+# Ship staging's live build to production
+gantry lift production --from staging
+
+# Ship production's live build again, for example after `gantry env set`
+gantry lift production --from production
+
+# Ship build 12
+gantry lift production --build 12
+```
+
+Under the `standard` deployment strategy a lift goes live at once. Under `blue-green` and `canary` it is staged at 0% next to the live version, and `gantry deploy` moves traffic:
+
+| Command | What it does |
+|---|---|
+| `gantry deploy status <env>` | Shows the live version, the staged or canary version, their traffic, when a held release times out, and the next step |
+| `gantry deploy shift <env> --percent <n>` | Sends n% of traffic to the new version (`canary` only). 100 is a cutover |
+| `gantry deploy cutover <env>` | Sends all traffic to the new version. The previous version stays ready |
+| `gantry deploy abort <env>` | Sends all traffic back to the version live before the release |
+| `gantry deploy complete <env>` | Drops the previous version after a cutover |
+| `gantry rollback <env> [--version <id>]` | Makes an earlier version live, by default the latest earlier one with an older build |
+
+`--complete` on `cutover`, or on `shift --percent 100`, completes the release in the same step. `cutover`, `shift` and `abort` act on the release in progress and take no version. During a canary split, `rollback` only accepts the live version; abort the release first.
+
+Each command waits until the change is applied and exits non-zero if it fails, is cancelled, or is skipped because a newer deployment replaced it. The first time a version takes all traffic (`cutover`, `shift --percent 100`, or a `rollback` to a version that never had it), its `post_deploy` commands run once and the command prints their output; a failure leaves the version live and exits non-zero. An edge can take a while to apply: after 30 minutes the command stops waiting and prints how to check the deployment, which keeps running.
+
 ## Database users
 
 `gantry databases create --no-master-rotation` keeps the master password in a Gantry secret that never rotates, instead of the cloud provider rotating it on a schedule. Choose at creation; it cannot be changed later.
@@ -103,9 +133,29 @@ Each service that binds a database gets its own database user, created on deploy
 
 A deploy fails when the bound Postgres database already holds tables, views, sequences or schemas owned by another database user. `gantry databases adopt <server> <database>` moves them to Gantry's owner role. Each user that owned any of them becomes a member of that role, so it keeps working, now with owner rights over the whole database. The command asks first; pass `--yes` where there is no terminal.
 
+## Private and public bastions
+
+A bastion is private unless you create it with `--public`. A private bastion has no public address and no open ports. The CLI reaches it by asking Gantry to open a session to the bastion's SSH port through the cloud's session service, then runs SSH through that session. You don't need cloud credentials, and each session is recorded in the team's audit log.
+
+On AWS the session runs through Session Manager, which needs AWS's [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) installed, the same as `gantry shell`. A private bastion on AWS needs a network whose private subnets reach the internet through a NAT gateway.
+
+```bash
+gantry bastions create --name ops                       # private
+gantry bastions create --name ops --public \
+  --allow-cidr 203.0.113.0/24                           # public, SSH from one range
+```
+
+`--public` gives the bastion a public address that takes SSH from each `--allow-cidr` (any address if you give none). Access is fixed when the bastion is created. To change it, destroy the bastion and create a new one.
+
+`gantry bastions proxy <slug>` connects stdin and stdout to a private bastion's SSH port, for use as an `ssh` ProxyCommand. `gantry bastions ssh` and `gantry bastions key` use it for private bastions:
+
+```bash
+ssh -i ~/.ssh/ops.pem -o ProxyCommand='gantry bastions proxy ops' ec2-user@ops
+```
+
 ## Tunnels and bastion host keys
 
-`gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH. The CLI checks the bastion's SSH host key before forwarding anything.
+`gantry databases tunnel` and `gantry caches tunnel` forward a local port through a bastion over SSH, directly to a public bastion or through a session to a private one. The CLI checks the bastion's SSH host key before forwarding anything.
 
 Gantry generates each bastion's host key when it provisions the bastion and returns the key's fingerprint with the bastion's SSH credentials. The CLI checks the key the bastion presents against that fingerprint, so even the first connection is verified and there is nothing to confirm. A key that doesn't match is refused, `--trust-host-key` included. `gantry bastions ssh` does the same by passing `ssh` a known_hosts file holding only that key.
 
@@ -115,7 +165,7 @@ Bastions provisioned before Gantry recorded host keys have no fingerprint until 
 - **Later connections:** the key must match the saved fingerprint. If it doesn't, the CLI refuses to open the tunnel and does not prompt. A changed key can mean someone is intercepting the connection.
 - **No terminal (CI, scripts):** the CLI can't prompt, so an unknown key fails. Pass `--trust-host-key` to trust the key and save it on first connection. The fingerprint is still printed. The flag never overrides a mismatch.
 
-Fingerprints are saved in `~/.gantry/known_hosts`. The directory is created with mode 0700 and the file with mode 0600. Each line is `<host id> <fingerprint>`. The host id is the bastion's EC2 instance id, so a rebuilt bastion is treated as a new host and prompts again rather than failing. If the instance id is not available, the host id is `bastion-<id>@<public IP>`.
+Fingerprints are saved in `~/.gantry/known_hosts`. The directory is created with mode 0700 and the file with mode 0600. Each line is `<host id> <fingerprint>`. The host id is `bastion-<id>@<public IP>` for a public bastion and `bastion-<id>` for a private one.
 
 To reset a bastion whose key legitimately changed, delete its line from `~/.gantry/known_hosts`. The mismatch error names the host id. The next tunnel will prompt again. To forget every bastion, delete the file.
 

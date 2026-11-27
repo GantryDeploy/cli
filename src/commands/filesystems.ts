@@ -11,8 +11,9 @@ import type {
   GetFilesystemsQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
-import { foreignAwsFlagsMessage, isAws, unsupportedCloud } from '../lib/clouds'
+import { foreignAwsFlagsMessage, isAws, invalidConfiguration } from '../lib/clouds'
 import { awsFilesystemSettings, awsOption, type AwsFilesystemFlags } from '../lib/clouds/aws'
+import { addExamples } from '../lib/examples'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -71,7 +72,7 @@ interface FilesystemCreateFlags extends AwsFilesystemFlags {
 export function registerFilesystemsCommand(program: Command): void {
   const filesystemsCmd = program.command('filesystems').description('Manage persistent filesystems')
 
-  filesystemsCmd
+  const listCmd = filesystemsCmd
     .command('list')
     .description('List all filesystems')
     .action(async () => {
@@ -109,7 +110,7 @@ export function registerFilesystemsCommand(program: Command): void {
       }
     })
 
-  filesystemsCmd
+  const createCmd = filesystemsCmd
     .command('create')
     .description('Create a new filesystem')
     .option('--cloud <id>', 'Cloud account ID')
@@ -131,7 +132,7 @@ export function registerFilesystemsCommand(program: Command): void {
           process.exit(1)
         }
         if (!isAws(cloud.provider)) {
-          printError(unsupportedCloud('filesystems'))
+          printError(invalidConfiguration('filesystem'))
           process.exit(1)
         }
         const cloudAccountId = cloud.id
@@ -192,4 +193,30 @@ export function registerFilesystemsCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(filesystemsCmd, [
+    { command: 'gantry filesystems list', description: "List the team's filesystems" },
+    {
+      command: 'gantry filesystems create',
+      description: 'Create a filesystem, prompting for each setting',
+    },
+  ])
+  addExamples(listCmd, [
+    { command: 'gantry filesystems list', description: "List the team's filesystems" },
+  ])
+  addExamples(createCmd, [
+    {
+      command: 'gantry filesystems create',
+      description: 'Create a filesystem, prompting for each setting',
+    },
+    {
+      command: 'gantry filesystems create --cloud c4xp9w --network n8kd2q --name Uploads',
+      description: 'Create a filesystem on a network',
+    },
+    {
+      command:
+        'gantry filesystems create --cloud c4xp9w --network n8kd2q --name Media --aws-throughput-mode provisioned --aws-throughput-mibps 128',
+      description: 'On AWS, provision 128 MiB/s of throughput',
+    },
+  ])
 }

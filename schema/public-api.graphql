@@ -1,31 +1,14 @@
-input ActivationInput {
-  """Environment slug (e.g. "production")"""
-  environment: String!
-
-  """Project ID"""
-  projectId: String!
-
-  """Target version (rollback/promote) or canary version (canary)"""
-  versionId: String
-
-  """Canary weight, 0–100"""
-  weight: Float
-}
-
-type ActivationResult {
-  """ID of the activation deployment"""
-  deploymentId: String
-  message: String
-  success: Boolean!
-}
-
 """Inputs for an artifact-upload CLI task"""
 type ArtifactUploadCliInputs {
   """
   Upload credentials when provider is aws. Returned only to the CLI that claims the step, by claimStep.
   """
   aws: AwsUploadCredentials
+
+  """Bucket the artifact is uploaded to."""
   bucketName: String!
+
+  """Globs of the files to leave out of the zip."""
   excludePatterns: [String!]
 
   """Largest artifact the deploy target accepts, in bytes"""
@@ -36,8 +19,17 @@ type ArtifactUploadCliInputs {
 
   """Cloud the artifact is uploaded to"""
   provider: String!
+
+  """Region of the bucket."""
   region: String!
-  sourcePath: String!
+
+  """Zip to copy instead of a local folder, on a lift of an existing build."""
+  source: ArtifactUploadSource
+
+  """Folder to zip. Null when copying from source."""
+  sourcePath: String
+
+  """ID of the step the CLI runs."""
   stepId: String!
 }
 
@@ -50,6 +42,26 @@ input ArtifactUploadCliOutputsInput {
   zipSize: Float!
 }
 
+"""A zip to download from another cloud account and upload as objectKey"""
+type ArtifactUploadSource {
+  """
+  Read-only credentials when the cloud is aws. Returned only to the CLI that claims the step, by claimStep.
+  """
+  aws: AwsUploadCredentials
+
+  """Bucket that holds the zip."""
+  bucketName: String!
+
+  """Object key of the zip."""
+  objectKey: String!
+
+  """Region of the bucket."""
+  region: String!
+}
+
+"""
+Fixed response an application load balancer sends when no route matches.
+"""
 input AwsAlbDefaultActionInput {
   """e.g. text/html or application/json"""
   contentType: String!
@@ -63,19 +75,28 @@ input AwsAlbDefaultActionInput {
 
 """Burstable performance setting for T-series instances"""
 enum AwsBurstablePerformanceEnum {
+  """Burstable instance types are never launched."""
   EXCLUDED
+
+  """Burstable instance types may be launched."""
   INCLUDED
+
+  """Only burstable instance types are launched."""
   REQUIRED
 }
 
 """Catalog filters that only apply to AWS"""
 input AwsCacheCatalogFilterInput {
+  """Only versions available in this deployment mode"""
   deploymentMode: AwsCacheDeploymentModeEnum
 }
 
 """Cache deployment mode"""
 enum AwsCacheDeploymentModeEnum {
+  """A cluster of nodes of a fixed size"""
   NODE_BASED
+
+  """ElastiCache Serverless, which scales capacity on demand"""
   SERVERLESS
 }
 
@@ -109,16 +130,26 @@ input AwsCacheSettingsInput {
   replicasPerNodeGroup: Int
 }
 
+"""A capacity provider the ECS cluster runs tasks on."""
 input AwsCapacityProviderInput {
   """Managed instances only"""
   instanceRequirements: AwsInstanceRequirementsInput
+
+  """Kind of capacity provider"""
   type: AwsCapacityProviderTypeEnum!
 }
 
 """Type of capacity provider"""
 enum AwsCapacityProviderTypeEnum {
+  """Serverless Fargate tasks at the on-demand price."""
   FARGATE
+
+  """
+  Fargate tasks on spare capacity, cheaper but stopped when AWS reclaims it.
+  """
   FARGATE_SPOT
+
+  """EC2 instances that ECS launches and manages. Needs a network."""
   MANAGED_INSTANCES
 }
 
@@ -132,23 +163,34 @@ input AwsCertificateSettingsInput {
 
 """Container orchestrator a cluster runs"""
 enum AwsClusterOrchestratorEnum {
+  """Amazon ECS."""
   ECS
 }
 
 """Cluster settings for an AWS cloud account"""
 input AwsClusterSettingsInput {
+  """Where the cluster runs tasks"""
   capacityProviders: [AwsCapacityProviderInput!]!
+
+  """Container orchestrator to run"""
   orchestrator: AwsClusterOrchestratorEnum!
 }
 
+"""Short-lived AWS credentials limited to one command invocation."""
 type AwsCommandCredentials {
+  """AWS access key id."""
   accessKeyId: String!
+
+  """AWS secret access key."""
   secretAccessKey: String!
+
+  """AWS session token."""
   sessionToken: String!
 }
 
 """Catalog filters that only apply to AWS"""
 input AwsDatabaseCatalogFilterInput {
+  """Only entries available in this deployment mode"""
   deploymentMode: AwsDatabaseDeploymentModeEnum
 
   """rds or aurora. Required when filtering by engine."""
@@ -157,7 +199,12 @@ input AwsDatabaseCatalogFilterInput {
 
 """Database deployment mode"""
 enum AwsDatabaseDeploymentModeEnum {
+  """A server of a fixed instance class"""
   PROVISIONED
+
+  """
+  Aurora Serverless v2, which scales capacity between a minimum and a maximum
+  """
   SERVERLESS
 }
 
@@ -191,10 +238,14 @@ input AwsDatabaseSettingsInput {
 
   """Serverless only, in steps of 0.5"""
   minCapacity: Float
+
+  """Turn on Performance Insights for the server"""
   performanceInsightsEnabled: Boolean
 
   """Serverless with a minimum capacity of 0 only, 300 to 86400"""
   secondsUntilAutoPause: Int
+
+  """Encrypt storage at rest"""
   storageEncrypted: Boolean
 
   """gp3, io1 or io2, RDS only"""
@@ -206,14 +257,24 @@ input AwsDatabaseSettingsInput {
 
 """EFS performance mode"""
 enum AwsEfsPerformanceModeEnum {
+  """Lowest latency per operation. The right choice for most workloads."""
   GENERAL_PURPOSE
+
+  """
+  Higher total throughput for many clients, with more latency per operation
+  """
   MAX_IO
 }
 
 """EFS throughput mode"""
 enum AwsEfsThroughputModeEnum {
+  """Throughput grows with the amount of data stored, with burst credits"""
   BURSTING
+
+  """Throughput scales with the workload, billed by use"""
   ELASTIC
+
+  """A fixed throughput set by provisionedThroughputMibps"""
   PROVISIONED
 }
 
@@ -235,10 +296,319 @@ input AwsFilesystemSettingsInput {
   throughputMode: AwsEfsThroughputModeEnum
 }
 
+"""What an AWS firewall rule does with a request it matches."""
+enum AwsFirewallAction {
+  """Lets the request through without checking later rules."""
+  ALLOW
+
+  """Refuses the request."""
+  BLOCK
+
+  """Asks the visitor to solve a CAPTCHA."""
+  CAPTCHA
+
+  """Runs a silent browser challenge."""
+  CHALLENGE
+
+  """Counts the request and goes on to the next rule."""
+  COUNT
+}
+
+"""
+A Bot Control category or signal a firewall can block. Verified bots, such as major search engines, pass every category except AI.
+"""
+enum AwsFirewallBotCategory {
+  """Bots used for advertising."""
+  ADVERTISING
+
+  """AI bots, verified or not."""
+  AI
+
+  """Bots that capture content to build archives."""
+  ARCHIVER
+
+  """Requests from a browser that looks automated."""
+  AUTOMATED_BROWSER
+
+  """Bots that fetch content, such as feeds, for a user."""
+  CONTENT_FETCHER
+
+  """Bots that check links in emails."""
+  EMAIL_CLIENT
+
+  """Requests from HTTP libraries, which can include API calls."""
+  HTTP_LIBRARY
+
+  """Requests from data centers bots typically use."""
+  KNOWN_BOT_DATA_CENTER
+
+  """Bots that check for broken links."""
+  LINK_CHECKER
+
+  """Bots that match no other category."""
+  MISCELLANEOUS
+
+  """Uptime and performance monitors."""
+  MONITORING
+
+  """Requests whose user agent is not a browser, including API clients."""
+  NON_BROWSER_USER_AGENT
+
+  """Bots that build link previews when a page is shared."""
+  PAGE_PREVIEW
+
+  """Bots from web scraping frameworks."""
+  SCRAPING_FRAMEWORK
+
+  """Unverified search engine crawlers."""
+  SEARCH_ENGINE
+
+  """Bots that scan for vulnerabilities."""
+  SECURITY
+
+  """Search engine optimization crawlers."""
+  SEO
+
+  """Bots that social platforms use to summarize shared pages."""
+  SOCIAL_MEDIA
+
+  """Bots that deliver webhook callbacks."""
+  WEBHOOKS
+}
+
+"""Settings of a bot-control rule."""
+input AwsFirewallBotControlRuleInput {
+  """
+  Categories to block; the others are counted. AWS bills Bot Control per request it inspects.
+  """
+  block: [AwsFirewallBotCategory!]!
+}
+
+"""The part of a request an AWS firewall condition looks at."""
+enum AwsFirewallConditionField {
+  """The size of the request body, compared with greaterThan."""
+  BODY_SIZE
+
+  """The country the request comes from, checked against countries."""
+  COUNTRY
+
+  """The header called name, compared with operator and value."""
+  HEADER
+
+  """The client IP address, checked against cidrs."""
+  IP
+
+  """The HTTP method, checked against methods."""
+  METHOD
+
+  """The URL path, compared with operator and value."""
+  PATH
+
+  """The query parameter called name, compared with operator and value."""
+  QUERY_PARAM
+}
+
+"""
+One test on a request. The field decides which of the other settings it reads: operator and value for path; name, operator and value for header and query-param; cidrs for ip; countries for country; methods for method; greaterThan for body-size.
+"""
+input AwsFirewallConditionInput {
+  """IPv4 or IPv6 ranges in CIDR notation"""
+  cidrs: [String!]
+
+  """Two-letter ISO country codes"""
+  countries: [String!]
+
+  """Part of the request to test"""
+  field: AwsFirewallConditionField!
+
+  """Match a body larger than this many bytes"""
+  greaterThan: Int
+
+  """HTTP methods, such as POST"""
+  methods: [String!]
+
+  """Header or query parameter name"""
+  name: String
+
+  """Match the requests the test does not"""
+  negate: Boolean
+
+  """How the text is compared to value"""
+  operator: AwsFirewallTextOperator
+
+  """Text to compare against"""
+  value: String
+}
+
+"""Settings of a custom rule."""
+input AwsFirewallCustomRuleInput {
+  """What happens to a matching request"""
+  action: AwsFirewallAction!
+
+  """Requests the rule acts on"""
+  match: AwsFirewallMatchInput!
+}
+
+"""An AWS managed rule group a firewall can turn on."""
+enum AwsFirewallManagedGroup {
+  """Core rules against common web exploits, such as the OWASP Top 10."""
+  COMMON
+
+  """Blocks addresses Amazon threat intelligence flags as bots."""
+  IP_REPUTATION
+
+  """Blocks request patterns known to exploit vulnerabilities."""
+  KNOWN_BAD_INPUTS
+
+  """Blocks exploits of Linux-specific vulnerabilities."""
+  LINUX
+
+  """Blocks exploits of PHP-specific vulnerabilities."""
+  PHP
+
+  """Blocks SQL injection attempts."""
+  SQL
+
+  """Blocks exploits of WordPress-specific vulnerabilities."""
+  WORDPRESS
+}
+
+"""Settings of a managed-group rule."""
+input AwsFirewallManagedGroupRuleInput {
+  """
+  Names of rules in the group that count matching requests instead of blocking
+  """
+  countRules: [String!]
+
+  """Managed rule group to turn on"""
+  group: AwsFirewallManagedGroup!
+}
+
+"""How an AWS firewall match combines its conditions."""
+enum AwsFirewallMatchCombine {
+  """A request matches when every condition does."""
+  ALL
+
+  """A request matches when at least one condition does."""
+  ANY
+}
+
+"""Which requests a rule applies to."""
+input AwsFirewallMatchInput {
+  """How the conditions combine"""
+  combine: AwsFirewallMatchCombine!
+
+  """From 1 to 10 conditions"""
+  conditions: [AwsFirewallConditionInput!]!
+}
+
+"""Which address an AWS rate limit counts requests by."""
+enum AwsFirewallRateAggregate {
+  """The client address in the X-Forwarded-For header."""
+  FORWARDED_IP
+
+  """The address the request comes from."""
+  IP
+}
+
+"""Settings of a rate-limit rule."""
+input AwsFirewallRateLimitRuleInput {
+  """What happens to a client over the limit. Allow is not valid here."""
+  action: AwsFirewallAction!
+
+  """Address requests are counted by"""
+  aggregate: AwsFirewallRateAggregate!
+
+  """Requests one client can send in the window, from 10 to 2,000,000,000"""
+  limit: Int!
+
+  """
+  Only matching requests count toward the limit. Left out, every request counts.
+  """
+  match: AwsFirewallMatchInput
+
+  """Window the requests are counted over: 60, 120, 300 or 600"""
+  windowSeconds: Int!
+}
+
+"""
+One rule of an AWS firewall. The section named by kind holds its settings.
+"""
+input AwsFirewallRuleInput {
+  """Settings when kind is BOT_CONTROL"""
+  botControl: AwsFirewallBotControlRuleInput
+
+  """Settings when kind is CUSTOM"""
+  custom: AwsFirewallCustomRuleInput
+
+  """Whether the rule is evaluated"""
+  enabled: Boolean!
+
+  """
+  ID of an existing rule to keep. Left out, the rule is new and gets an ID.
+  """
+  id: String
+
+  """What the rule does"""
+  kind: AwsFirewallRuleKind!
+
+  """Settings when kind is MANAGED_GROUP"""
+  managedGroup: AwsFirewallManagedGroupRuleInput
+
+  """Display name"""
+  name: String!
+
+  """Settings when kind is RATE_LIMIT"""
+  rateLimit: AwsFirewallRateLimitRuleInput
+}
+
+"""
+What an AWS firewall rule does. The section of the same name holds its settings.
+"""
+enum AwsFirewallRuleKind {
+  """Blocks the Bot Control categories it names."""
+  BOT_CONTROL
+
+  """Acts on requests that match its conditions."""
+  CUSTOM
+
+  """Turns on an AWS managed rule group."""
+  MANAGED_GROUP
+
+  """Acts on a client that sends too many requests."""
+  RATE_LIMIT
+}
+
+"""The rules of an AWS firewall."""
+input AwsFirewallRulesInput {
+  """Every rule, in the order the firewall evaluates them. Up to 100."""
+  rules: [AwsFirewallRuleInput!]!
+}
+
+"""How an AWS firewall condition compares a request's text to its value."""
+enum AwsFirewallTextOperator {
+  """The text contains the value."""
+  CONTAINS
+
+  """The text ends with the value."""
+  ENDS_WITH
+
+  """The text equals the value."""
+  EXACT
+
+  """The text matches the value as a regular expression."""
+  REGEX
+
+  """The text starts with the value."""
+  STARTS_WITH
+}
+
 """Which EC2 instances a managed instances capacity provider may launch"""
 input AwsInstanceRequirementsInput {
   """e.g. c5.* or m5.large"""
   allowedInstanceTypes: [String!]
+
+  """Whether burstable T-series instances may be launched"""
   burstablePerformance: AwsBurstablePerformanceEnum
 
   """arm64 or x86_64"""
@@ -246,20 +616,41 @@ input AwsInstanceRequirementsInput {
 
   """e.g. amazon-web-services, intel, amd"""
   cpuManufacturers: [String!]
+
+  """Memory per instance, in MiB"""
   memoryMib: IntRangeInput
+
+  """vCPUs per instance"""
   vcpuCount: IntRangeInput
 }
 
+"""
+What a client needs to invoke the command on AWS Lambda itself: credentials limited to the live published version, and the payload in the runtime format.
+"""
 type AwsLambdaCommandInvocation {
+  """Credentials for the invocation."""
   credentials: AwsCommandCredentials!
+
+  """Name of the Lambda function to invoke."""
   functionName: String!
+
+  """Invocation payload, as a JSON string."""
   payload: String!
+
+  """Published version to invoke."""
   qualifier: String!
+
+  """AWS region of the function."""
   region: String!
 }
 
 """Load balancer settings for an AWS cloud account"""
 input AwsLoadBalancerSettingsInput {
+  """
+  Application load balancers only: accept traffic only from CloudFront, alongside allowedCidrs
+  """
+  cdnOnly: Boolean
+
   """Application load balancers only: response when no route matches"""
   defaultAction: AwsAlbDefaultActionInput
 
@@ -271,8 +662,13 @@ input AwsLoadBalancerSettingsInput {
 NAT gateways an AWS network gets: none, one, or one per availability zone
 """
 enum AwsNatGatewayOptionEnum {
+  """No NAT gateway. Private subnets have no outbound internet access."""
   NONE
+
+  """One NAT gateway in each availability zone."""
   PER_AZ
+
+  """One NAT gateway shared by every private subnet."""
   SINGLE
 }
 
@@ -285,23 +681,47 @@ input AwsNetworkSettingsInput {
   natGatewayOption: AwsNatGatewayOptionEnum
 }
 
+"""What the AWS session plugin needs to attach to the session ECS opened."""
 type AwsShellSession {
+  """AWS region of the session."""
   region: String!
+
+  """Session id."""
   sessionId: String!
+
+  """WebSocket URL of the session stream."""
   streamUrl: String!
+
+  """Session target, naming the ECS task and container."""
   target: String!
+
+  """Token that opens the stream."""
   tokenValue: String!
 }
 
-"""Short-lived AWS credentials scoped to writing one artifact"""
+"""Short-lived AWS credentials scoped to one artifact or folder"""
 type AwsUploadCredentials {
+  """AWS access key ID."""
   accessKeyId: String!
+
+  """AWS secret access key."""
   secretAccessKey: String!
+
+  """AWS session token. The credentials expire with it."""
   sessionToken: String!
 }
 
+"""
+A host in a network for reaching private databases and caches over SSH.
+"""
 type Bastion {
+  """CIDR blocks allowed to SSH in. Empty for a private bastion."""
+  allowedCidrs: [String!]!
+
+  """Cloud account the bastion belongs to"""
   cloudAccountId: String!
+
+  """When the bastion was created"""
   createdAt: String!
 
   """
@@ -313,10 +733,14 @@ type Bastion {
   The bastion's SSH host public key (`ssh-ed25519 ...`), set once provisioned
   """
   hostPublicKey: String
+
+  """Bastion ID"""
   id: String!
+
+  """Display name"""
   name: String!
 
-  """Network ID - must have public subnets"""
+  """Network ID"""
   networkId: String!
 
   """Cloud the bastion runs in, from its cloud account"""
@@ -325,8 +749,17 @@ type Bastion {
   """Cloud-specific data including instance details and SSH key reference"""
   providerData: JSON!
 
-  """Public IP address used for SSH, set once provisioned"""
+  """
+  Whether the bastion has a public address that takes SSH. A private bastion is reached through startBastionSession.
+  """
+  publicAccess: Boolean!
+
+  """
+  Public IP address used for SSH, set once a public bastion is provisioned
+  """
   publicIp: String
+
+  """Cloud region the bastion runs in"""
   region: String!
 
   """URL-friendly identifier for CLI and API references"""
@@ -334,22 +767,33 @@ type Bastion {
 
   """User to sign in as over SSH"""
   sshUser: String!
+
+  """Provisioning status"""
   status: BastionStatusEnum!
 
   """Team ID"""
   teamId: String!
+
+  """When the bastion last changed"""
   updatedAt: String!
 }
 
+"""Outcome of a bastion mutation."""
 type BastionMutationResult {
+  """The bastion, when the mutation succeeded"""
   bastion: Bastion
 
   """Deployment ID for provisioning progress tracking"""
   deploymentId: String
+
+  """What happened, safe to show to a user"""
   message: String
+
+  """Whether the mutation succeeded"""
   success: Boolean!
 }
 
+"""A bastion's SSH private key and the details to connect with it."""
 type BastionPrivateKeyResult {
   """
   `SHA256:` fingerprint of the bastion's SSH host key, for verifying the host
@@ -360,6 +804,8 @@ type BastionPrivateKeyResult {
   The bastion's SSH host public key (`ssh-ed25519 ...`). Unset for a bastion provisioned before host keys were recorded.
   """
   hostPublicKey: String
+
+  """What happened, safe to show to a user"""
   message: String
 
   """SSH private key in PEM format"""
@@ -367,60 +813,121 @@ type BastionPrivateKeyResult {
 
   """User to sign in as over SSH"""
   sshUser: String
+
+  """Whether the key was read"""
   success: Boolean!
 }
 
 """Status of a bastion host"""
 enum BastionStatusEnum {
+  """The bastion is running and takes connections."""
   ACTIVE
+
+  """The bastion is destroyed."""
   DELETED
+
+  """Destroying the bastion failed."""
   DELETE_FAILED
+
+  """The bastion is being destroyed."""
   DELETING
+
+  """Provisioning the bastion failed."""
   FAILED
+
+  """The bastion is waiting to be provisioned."""
   PENDING
+
+  """The bastion is being provisioned."""
   PROVISIONING
 }
 
+"""
+One published version of a blueprint: a reusable project shape a `gantry.yml` can reference.
+"""
 type Blueprint {
+  """When this version was deprecated. Null while it is current."""
   deprecatedAt: String
+
+  """Id of this blueprint version."""
   id: String!
+
+  """Blueprint name inside its namespace."""
   name: String!
+
+  """Namespace the blueprint is published under, such as `gantry`."""
   namespace: String!
+
+  """Blueprint YAML parsed into its object form."""
   parsedSpec: JSON!
+
+  """When this version was published."""
   publishedAt: String!
+
+  """Who published this version. Null when the publisher is unknown."""
   publishedBy: BlueprintPublisher
+
+  """Pinned reference to this version, `@<namespace>/<name>:<version>`."""
   reference: String!
+
+  """Version number. Each publish adds the next one."""
   version: Int!
+
+  """Blueprint YAML as published."""
   yamlSource: String!
 }
 
+"""The person who published a blueprint version."""
 type BlueprintPublisher {
+  """User id of the publisher."""
   id: String!
+
+  """Display name of the publisher, when they set one."""
   name: String
 }
 
 """A Docker build argument"""
 type BuildArg {
+  """Argument name."""
   name: String!
+
+  """Argument value."""
   value: String!
 }
 
+"""A named build the environment would run."""
 type BuildPlanEntryType {
+  """CPU architecture it builds for, such as `arm64`."""
   architecture: String!
+
+  """Build name from `setup.builds`."""
   name: String!
 }
 
+"""A managed cache that services can bind to"""
 type Cache {
   """Days of backups kept"""
   backupRetentionDays: Int!
+
+  """Cloud account the cache runs in"""
   cloudAccountId: String!
+
+  """When the cache was created, as an ISO 8601 timestamp"""
   createdAt: String!
 
   """Hostname clients connect to, set once provisioned"""
   endpoint: String
+
+  """Cache engine"""
   engine: CacheEngineEnum!
+
+  """Engine version, e.g. 8.0"""
   engineVersion: String
+
+  """Cache ID"""
   id: String!
+
+  """Display name"""
   name: String!
 
   """Network ID - required for all caches"""
@@ -436,6 +943,8 @@ type Cache {
   Settings and outputs only this cloud has. Its `provider` equals `provider`.
   """
   providerData: JSON!
+
+  """Region the cache runs in"""
   region: String!
 
   """Node size. Null for serverless."""
@@ -443,37 +952,56 @@ type Cache {
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Where the cache is in its lifecycle"""
   status: CacheStatusEnum!
 
   """Team ID"""
   teamId: String!
+
+  """When the cache last changed, as an ISO 8601 timestamp"""
   updatedAt: String!
 }
 
 """Cache engine type"""
 enum CacheEngineEnum {
+  """Memcached, a key-value cache with no persistence"""
   MEMCACHED
+
+  """Redis OSS"""
   REDIS
+
+  """Valkey, an open-source in-memory store that Redis clients can use"""
   VALKEY
 }
 
+"""An engine version a cache can be created with"""
 type CacheEngineVersion {
+  """Engine the version belongs to"""
   engine: CacheEngineEnum!
 
   """Catalog details only this cloud has"""
   providerData: JSON!
+
+  """Regions where this version is available"""
   supportedRegions: [String!]!
 
   """Version string, e.g. 7.2"""
   version: String!
 }
 
+"""Result of a cache change"""
 type CacheMutationResult {
+  """The cache, when the change succeeded"""
   cache: Cache
 
   """Deployment ID for provisioning progress tracking"""
   deploymentId: String
+
+  """What happened, safe to show to a user"""
   message: String
+
+  """Whether the change was accepted"""
   success: Boolean!
 }
 
@@ -487,23 +1015,44 @@ type CacheSize {
 
   """The value to send as size, e.g. cache.t4g.small"""
   size: String!
+
+  """Engines that can run on this size"""
   supportedEngines: [CacheEngineEnum!]!
+
+  """Regions where this size is available"""
   supportedRegions: [String!]!
+
+  """Virtual CPUs per node"""
   vcpu: Int!
 }
 
 """Status of a cache"""
 enum CacheStatusEnum {
+  """Ready for connections"""
   ACTIVE
+
+  """The last change did not complete"""
   FAILED
+
+  """Being created or changed"""
   PENDING
 }
 
+"""A cache engine a cloud offers, with guidance on when to pick it"""
 type CacheTypeInfo {
+  """What the engine is"""
   description: String!
+
+  """Engine name to show, e.g. Valkey"""
   displayName: String!
+
+  """When to choose this engine"""
   guidance: String!
+
+  """Cloud that offers the engine, e.g. aws"""
   provider: String!
+
+  """Whether a cache with this engine must be created in a network"""
   requiresNetwork: Boolean!
 
   """Whether this engine can shard data across nodes in this cloud"""
@@ -511,22 +1060,48 @@ type CacheTypeInfo {
 
   """Whether this engine can run serverless in this cloud"""
   supportsServerless: Boolean!
+
+  """Engine, the value to send as engine"""
   type: CacheEngineEnum!
 }
 
+"""The result of cancelDeployment."""
 type CancelDeploymentResult {
+  """The deployment, now cancelling."""
   deployment: Deployment
+
+  """Why the cancel was refused, or a note on it."""
   message: String
+
+  """Whether the cancel was accepted."""
   success: Boolean!
 }
 
+"""
+A TLS certificate for one or more hostnames. Create and validate it before deploying a route that needs it.
+"""
 type Certificate {
+  """Other hostnames the certificate covers. Null when there are none."""
   additionalDomains: [String!]
+
+  """Cloud account the certificate is issued in."""
   cloudAccountId: String!
+
+  """When the certificate was requested."""
   createdAt: String!
+
+  """
+  Domain the certificate belongs to. Null when it is not tied to a domain.
+  """
   domainId: String
+
+  """Certificate id."""
   id: String!
+
+  """When its status was last synced. Null before the first sync."""
   lastCheckedAt: String
+
+  """Main hostname the certificate covers. May be a wildcard (`*.`)."""
   primaryDomain: String!
 
   """Cloud the certificate is issued in, e.g. aws"""
@@ -537,27 +1112,52 @@ type Certificate {
 
   """Per-region certificates, for clouds that issue certificates per region"""
   regionalCertificates: [RegionalCertificate!]
+
+  """Overall status, combined from every region."""
   status: CertificateStatusEnum!
 
   """Team ID"""
   teamId: String!
 }
 
+"""The outcome of a certificate change."""
 type CertificateMutationResult {
+  """The certificate after the change. Null when the change was refused."""
   certificate: Certificate
+
+  """What happened, or why the change was refused."""
   message: String
+
+  """Whether the change was made."""
   success: Boolean!
 }
 
 """Certificate status values"""
 enum CertificateStatusEnum {
+  """Issued and usable in every region."""
   ACTIVE
+
+  """Deleted."""
   DELETED
+
+  """Being deleted."""
   DELETING
+
+  """Past its expiry date."""
   EXPIRED
+
+  """Validation failed in every region."""
   FAILED
+
+  """Issued in some regions and failed in the others."""
   PARTIAL
+
+  """Requested and not yet issued in any region."""
   PENDING
+
+  """
+  Waiting for its DNS validation records to resolve in at least one region.
+  """
   VALIDATING
 }
 
@@ -567,14 +1167,73 @@ type ClaimStepResult {
   success: Boolean!
 }
 
+"""A hostname a cleanup item served, and where its DNS points."""
+type CleanupHostname {
+  """Whether public DNS for the hostname already points at its new routing"""
+  dnsMoved: Boolean!
+
+  """
+  The record value the hostname must point at, when Gantry has one for it
+  """
+  dnsTarget: String
+
+  """The hostname."""
+  hostname: String!
+}
+
+"""Infrastructure that no live version uses and can be removed"""
+type CleanupItem {
+  """One-line summary of the item, naming its hostnames."""
+  description: String!
+
+  """Hostnames the item served."""
+  hostnames: [CleanupHostname!]!
+
+  """Cleanup item id, passed to `cleanUp`."""
+  id: ID!
+
+  """What the item is."""
+  kind: CleanupKindEnum!
+
+  """False while traffic may still reach this item"""
+  readyToRemove: Boolean!
+}
+
+"""What a cleanup item is"""
+enum CleanupKindEnum {
+  """
+  Routing that served hostnames before they moved to new routing, kept until public DNS points at the new one.
+  """
+  PREVIOUS_ROUTING
+}
+
+"""Outcome of `cleanUp`."""
+type CleanupResult {
+  """Why the items were not removed."""
+  message: String
+
+  """Ids of the items removed."""
+  removed: [ID!]!
+
+  """Whether the items were removed."""
+  success: Boolean!
+}
+
 """Inputs the CLI needs to run a step, shaped by the step cliTask"""
 union CliInputs = ArtifactUploadCliInputs | ContainerPushCliInputs | LocalBuildCliInputs | ObjectUploadCliInputs
 
 """The status of CLI execution for a step"""
 enum CliStatus {
+  """A CLI claimed the step and is running it."""
   CLAIMED
+
+  """The CLI finished the step."""
   COMPLETE
+
+  """The CLI reported a failure. `cliError` says why."""
   FAILED
+
+  """No CLI has claimed the step yet."""
   PENDING
 }
 
@@ -588,67 +1247,140 @@ input CliTaskOutputsInput {
   objectUpload: ObjectUploadCliOutputsInput
 }
 
+"""A team's connected account on a cloud."""
 type CloudAccount {
+  """Details of the cloud"""
   cloudProvider: CloudProvider
+
+  """When the account was connected"""
   createdAt: String!
+
+  """Cloud account ID"""
   id: String!
+
+  """Display name"""
   name: String!
+
+  """Cloud the account is on"""
   provider: CloudProviderEnum!
 
   """Team ID"""
   teamId: String!
 }
 
+"""
+The resources Gantry created in a cloud account for the team's environments.
+"""
 type CloudAccountResourcesResult {
+  """Resources by project and environment. Set when groupBy is PROJECT."""
   byProject: [ResourceProjectGroup!]
+
+  """Resources by type. Set when groupBy is TYPE."""
   byType: [ResourceTypeGroup!]
+
+  """Cloud account ID"""
   cloudAccountId: String!
+
+  """Cloud account name"""
   cloudAccountName: String!
+
+  """Number of resources in the account"""
   totalResources: Float!
 }
 
+"""A cloud Gantry can deploy to."""
 type CloudProvider {
+  """Whether a team can connect an account on this cloud."""
   available: Boolean!
+
+  """Name to show for the cloud"""
   name: String!
+
+  """Cloud identifier, e.g. aws"""
   slug: String!
 }
 
 """Supported cloud providers"""
 enum CloudProviderEnum {
+  """Amazon Web Services."""
   AWS
+
+  """Microsoft Azure."""
   AZURE
+
+  """Cloudflare."""
   CLOUDFLARE
+
+  """DigitalOcean."""
   DIGITALOCEAN
+
+  """Google Cloud."""
   GCP
+
+  """Vultr."""
   VULTR
 }
 
+"""A region a cloud offers."""
 type CloudRegion {
+  """Region code the API takes, e.g. us-east-1"""
   code: String!
+
+  """Name to show for the region"""
   name: String!
 }
 
+"""A cloud resource Gantry created for a deployment."""
 type CloudResource {
+  """When the resource was created"""
   createdAt: String!
+
+  """Environment the resource belongs to"""
   environmentId: String
+
+  """Name of the environment the resource belongs to"""
   environmentName: String
+
+  """Resource ID"""
   id: String!
+
+  """Project the resource belongs to"""
   projectId: String
+
+  """Name of the project the resource belongs to"""
   projectName: String
 
   """Cloud the resource lives in"""
   provider: String!
+
+  """The resource's id in the cloud"""
   resourceId: String
+
+  """Kind of resource, as the cloud names it"""
   resourceType: String!
+
+  """Service the resource belongs to"""
   serviceId: String
+
+  """Name of the service the resource belongs to"""
   serviceName: String
+
+  """Resource status"""
   status: ResourceStatusEnum!
 }
 
+"""Compute a team runs container services on, in one cloud region."""
 type Cluster {
+  """Cloud account the cluster belongs to"""
   cloudAccountId: String!
+
+  """When the cluster was created"""
   createdAt: String!
+
+  """Cluster ID"""
   id: String!
+
+  """Display name"""
   name: String!
 
   """Network ID (required for managed instances)"""
@@ -659,48 +1391,83 @@ type Cluster {
 
   """Settings and outputs only this cloud has, such as capacity providers"""
   providerData: JSON!
+
+  """Cloud region the cluster runs in"""
   region: String!
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Provisioning status"""
   status: ClusterStatusEnum!
 
   """Team ID"""
   teamId: String!
+
+  """When the cluster last changed"""
   updatedAt: String!
 }
 
+"""Outcome of a cluster mutation."""
 type ClusterMutationResult {
+  """The cluster, when the mutation succeeded"""
   cluster: Cluster
 
   """Deployment ID for provisioning progress tracking"""
   deploymentId: String
+
+  """What happened, safe to show to a user"""
   message: String
+
+  """Whether the mutation succeeded"""
   success: Boolean!
 }
 
 """Status of a cluster"""
 enum ClusterStatusEnum {
+  """The cluster is ready to run services."""
   ACTIVE
+
+  """Provisioning the cluster failed."""
   FAILED
+
+  """The cluster is being provisioned."""
   PENDING
 }
 
+"""A kind of cluster a cloud offers."""
 type ClusterTypeInfo {
+  """What the cluster type runs"""
   description: String!
+
+  """Name to show for the cluster type"""
   displayName: String!
+
+  """When to choose this cluster type"""
   guidance: String
+
+  """Cloud that offers the cluster type"""
   provider: String!
 
   """Orchestrator id from the cloud catalog"""
   type: String!
 }
 
+"""State and output of a command run on a container service."""
 type CommandRunStatus {
+  """Exit code, once `state` is `finished` and the command reported one."""
   exitCode: Int
+
+  """Why the run finished without an exit code."""
   message: String
+
+  """Output written since `outputCursor`."""
   output: String!
+
+  """Pass back to read only newer output."""
   outputCursor: String
+
+  """`not-found`, `starting`, `running` or `finished`."""
   state: String!
 }
 
@@ -709,10 +1476,32 @@ type CompleteCliStepResult {
   success: Boolean!
 }
 
+"""
+An image to pull from another region or cloud account and push as imageUri
+"""
+type ContainerImageSource {
+  """Image to pull."""
+  imageUri: String!
+
+  """Container registry to sign in to for the pull"""
+  registryEndpoint: String!
+
+  """
+  Short-lived pull-only password. Returned only to the CLI that claims the step, by claimStep.
+  """
+  registryPassword: String
+
+  """Username for the registry the image is pulled from."""
+  registryUsername: String!
+}
+
 """Inputs for a container-push CLI task"""
 type ContainerPushCliInputs {
+  """Image reference to push to."""
   imageUri: String!
-  localImageTag: String!
+
+  """Image the local-build step produced. Null when copying from source."""
+  localImageTag: String
 
   """Container registry to sign in to"""
   registryEndpoint: String!
@@ -724,6 +1513,13 @@ type ContainerPushCliInputs {
 
   """Username for the container registry"""
   registryUsername: String!
+
+  """
+  Image to copy instead of a local build, on a lift of an existing build.
+  """
+  source: ContainerImageSource
+
+  """ID of the step the CLI runs."""
   stepId: String!
 }
 
@@ -733,20 +1529,32 @@ input ContainerPushCliOutputsInput {
   success: Boolean!
 }
 
+"""A new bastion to create in a network."""
 input CreateBastionInput {
+  """
+  CIDR blocks allowed to SSH to a public bastion. Leave empty to allow any address.
+  """
+  allowedCidrs: [String!]
+
   """Cloud account ID"""
   cloudAccountId: String!
 
   """User-friendly name"""
   name: String!
 
-  """Network ID - must have public subnets"""
+  """Network ID"""
   networkId: String!
+
+  """
+  Give the bastion a public address that takes SSH from allowedCidrs. Without it the bastion has no inbound access and is reached through startBastionSession. Fixed at create.
+  """
+  publicAccess: Boolean! = false
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
 }
 
+"""A new cache to create in a network"""
 input CreateCacheInput {
   """Required when the cloud account is AWS"""
   aws: AwsCacheSettingsInput
@@ -776,16 +1584,25 @@ input CreateCacheInput {
   slug: String!
 }
 
+"""A certificate to request."""
 input CreateCertificateInput {
+  """Other hostnames to cover."""
   additionalDomains: [String!]
 
   """Required when the cloud account is AWS"""
   aws: AwsCertificateSettingsInput
+
+  """Cloud account to issue the certificate in."""
   cloudAccountId: String!
+
+  """Domain to tie the certificate to."""
   domainId: String
+
+  """Main hostname to cover. A wildcard such as `*.example.com` is allowed."""
   primaryDomain: String!
 }
 
+"""A new cluster to create."""
 input CreateClusterInput {
   """Required when the cloud account is AWS"""
   aws: AwsClusterSettingsInput
@@ -798,6 +1615,8 @@ input CreateClusterInput {
 
   """Network ID - required for managed instances"""
   networkId: String
+
+  """Cloud region to create the cluster in"""
   region: String!
 
   """URL-friendly identifier for CLI and API references"""
@@ -808,6 +1627,7 @@ input CreateClusterInput {
 A new database server. Send the settings section for the cloud account it runs in.
 """
 input CreateDatabaseInput {
+  """Settings for a server in an AWS cloud account"""
   aws: AwsDatabaseSettingsInput
 
   """Days of automatic backups. Defaults to 7."""
@@ -818,6 +1638,8 @@ input CreateDatabaseInput {
 
   """Database engine"""
   engine: DatabaseEngineEnum!
+
+  """Engine version, e.g. 16.4"""
   engineVersion: String
 
   """Keep a standby copy in a second zone"""
@@ -842,22 +1664,40 @@ input CreateDatabaseInput {
   storageGb: Int
 }
 
+"""A root domain to register with the team."""
 input CreateDomainInput {
   """Root domain FQDN (e.g., example.com)"""
   name: String!
 }
 
+"""An environment to add to a project."""
 input CreateEnvironmentInput {
+  """Cloud account the environment deploys into."""
   cloudAccountId: String!
+
+  """Colour shown for the environment in the console."""
   color: String
+
+  """Whether this is a production environment."""
   isProduction: Boolean! = false
+
+  """Display name."""
   name: String!
+
+  """Network the environment deploys into."""
   networkId: String
+
+  """Project to add the environment to."""
   projectId: String!
+
+  """Cloud region the environment deploys into, such as `us-east-1`."""
   region: String!
+
+  """Slug that names the environment under `environments` in `gantry.yml`."""
   slug: String!
 }
 
+"""A new shared filesystem to create in a network"""
 input CreateFilesystemInput {
   """Required when the cloud account is AWS"""
   aws: AwsFilesystemSettingsInput
@@ -875,7 +1715,26 @@ input CreateFilesystemInput {
   slug: String!
 }
 
+"""A new firewall to create. It starts with no rules."""
+input CreateFirewallInput {
+  """Display name"""
+  name: String!
+
+  """Cloud the rules are written for"""
+  provider: CloudProviderEnum!
+
+  """Identifier that gantry.yml routes use to name the firewall"""
+  slug: String!
+}
+
+"""A new load balancer to create."""
 input CreateLoadBalancerInput {
+  """
+  Addresses (CIDRs) that may reach the load balancer. Empty accepts its visibility default.
+  """
+  allowedCidrs: [String!]
+
+  """Only for an AWS cloud account"""
   aws: AwsLoadBalancerSettingsInput
 
   """Cloud account ID"""
@@ -897,39 +1756,70 @@ input CreateLoadBalancerInput {
 
   """Load balancer type"""
   type: LoadBalancerTypeEnum!
+
+  """
+  Who can reach it. An internal load balancer goes in the network's private subnets and can't change to public later.
+  """
+  visibility: LoadBalancerVisibility! = PUBLIC
 }
 
+"""A new network to create."""
 input CreateNetworkInput {
   """Only for an AWS cloud account"""
   aws: AwsNetworkSettingsInput
 
   """Address range, e.g. 10.0.0.0/16"""
   cidr: String!
+
+  """Cloud account ID"""
   cloudAccountId: String!
 
   """
   When true, databases and caches get no network-wide ingress. Defaults to false.
   """
   leastPrivilegeMode: Boolean
+
+  """User-friendly name"""
   name: String!
+
+  """Cloud region to create the network in"""
   region: String!
+
+  """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Subnets to create in the network"""
   subnets: [NetworkSubnetInput!]!
 }
 
+"""A project to create."""
 input CreateProjectInput {
+  """Cloud the project deploys to."""
   cloudProvider: CloudProviderEnum!
+
+  """Display name. The slug is made from it."""
   name: String!
+
+  """Free-text label for grouping projects."""
   tag: String
 }
 
+"""A new secret to store in a cloud account"""
 input CreateSecretInput {
+  """Cloud account to store the secret in"""
   cloudAccountId: String!
+
+  """What the secret is for"""
   description: String
+
+  """Keys and values to store"""
   keyValuePairs: [SecretKeyValueInput!]!
+
+  """Name, unique in the cloud account"""
   name: String!
 }
 
+"""The configuration to validate, and to record as a new version."""
 input CreateVersionInput {
   """The full gantry.yml configuration"""
   config: JSON!
@@ -943,7 +1833,9 @@ input CreateVersionInput {
   gitRef: String
 }
 
+"""The result of createVersion."""
 type CreateVersionResult {
+  """Why the call failed, or a note on the result."""
   message: String
 
   """Project ID for image tagging"""
@@ -951,29 +1843,56 @@ type CreateVersionResult {
 
   """Project slug for image tagging"""
   projectSlug: String
+
+  """Whether the configuration is valid and the version was recorded."""
   success: Boolean!
 
   """Version ID"""
   versionId: String
 
-  """Sequential version number for this project + environment"""
-  versionNumber: Float
+  """The build number this version deploys. Null on a preview environment."""
+  versionNumber: Int
 }
 
+"""The environment whose staged version takes all traffic."""
+input CutoverInput {
+  """Also complete the release, dropping the previous version"""
+  complete: Boolean
+
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+}
+
+"""A managed database server that services can bind to"""
 type Database {
   """Days of automatic backups. 0 means backups are off."""
   backupRetentionDays: Int!
+
+  """Cloud account the server runs in"""
   cloudAccountId: String!
+
+  """When the server was created, as an ISO 8601 timestamp"""
   createdAt: String!
 
   """Hostname clients connect to, set once provisioned"""
   endpoint: String
+
+  """Database engine"""
   engine: DatabaseEngineEnum!
+
+  """Engine version, e.g. 16.4"""
   engineVersion: String
 
   """A standby copy in a second zone"""
   highAvailability: Boolean!
+
+  """Database server ID"""
   id: String!
+
+  """Display name"""
   name: String!
 
   """Network ID - required for all databases"""
@@ -992,6 +1911,8 @@ type Database {
 
   """Whether the database accepts connections from the internet"""
   publiclyAccessible: Boolean!
+
+  """Region the server runs in"""
   region: String!
 
   """
@@ -1001,6 +1922,8 @@ type Database {
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Where the server is in its lifecycle"""
   status: DatabaseStatusEnum!
 
   """Null when storage grows on its own"""
@@ -1008,42 +1931,73 @@ type Database {
 
   """Team ID"""
   teamId: String!
+
+  """When the server last changed, as an ISO 8601 timestamp"""
   updatedAt: String!
 }
 
+"""The master user of a database server"""
 type DatabaseCredentialsResult {
+  """What happened, safe to show to a user"""
   message: String
+
+  """Master password"""
   password: String
+
+  """Whether the credentials were read"""
   success: Boolean!
+
+  """Master username"""
   username: String
 }
 
 """Database engine type"""
 enum DatabaseEngineEnum {
+  """MariaDB"""
   MARIADB
+
+  """MySQL"""
   MYSQL
+
+  """PostgreSQL"""
   POSTGRESQL
 }
 
+"""An engine version a database server can be created with"""
 type DatabaseEngineVersion {
+  """
+  Date the cloud stops supporting this version. Null when none is announced.
+  """
   deprecationDate: String
+
+  """Version name to show"""
   description: String!
+
+  """Engine the version belongs to"""
   engine: DatabaseEngineEnum!
 
   """Catalog details only this cloud has"""
   providerData: JSON!
+
+  """Regions where this version is available"""
   supportedRegions: [String!]!
 
   """Version string, e.g. 16.4"""
   version: String!
 }
 
+"""Result of a database server change"""
 type DatabaseMutationResult {
+  """The database server, when the change succeeded"""
   database: Database
 
   """Deployment ID for provisioning progress tracking"""
   deploymentId: String
+
+  """What happened, safe to show to a user"""
   message: String
+
+  """Whether the change was accepted"""
   success: Boolean!
 }
 
@@ -1057,15 +2011,25 @@ type DatabaseServiceUser {
 
   """Database inside the server"""
   databaseName: String!
+
+  """Environment the binding deploys to"""
   environmentId: String!
+
+  """Slug of that environment"""
   environmentSlug: String!
+
+  """Service user ID"""
   id: String!
 
   """
   Secret reference holding the password, for password users. Never the password.
   """
   passwordSecret: String
+
+  """Service the binding belongs to"""
   serviceId: String!
+
+  """Name of that service"""
   serviceName: String!
 
   """
@@ -1077,6 +2041,8 @@ type DatabaseServiceUser {
   pending, staged (a staged rotation waiting for a deploy), active, failed, dropping, or drop_failed
   """
   status: String!
+
+  """Database username"""
   username: String!
 }
 
@@ -1090,26 +2056,47 @@ type DatabaseSize {
 
   """The value to send as size, e.g. db.t4g.medium"""
   size: String!
+
+  """Virtual CPUs"""
   vcpu: Int!
 }
 
 """Status of a database"""
 enum DatabaseStatusEnum {
+  """Ready for connections"""
   ACTIVE
+
+  """The last change did not complete"""
   FAILED
+
+  """Being created or changed"""
   PENDING
 }
 
+"""A database engine a cloud offers, with guidance on when to pick it"""
 type DatabaseTypeInfo {
+  """What the engine is"""
   description: String!
+
+  """Engine name to show, e.g. Aurora PostgreSQL"""
   displayName: String!
+
+  """Engine, the value to send as engine"""
   engine: DatabaseEngineEnum!
+
+  """When to choose this engine"""
   guidance: String!
+
+  """Cloud that offers the engine, e.g. aws"""
   provider: String!
 
   """Catalog details only this cloud has"""
   providerData: JSON!
+
+  """Whether a server with this engine must be created in a network"""
   requiresNetwork: Boolean!
+
+  """Whether this engine can run serverless in this cloud"""
   supportsServerless: Boolean!
 }
 
@@ -1117,7 +2104,14 @@ type DatabaseTypeInfo {
 IN_PLACE sets a new password on the same user. STAGED (Advanced Deployments) creates the user in the other slot, which the next deploy switches to
 """
 enum DatabaseUserRotationMode {
+  """
+  Set a new password on the same user now. Running instances fail to connect until they restart.
+  """
   IN_PLACE
+
+  """
+  Create the user in the other slot. The next deploy switches to it while the current user keeps working.
+  """
   STAGED
 }
 
@@ -1126,149 +2120,469 @@ A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date
 """
 scalar DateTime
 
+"""
+One run of work against a project, environment or service: a deploy, a teardown, a traffic change or an operation.
+"""
 type Deployment {
+  """When the deployment finished."""
   completedAt: String
 
   """Deployment type: deploy, teardown, activation, or operation"""
   deploymentType: String
+
+  """ID of the environment. Null on a cloud deployment."""
   environmentId: String
+
+  """Name of the environment."""
   environmentName: String
+
+  """Deployment ID."""
   id: String!
+
+  """The latest progress or error message."""
   lastMessage: String
+
+  """
+  Extra details recorded on the deployment, such as the options it ran with.
+  """
   meta: JSON
+
+  """
+  Post-deploy commands of a routing deployment. Null when there are none.
+  """
+  postDeployState: PostDeployState
+
+  """ID of the project. Null on a cloud deployment."""
   projectId: String
+
+  """Name of the project."""
   projectName: String
 
   """Deployment scope: cloud, project-env, or service-env"""
   scope: String
+
+  """ID of the service, on a service deployment."""
   serviceId: String
+
+  """Name of the service, on a service deployment."""
   serviceName: String
+
+  """When the deployment started."""
   startedAt: String!
+
+  """Where the deployment is."""
   status: DeploymentStatus!
+
+  """
+  The steps of the deployment, in order. Null when the query does not load them.
+  """
   steps: [DeploymentStep!]
 
   """Team ID"""
   teamId: String!
+
+  """When the deployment last changed."""
   updatedAt: String!
+
+  """ID of the version the deployment deploys."""
   versionId: String
 }
 
+"""Options that change how a deploy runs."""
 input DeploymentOptionsInput {
   """Delete stale files after upload"""
   deleteStale: Boolean
 
   """Force re-upload all files"""
   force: Boolean
+
+  """
+  Go live without running the post-deploy commands. The deployment records the skip.
+  """
+  skipPostDeploy: Boolean
+
+  """
+  Deploy without running the services' pre-deploy commands. The deployment records the skip.
+  """
+  skipPreDeploy: Boolean
 }
 
 """The phase of a deployment step"""
 enum DeploymentPhase {
+  """Builds the code and container images, run by the CLI."""
   BUILDING
+
+  """Provisions and updates the compute for the version."""
   DEPLOYING
+
+  """Points routing and DNS at the version."""
   GO_LIVE
+
+  """Runs post-deploy commands and finishes the deployment."""
   POST_DEPLOY
+
+  """Creates what the version needs before it deploys, such as queues."""
   SETUP
+
+  """Uploads artifacts, images and static files, run by the CLI."""
   UPLOADING
 }
 
+"""What a deploy of the environment would do."""
 type DeploymentPlanType {
+  """Each named build."""
   builds: [BuildPlanEntryType!]!
+
+  """Each hostname the environment routes."""
   routing: [RoutingPlanEntryType!]!
+
+  """Each service in the config."""
   services: [ServicePlanEntryType!]!
 }
 
 """The status of a deployment"""
 enum DeploymentStatus {
+  """
+  Waiting on something outside the deployment, such as a certificate that has not validated yet. It resumes on its own.
+  """
   BLOCKED
+
+  """Cancelled before it finished."""
   CANCELLED
+
+  """A cancel was requested and open steps are being stopped."""
   CANCELLING
+
+  """Every step finished."""
   COMPLETE
+
+  """A step failed. `lastMessage` says what failed."""
   FAILED
+
+  """The steps are planned and the first ones are starting."""
   INITIALIZING
+
+  """Queued and not picked up yet."""
   PENDING
+
+  """Gantry is working out the steps the deployment needs."""
   PLANNING
+
+  """Steps are running."""
   RUNNING
+
+  """
+  Ended with nothing to do, for example because a newer deployment replaced it.
+  """
   SKIPPED
 }
 
+"""One unit of work in a deployment, run by Gantry or by the CLI."""
 type DeploymentStep {
+  """Why the CLI failed the step."""
   cliError: String
 
   """
   Inputs for the CLI, shaped by cliTask. Present once the step is ready for the CLI.
   """
   cliInputs: CliInputs
+
+  """What the CLI reported when it completed the step."""
   cliOutputs: JSON
+
+  """Where the CLI is with the step. Null on Gantry steps."""
   cliStatus: CliStatus
+
+  """
+  The task the CLI runs for the step, such as `local-build`. Null on Gantry steps.
+  """
   cliTask: String
+
+  """When the step finished."""
   completedAt: String
+
+  """When the step was created."""
   createdAt: String!
+
+  """ID of the deployment the step belongs to."""
   deploymentId: String!
+
+  """Why the step failed."""
   error: String
+
+  """Whether Gantry or the CLI runs the step."""
   executor: StepExecutor!
+
+  """Step ID."""
   id: String!
+
+  """What the step produced, read by the steps after it."""
   outputs: JSON
+
+  """The phase the step belongs to."""
   phase: DeploymentPhase!
+
+  """Position of the step in the deployment, lowest first."""
   sequence: Float!
+
+  """When the step started."""
   startedAt: String
+
+  """Where the step is."""
   status: DeploymentStepStatus!
+
+  """What the step does, such as `container-push` or `health-check`."""
   stepType: String!
 }
 
 """The status of a deployment step"""
 enum DeploymentStepStatus {
+  """Waiting for the CLI to claim and run the step."""
   AWAITING_CLI
+
+  """Stopped because the deployment was cancelled."""
   CANCELLED
+
+  """Finished."""
   COMPLETE
+
+  """Failed. `error` or `cliError` says why."""
   FAILED
+
+  """Waiting for the CLI to send the list of files it will upload."""
   MANIFEST_REQUIRED
+
+  """Waiting for the steps it depends on."""
   PENDING
+
+  """Gantry is running the step."""
   PROCESSING
+
+  """Ready and queued for Gantry to run."""
   QUEUED
 }
 
+"""
+A DNS record that proves control of a domain so the certificate can be issued.
+"""
 type DnsValidationRecord {
+  """Record name to create."""
   name: String!
+
+  """Record type, such as `CNAME`."""
   type: String!
+
+  """Record value."""
   value: String!
 }
 
+"""
+A root domain registered with the team. Routing can serve any hostname under it.
+"""
 type Domain {
+  """When the domain was registered."""
   createdAt: String!
+
+  """Domain id."""
   id: String!
+
+  """Root domain name, such as `example.com`."""
   name: String!
 
   """Team ID"""
   teamId: String!
+
+  """When the domain last changed."""
   updatedAt: String!
 }
 
+"""The outcome of a domain change."""
 type DomainMutationResult {
+  """The domain after the change. Null when the change was refused."""
   domain: Domain
+
+  """What happened, or why the change was refused."""
   message: String
+
+  """Whether the change was made."""
   success: Boolean!
 }
 
-type Environment {
-  cloudAccountId: String!
-  color: String
-  createdAt: String!
-  id: String!
-  isProduction: Boolean!
-  name: String!
+"""A stored env var"""
+type EnvVar {
+  """Variable name"""
+  key: String!
+
+  """When the value last changed, as an ISO 8601 timestamp"""
+  updatedAt: String!
+
+  """Variable value"""
+  value: String!
+}
+
+"""One env var to store"""
+input EnvVarInput {
+  """Variable name"""
+  key: String!
+
+  """Variable value"""
+  value: String!
+}
+
+"""Where a stored env var applies. Narrower scopes win over broader ones."""
+enum EnvVarScopeEnum {
+  """Every service deployed to one cloud account"""
+  CLOUD_ACCOUNT
+
+  """One project environment, or one service there when `service` is set"""
+  ENVIRONMENT
+
+  """Every service deployed to one network"""
+  NETWORK
+
+  """Every service in one project"""
+  PROJECT
+
+  """Every service the team deploys"""
+  TEAM
+}
+
+"""Where a value in a service env came from, lowest precedence first."""
+enum EnvVarSourceEnum {
+  """Injected by a database, cache, bucket or filesystem binding"""
+  BINDING
+
+  """Stored at the cloud account scope"""
+  CLOUD_ACCOUNT
+
+  """Stored at the environment scope"""
+  ENVIRONMENT
+
+  """The environment's `env` for the service in gantry.yml"""
+  ENVIRONMENT_YAML
+
+  """Stored at the network scope"""
+  NETWORK
+
+  """
+  Copied from a preview's parent environment, by the template's inherit_env
+  """
+  PARENT_ENVIRONMENT
+
+  """A preview template's `overrides` env in gantry.yml"""
+  PREVIEW_TEMPLATE
+
+  """Stored at the project scope"""
+  PROJECT
+
+  """The service's `secrets` in gantry.yml"""
+  SECRET
+
+  """Stored for this service only in the environment"""
+  SERVICE_OVERRIDE
+
+  """The service's `env` in gantry.yml"""
+  SERVICE_YAML
+
+  """Stored at the team scope"""
+  TEAM
+}
+
+"""The scope a stored env var operation applies to"""
+input EnvVarTargetInput {
+  """Required for CLOUD_ACCOUNT"""
+  cloudAccountId: String
+
+  """Required for ENVIRONMENT"""
+  environmentSlug: String
+
+  """Required for NETWORK"""
   networkId: String
+
+  """Required for PROJECT and ENVIRONMENT"""
+  projectId: String
+
+  """Where the variables apply"""
+  scope: EnvVarScopeEnum!
+
+  """
+  ENVIRONMENT only: a service name, for an override that applies to that service only
+  """
+  service: String
+}
+
+"""
+Result of a stored env var change. Deployed services pick it up on their next deploy.
+"""
+type EnvVarsMutationResult {
+  """Names of variables that were added"""
+  created: [String!]!
+
+  """What happened, safe to show to a user"""
+  message: String
+
+  """Names of variables that were removed"""
+  removed: [String!]!
+
+  """Whether the change was applied"""
+  success: Boolean!
+
+  """Names of variables whose value changed"""
+  updated: [String!]!
+}
+
+"""
+A place a project deploys to, such as staging or production, in one cloud region.
+"""
+type Environment {
+  """Cloud account the environment deploys into."""
+  cloudAccountId: String!
+
+  """
+  Colour shown for the environment in the console. Null when none is set.
+  """
+  color: String
+
+  """When the environment was created."""
+  createdAt: String!
+
+  """Environment id."""
+  id: String!
+
+  """Whether this is a production environment."""
+  isProduction: Boolean!
+
+  """Display name."""
+  name: String!
+
+  """Network the environment deploys into. Null when none is set."""
+  networkId: String
+
+  """Position in the project's environment list. Lower comes first."""
   pipelineOrder: Int!
+
+  """Project the environment belongs to."""
   projectId: String!
+
+  """Cloud region the environment deploys into."""
   region: String!
+
+  """Slug that names the environment under `environments` in `gantry.yml`."""
   slug: String!
 
   """Team ID"""
   teamId: String!
 }
 
+"""The outcome of an environment change."""
 type EnvironmentMutationResult {
+  """The environment after the change. Null when the change was refused."""
   environment: Environment
+
+  """What happened, or why the change was refused."""
   message: String
+
+  """Whether the change was made."""
   success: Boolean!
 }
 
@@ -1305,10 +2619,18 @@ input FileUploadResultInput {
   success: Boolean!
 }
 
+"""A shared filesystem that container services can mount"""
 type Filesystem {
+  """Cloud account the filesystem lives in"""
   cloudAccountId: String!
+
+  """When the filesystem was created, as an ISO 8601 timestamp"""
   createdAt: String!
+
+  """Filesystem ID"""
   id: String!
+
+  """Display name"""
   name: String!
 
   """Network ID - required for all filesystems"""
@@ -1319,34 +2641,178 @@ type Filesystem {
 
   """Settings and outputs only this cloud has"""
   providerData: JSON!
+
+  """Region the filesystem lives in, from its network"""
   region: String!
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Where the filesystem is in its lifecycle"""
   status: FilesystemStatusEnum!
 
   """Team ID"""
   teamId: String!
+
+  """When the filesystem last changed, as an ISO 8601 timestamp"""
   updatedAt: String!
 }
 
+"""Result of a filesystem change"""
 type FilesystemMutationResult {
   """Deployment ID for provisioning progress tracking"""
   deploymentId: String
+
+  """The filesystem, when the change succeeded"""
   filesystem: Filesystem
+
+  """What happened, safe to show to a user"""
   message: String
+
+  """Whether the change was accepted"""
   success: Boolean!
 }
 
 """Status of a filesystem"""
 enum FilesystemStatusEnum {
+  """Ready to mount"""
   ACTIVE
+
+  """The last change did not complete"""
   FAILED
+
+  """Being created or changed"""
   PENDING
 }
 
+"""
+A team's set of rules that blocks unwanted requests before they reach a hostname. A route puts one in front of its hostname by slug.
+"""
+type Firewall {
+  """When the firewall was created"""
+  createdAt: String!
+
+  """Firewall ID"""
+  id: String!
+
+  """Load balancers it is attached to"""
+  loadBalancers: [FirewallLoadBalancer!]!
+
+  """Display name"""
+  name: String!
+
+  """Cloud accounts the firewall is deployed in or being removed from"""
+  placements: [FirewallPlacement!]!
+
+  """Cloud the rules are written for"""
+  provider: CloudProviderEnum!
+
+  """The firewall's rules, in its cloud's terms"""
+  rules: JSON!
+
+  """Identifier that gantry.yml routes use to name the firewall"""
+  slug: String!
+
+  """What it can sit in front of, by its cloud"""
+  targets: [FirewallTargetEnum!]!
+
+  """Team ID"""
+  teamId: String!
+
+  """When the firewall last changed"""
+  updatedAt: String!
+
+  """Hostnames live versions route through it"""
+  uses: [FirewallUse!]!
+}
+
+"""A load balancer a firewall is attached to."""
+type FirewallLoadBalancer {
+  """Load balancer ID"""
+  id: String!
+
+  """Load balancer name"""
+  name: String!
+
+  """Load balancer slug"""
+  slug: String!
+}
+
+"""Outcome of a firewall mutation."""
+type FirewallMutationResult {
+  """The firewall, when a create or update succeeded"""
+  firewall: Firewall
+
+  """What happened, safe to show to a user"""
+  message: String
+
+  """Whether the mutation succeeded"""
+  success: Boolean!
+}
+
+"""
+A deployment of a firewall into one cloud account, made when a hostname there first uses it.
+"""
+type FirewallPlacement {
+  """Cloud account the firewall is deployed in"""
+  cloudAccountId: String!
+
+  """Placement ID"""
+  id: String!
+
+  """
+  Outputs only this cloud has, such as the ID of the deployed rule set. Empty until the deployment succeeds.
+  """
+  providerData: JSON!
+
+  """Deployment state"""
+  status: FirewallPlacementStatus!
+}
+
+"""State of a firewall's deployment in one cloud account"""
+enum FirewallPlacementStatus {
+  """A hostname in the cloud account uses the firewall."""
+  ACTIVE
+
+  """
+  No hostname in the cloud account uses the firewall, and it is being removed.
+  """
+  DRAINING
+
+  """The firewall was removed from the cloud account."""
+  RELEASED
+}
+
+"""What a firewall can sit in front of"""
+enum FirewallTargetEnum {
+  """A CDN, set by a hostname's cdn.firewall in gantry.yml"""
+  CDN
+
+  """A load balancer, attached from the console, CLI or API"""
+  LOAD_BALANCER
+}
+
+"""A hostname a live version routes through a firewall."""
+type FirewallUse {
+  """CDN the hostname is placed on, once it is"""
+  cdnId: String
+
+  """Hostname behind the firewall"""
+  hostname: String!
+
+  """Project that routes the hostname"""
+  projectId: String!
+
+  """Name of that project"""
+  projectName: String!
+}
+
+"""An inclusive range of whole numbers."""
 input IntRangeInput {
+  """Highest allowed value. Omit for no limit."""
   max: Int
+
+  """Lowest allowed value"""
   min: Int!
 }
 
@@ -1355,13 +2821,114 @@ The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://
 """
 scalar JSON
 
+"""Set exactly one source: from or buildNumber."""
+input LiftBuildInput {
+  """Project build number to lift"""
+  buildNumber: Int
+
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Environment slug whose live build is lifted"""
+  from: String
+
+  """Project ID"""
+  projectId: String!
+}
+
+"""The result of liftBuild."""
+type LiftBuildResult {
+  """Why the lift was refused, or a note on it."""
+  message: String
+
+  """Whether the version was created from the build."""
+  success: Boolean!
+
+  """The new version in the environment"""
+  versionId: String
+
+  """
+  The build's number, which the version shares. Null on a preview environment.
+  """
+  versionNumber: Int
+
+  """Configuration of the new version, for passing to startDeployment"""
+  yamlSnapshot: String
+}
+
+"""A preview to create, or to redeploy when it exists."""
+input LiftPreviewEnvironmentInput {
+  """
+  The preview's name. An existing preview with this name is redeployed. Without one, a new preview is created and named by its id.
+  """
+  name: String
+
+  """Project id. Must match the `id` in the YAML."""
+  projectId: String!
+
+  """
+  Services to deploy, in place of the template's `services` for this lift.
+  """
+  services: [String!]
+
+  """Branch and commit to record on the preview."""
+  sourceRef: PreviewSourceRefInput
+
+  """Template name from `previews:`."""
+  template: String!
+
+  """Variable values that win over every other source."""
+  variables: [VariableOverrideInput!]
+
+  """The `gantry.yml` content."""
+  yaml: String!
+}
+
+"""The outcome of lifting a preview."""
+type LiftPreviewEnvironmentResult {
+  """Whether this lift created the preview."""
+  created: Boolean
+
+  """Every problem found. Empty when `ok`."""
+  errors: [ResolutionErrorType!]!
+
+  """Whether the preview is ready to deploy."""
+  ok: Boolean!
+
+  """The preview. Set when `ok`."""
+  preview: PreviewEnvironment
+
+  """
+  The preview's resolved config and plan, for passing to createVersion and startDeployment.
+  """
+  resolved: ResolvedEnvironmentType
+}
+
+"""
+A load balancer that routes traffic to services, shared by any project that routes to it.
+"""
 type LoadBalancer {
+  """
+  Addresses (CIDRs) that may reach it. Empty accepts the visibility default.
+  """
+  allowedCidrs: [String!]!
+
+  """Cloud account the load balancer belongs to"""
   cloudAccountId: String!
+
+  """When the load balancer was created"""
   createdAt: String!
 
   """Hostname or URL clients reach, once provisioned"""
   endpoint: String
+
+  """Firewall attached to the load balancer"""
+  firewallId: String
+
+  """Load balancer ID"""
   id: String!
+
+  """Display name"""
   name: String!
 
   """Network ID (required for application load balancers)"""
@@ -1378,55 +2945,111 @@ type LoadBalancer {
 
   """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Provisioning status"""
   status: LoadBalancerStatusEnum!
 
   """Team ID"""
   teamId: String!
+
+  """Load balancer type"""
   type: LoadBalancerTypeEnum!
+
+  """When the load balancer last changed"""
   updatedAt: String!
+
+  """
+  Whether it takes traffic from the internet or only from inside its network
+  """
+  visibility: LoadBalancerVisibility!
 }
 
+"""Outcome of a load balancer mutation."""
 type LoadBalancerMutationResult {
   """Deployment ID for provisioning progress tracking"""
   deploymentId: String
+
+  """The load balancer, when the mutation succeeded"""
   loadBalancer: LoadBalancer
+
+  """What happened, safe to show to a user"""
   message: String
+
+  """Whether the mutation succeeded"""
   success: Boolean!
 }
 
 """Status of a load balancer"""
 enum LoadBalancerStatusEnum {
+  """The load balancer is ready to take routes."""
   ACTIVE
+
+  """Provisioning the load balancer failed."""
   FAILED
+
+  """The load balancer is being provisioned."""
   PENDING
 }
 
 """Type of load balancer"""
 enum LoadBalancerTypeEnum {
+  """A regional HTTP and HTTPS load balancer inside a network."""
   APPLICATION
-  GATEWAY_HTTP
+
+  """An HTTP and HTTPS load balancer with no region."""
   GLOBAL
 }
 
+"""A kind of load balancer a cloud offers."""
 type LoadBalancerTypeInfo {
+  """What the load balancer type does"""
   description: String!
+
+  """Name to show for the load balancer type"""
   displayName: String!
+
+  """When to choose this load balancer type"""
   guidance: String!
+
+  """Cloud that offers the load balancer type"""
   provider: String!
+
+  """Whether createLoadBalancer needs a networkId for this type"""
   requiresNetwork: Boolean!
+
+  """Whether createLoadBalancer needs a region for this type"""
   requiresRegion: Boolean!
+
+  """Load balancer type"""
   type: LoadBalancerTypeEnum!
+}
+
+"""Who can reach a load balancer"""
+enum LoadBalancerVisibility {
+  """
+  Takes traffic only from inside its network. A CDN cannot sit in front of it; route a hostname to it with cdn: false.
+  """
+  INTERNAL
+
+  """Takes traffic from the internet."""
+  PUBLIC
 }
 
 """Inputs for a local-build CLI task"""
 type LocalBuildCliInputs {
   """CPU architecture to build the image for. Set whenever dockerfile is."""
   architecture: String
+
+  """Docker build arguments."""
   buildArgs: [BuildArg!]
 
   """Build commands to run, in order"""
   buildCommands: [String!]
+
+  """Docker build stage to stop at (`--target`)."""
   dockerTarget: String
+
+  """Dockerfile to build. Null when no image is built."""
   dockerfile: String
 
   """Name of the named build this step runs"""
@@ -1434,12 +3057,22 @@ type LocalBuildCliInputs {
 
   """Project ID used for image tagging"""
   projectId: String!
+
+  """Project slug, used for image tagging."""
   projectSlug: String!
+
+  """Service the build is for."""
   serviceName: String!
+
+  """ID of the step the CLI runs."""
   stepId: String!
 
-  """Version number used for image tagging"""
-  versionNumber: Int!
+  """
+  Version tag for the local image: v12, or the version ID on a preview environment.
+  """
+  versionTag: String!
+
+  """Directory the build runs in, and the Docker context."""
   workingDir: String
 }
 
@@ -1450,18 +3083,35 @@ input LocalBuildCliOutputsInput {
   success: Boolean!
 }
 
+"""One log line."""
 type LogLine {
+  """The line."""
   message: String!
+
+  """When the line was written, in ISO 8601."""
   timestamp: String!
 }
 
+"""A page of log lines."""
 type LogPage {
+  """
+  Opaque cursor. Pass it back to receive only the lines written since this page.
+  """
   cursor: String!
+
+  """Lines, oldest first."""
   lines: [LogLine!]!
 }
 
 type Mutation {
-  abortCanary(input: ActivationInput!, team: String): ActivationResult!
+  """Send all traffic back to the version that was live before the release."""
+  abortRelease(
+    """The environment to act on."""
+    input: ReleaseEnvironmentInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ReleaseOperationResult!
 
   """
   Move a database's objects to Gantry's owner role so service users can be granted access. Each previous owner becomes a member of the owner role, so existing users keep working with owner rights over the whole database. Returns a deploymentId to poll.
@@ -1472,31 +3122,298 @@ type Mutation {
 
     """Database server id"""
     id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): DatabaseMutationResult!
-  cancelDeployment(id: String!, team: String): CancelDeploymentResult!
-  claimStep(stepId: String!, team: String): ClaimStepResult!
-  completeCliStep(fileResults: [FileUploadResultInput!], outputs: CliTaskOutputsInput!, stepId: String!, team: String): CompleteCliStepResult!
-  createBastion(input: CreateBastionInput!, team: String): BastionMutationResult!
-  createCache(input: CreateCacheInput!, team: String): CacheMutationResult!
-  createCertificate(input: CreateCertificateInput!, team: String): CertificateMutationResult!
-  createCluster(input: CreateClusterInput!, team: String): ClusterMutationResult!
-  createDatabase(input: CreateDatabaseInput!, team: String): DatabaseMutationResult!
-  createDomain(input: CreateDomainInput!, team: String): DomainMutationResult!
-  createEnvironment(input: CreateEnvironmentInput!, team: String): EnvironmentMutationResult!
-  createFilesystem(input: CreateFilesystemInput!, team: String): FilesystemMutationResult!
-  createLoadBalancer(input: CreateLoadBalancerInput!, team: String): LoadBalancerMutationResult!
-  createNetwork(input: CreateNetworkInput!, team: String): NetworkMutationResult!
-  createProject(input: CreateProjectInput!, team: String): ProjectMutationResult!
-  createSecret(input: CreateSecretInput!, team: String): SecretMutationResult!
-  createVersion(input: CreateVersionInput!, team: String): CreateVersionResult!
-  deleteSecret(id: String!, team: String): SecretMutationResult!
-  destroyBastion(slug: String!, team: String): BastionMutationResult!
-  failCliStep(error: String!, stepId: String!, team: String): FailCliStepResult!
-  promoteBlueGreen(input: ActivationInput!, team: String): ActivationResult!
-  promoteCanary(input: ActivationInput!, team: String): ActivationResult!
-  promoteVersion(input: PromoteVersionInput!, team: String): PromoteVersionResult!
-  rollbackDeployment(input: ActivationInput!, team: String): ActivationResult!
+
+  """
+  Cancel a deployment. Its open steps stop, and a release command already running keeps running.
+  """
+  cancelDeployment(
+    """Deployment ID."""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CancelDeploymentResult!
+  claimStep(
+    stepId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ClaimStepResult!
+
+  """Remove cleanup items from `cleanupItems` by id."""
+  cleanUp(
+    """Ids of the cleanup items to remove."""
+    ids: [ID!]!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CleanupResult!
+  completeCliStep(
+    fileResults: [FileUploadResultInput!]
+    outputs: CliTaskOutputsInput!
+    stepId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CompleteCliStepResult!
+
+  """Drop the previous version of a release that has been cut over."""
+  completeRelease(
+    """The environment to act on."""
+    input: ReleaseEnvironmentInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ReleaseOperationResult!
+
+  """
+  Create a bastion in a network and start provisioning it. Follow progress with the returned deploymentId.
+  """
+  createBastion(
+    """The bastion to create"""
+    input: CreateBastionInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): BastionMutationResult!
+
+  """
+  Create a cache in a network. Provisioning runs as a deployment; poll the returned deploymentId.
+  """
+  createCache(
+    """The cache to create"""
+    input: CreateCacheInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CacheMutationResult!
+
+  """
+  Request a certificate. It starts pending and becomes active once the DNS validation records on its regional certificates resolve.
+  """
+  createCertificate(
+    """The certificate to request."""
+    input: CreateCertificateInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CertificateMutationResult!
+
+  """
+  Create a cluster and start provisioning it. Follow progress with the returned deploymentId.
+  """
+  createCluster(
+    """The cluster to create"""
+    input: CreateClusterInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ClusterMutationResult!
+
+  """
+  Create a database server in a network. Provisioning runs as a deployment; poll the returned deploymentId.
+  """
+  createDatabase(
+    """The database server to create"""
+    input: CreateDatabaseInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DatabaseMutationResult!
+
+  """
+  Register a root domain with the team. A subdomain is refused, and the team's plan caps how many domains it can have.
+  """
+  createDomain(
+    """The domain to register."""
+    input: CreateDomainInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DomainMutationResult!
+
+  """
+  Add an environment to a project. The team's plan caps how many environments a project can have.
+  """
+  createEnvironment(
+    """The environment to add."""
+    input: CreateEnvironmentInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): EnvironmentMutationResult!
+
+  """
+  Create a shared filesystem in a network. Provisioning runs as a deployment; poll the returned deploymentId.
+  """
+  createFilesystem(
+    """The filesystem to create"""
+    input: CreateFilesystemInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FilesystemMutationResult!
+
+  """
+  Create a firewall. It is deployed to a cloud account when a route there first puts it in front of a hostname.
+  """
+  createFirewall(
+    """The firewall to create"""
+    input: CreateFirewallInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
+
+  """
+  Create a load balancer and start provisioning it. Follow progress with the returned deploymentId.
+  """
+  createLoadBalancer(
+    """The load balancer to create"""
+    input: CreateLoadBalancerInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): LoadBalancerMutationResult!
+
+  """
+  Create a network and start provisioning it. Follow progress with the returned deploymentId.
+  """
+  createNetwork(
+    """The network to create"""
+    input: CreateNetworkInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): NetworkMutationResult!
+
+  """
+  Create a project with no environments. The team's plan caps how many projects it can have.
+  """
+  createProject(
+    """The project to create."""
+    input: CreateProjectInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ProjectMutationResult!
+
+  """Store a new secret in the cloud account's secret store"""
+  createSecret(
+    """The secret to create"""
+    input: CreateSecretInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): SecretMutationResult!
+
+  """
+  Validate a gantry.yml configuration. With an environment, also record it as the next version there.
+  """
+  createVersion(
+    """The configuration, and the environment to record it for."""
+    input: CreateVersionInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CreateVersionResult!
+
+  """Send all traffic to the new version of the release in progress."""
+  cutover(
+    """The environment to cut over."""
+    input: CutoverInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ReleaseOperationResult!
+
+  """
+  Delete a firewall. Refused while a live version routes through it or it is still deployed in a cloud account.
+  """
+  deleteFirewall(
+    """Firewall ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
+
+  """Delete a secret from its cloud and from Gantry"""
+  deleteSecret(
+    """Secret ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): SecretMutationResult!
+
+  """
+  Destroy a bastion and its cloud resources. Follow progress with the returned deploymentId.
+  """
+  destroyBastion(
+    """Bastion slug"""
+    slug: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): BastionMutationResult!
+  failCliStep(
+    error: String!
+    stepId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FailCliStepResult!
+
+  """
+  Lift a build that already exists: another environment's live build, or a build by number.
+  """
+  liftBuild(
+    """The environment, and the build to lift."""
+    input: LiftBuildInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): LiftBuildResult!
+
+  """
+  Create a preview from a `previews:` template, or find the one with this name, and resolve the config it deploys. Deploy it with createVersion and startDeployment.
+  """
+  liftPreviewEnvironment(
+    """The template, the name, and the config."""
+    input: LiftPreviewEnvironmentInput!
+  ): LiftPreviewEnvironmentResult!
+
+  """Apply the routing of the environment's live versions again."""
+  reapplyRouting(
+    """The environment to act on."""
+    input: ReleaseEnvironmentInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ReleaseOperationResult!
+
+  """Make the env vars at a scope exactly the ones given, removing the rest"""
+  replaceEnvVars(
+    """The scope and the variables"""
+    input: SetEnvVarsInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): EnvVarsMutationResult!
+
+  """Make an earlier version of the environment live."""
+  rollback(
+    """The environment, and the version to make live."""
+    input: RollbackInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ReleaseOperationResult!
 
   """
   Give a password service user a new password. IN_PLACE changes it on the same user now, and running instances fail to connect until they restart. STAGED (plans with Advanced Deployments) creates the user in the binding's other slot, which the next deploy switches to, while the current user keeps working. Returns a deploymentId to poll.
@@ -1512,16 +3429,169 @@ type Mutation {
 
     """Service user id from databaseServiceUsers"""
     serviceUserId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): DatabaseMutationResult!
-  setCanary(input: ActivationInput!, team: String): ActivationResult!
-  startCommandRun(command: [String!]!, environmentSlug: String!, function: String, projectId: String!, service: String!, team: String): StartCommandRunResult!
-  startDeployment(input: StartDeploymentInput!, team: String): StartDeploymentResult!
-  startShellSession(command: String, environmentSlug: String!, instance: String, projectId: String!, service: String!, team: String): StartShellSessionResult!
-  startTeardown(input: StartTeardownInput!, team: String): StartTeardownResult!
-  submitManifest(input: SubmitManifestInput!, team: String): SubmitManifestResult!
-  triggerCertificateValidation(id: String!, team: String): CertificateMutationResult!
-  triggerReroute(input: TriggerRerouteInput!, team: String): TriggerRerouteResult!
+
+  """
+  Add or change env vars at a scope. Variables not named stay as they are.
+  """
+  setEnvVars(
+    """The scope and the variables"""
+    input: SetEnvVarsInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): EnvVarsMutationResult!
+
+  """
+  Replace a firewall's rules with an ordered list. The new rules are redeployed to every cloud account it's deployed in.
+  """
+  setFirewallRules(
+    """The firewall and its new rules"""
+    input: SetFirewallRulesInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
+
+  """
+  Attach a firewall to a load balancer, or detach it with a null firewallId. The load balancer redeploys once the firewall is deployed in its region.
+  """
+  setLoadBalancerFirewall(
+    """The load balancer and its firewall"""
+    input: SetLoadBalancerFirewallInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): LoadBalancerMutationResult!
+
+  """Send a share of traffic to the new version of a canary release."""
+  shiftTraffic(
+    """The environment, and the share of traffic."""
+    input: ShiftTrafficInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ReleaseOperationResult!
+
+  """
+  Open a session to an active bastion's SSH port, for a bastion with no public address. Needs use access.
+  """
+  startBastionSession(
+    """Bastion slug"""
+    slug: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): StartBastionSessionResult!
+
+  """
+  Run a one-off command on a service's live version. A container service starts a task to poll with `commandRun`. A serverless service returns an invocation for the client to make.
+  """
+  startCommandRun(
+    """Command and its arguments, one per item."""
+    command: [String!]!
+
+    """Environment slug."""
+    environmentSlug: String!
+
+    """
+    Function of a serverless service to run the command on. Default: its `console` function.
+    """
+    function: String
+
+    """Project id."""
+    projectId: String!
+
+    """Service name from gantry.yml."""
+    service: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): StartCommandRunResult!
+
+  """
+  Deploy a configuration to an environment. Starts one deployment per service and returns their IDs to poll.
+  """
+  startDeployment(
+    """What to deploy, and where."""
+    input: StartDeploymentInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): StartDeploymentResult!
+
+  """
+  Open an interactive session in a running instance of a container service. The session runs as root with the service access and secrets, and is recorded in the audit log.
+  """
+  startShellSession(
+    """Command the session runs. Default: a shell."""
+    command: String
+
+    """Environment slug."""
+    environmentSlug: String!
+
+    """
+    Id of the running instance to attach to. Default: any running instance.
+    """
+    instance: String
+
+    """Project id."""
+    projectId: String!
+
+    """Service name from gantry.yml."""
+    service: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): StartShellSessionResult!
+
+  """
+  Destroy the resources of an environment. Needs the token from teardownPreview and the typed confirmation phrase.
+  """
+  startTeardown(
+    """The environment, token and confirmation phrase."""
+    input: StartTeardownInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): StartTeardownResult!
+  submitManifest(
+    input: SubmitManifestInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): SubmitManifestResult!
+
+  """
+  Tear down a preview: its cloud resources, routing, DNS records, database users and the databases it owns, from what was stored for it. A preview already gone succeeds. Refuses anything that is not a preview.
+  """
+  teardownPreviewEnvironment(
+    """The template and name of the preview."""
+    input: TeardownPreviewEnvironmentInput!
+  ): TeardownPreviewEnvironmentResult!
+
+  """
+  Sync the certificate status and check validation again in every region that is validating or has failed.
+  """
+  triggerCertificateValidation(
+    """Certificate id."""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CertificateMutationResult!
+
+  """Remove env vars from a scope"""
+  unsetEnvVars(
+    """The scope and the names to remove"""
+    input: UnsetEnvVarsInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): EnvVarsMutationResult!
 
   """
   Change a database server. A setting change deploys the server right away and returns a deploymentId to poll.
@@ -1529,21 +3599,53 @@ type Mutation {
   updateDatabase(
     """Database server id"""
     id: String!
+
+    """Settings to change. A field left out keeps its value."""
     input: UpdateDatabaseInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): DatabaseMutationResult!
-  updateSecret(input: UpdateSecretInput!, team: String): SecretMutationResult!
+
+  """Rename a firewall. Its deployments are unchanged."""
+  updateFirewall(
+    """The new name"""
+    input: UpdateFirewallInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): FirewallMutationResult!
+
+  """
+  Rename a secret, change its description, or replace its keys and values
+  """
+  updateSecret(
+    """The changes to make"""
+    input: UpdateSecretInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): SecretMutationResult!
 }
 
+"""A private network in one cloud region that resources run in."""
 type Network {
   """Address range"""
   cidr: String!
+
+  """Cloud account the network belongs to"""
   cloudAccountId: String!
+
+  """When the network was created"""
   createdAt: String!
+
+  """Network ID"""
   id: String!
 
   """When true, databases and caches get no network-wide ingress"""
   leastPrivilegeMode: Boolean!
+
+  """Display name"""
   name: String!
 
   """Cloud the network is in, e.g. aws"""
@@ -1551,37 +3653,65 @@ type Network {
 
   """Settings and ids only this cloud has"""
   providerData: JSON!
+
+  """Cloud region the network is in"""
   region: String!
+
+  """URL-friendly identifier for CLI and API references"""
   slug: String!
+
+  """Provisioning status of the network's cloud resources"""
   stackStatus: String
+
+  """Subnets of the network"""
   subnets: [NetworkSubnet!]!
 
   """Team ID"""
   teamId: String!
 }
 
+"""Outcome of a network mutation."""
 type NetworkMutationResult {
+  """Deployment ID for provisioning progress tracking"""
   deploymentId: String
+
+  """What happened, safe to show to a user"""
   message: String
+
+  """The network, when the mutation succeeded"""
   network: Network
+
+  """Whether the mutation succeeded"""
   success: Boolean!
 }
 
+"""A subnet of a network."""
 type NetworkSubnet {
+  """Address range, e.g. 10.0.1.0/24"""
   cidr: String!
+
+  """Subnet name"""
   name: String!
 
   """The subnet id in the cloud, set by provisioning"""
   subnetId: String
+
+  """Public or private"""
   type: SubnetTypeEnum!
 
   """Availability zone"""
   zone: String
 }
 
+"""A subnet to create in the network."""
 input NetworkSubnetInput {
+  """Address range inside the network's range, e.g. 10.0.1.0/24"""
   cidr: String!
+
+  """Subnet name, unique in the network"""
   name: String!
+
+  """Public or private"""
   type: SubnetTypeEnum!
 
   """Availability zone"""
@@ -1590,17 +3720,39 @@ input NetworkSubnetInput {
 
 """Inputs for an object-upload CLI task"""
 type ObjectUploadCliInputs {
+  """Bucket the files are uploaded to."""
   bucketName: String!
+
+  """Delete files from the bucket that the upload left out."""
   deleteStale: Boolean
+
+  """Globs of the files to leave out."""
   excludePatterns: [String!]
+
+  """Upload every file, including ones already uploaded."""
   force: Boolean
+
+  """Globs of the files to upload. Null uploads every file."""
   includePatterns: [String!]
+
+  """Folder in the bucket the files are uploaded under."""
   keyPrefix: String!
 
   """Files submitted through submitManifest"""
   manifest: [FileManifestEntry!]
+
+  """Region of the bucket."""
   region: String!
+
+  """
+  Where to copy the files from instead of the local folder, on a lift of an existing build.
+  """
+  source: ObjectUploadSource
+
+  """Local folder to upload, relative to the project root."""
   sourcePath: String!
+
+  """ID of the step the CLI runs."""
   stepId: String!
 
   """
@@ -1615,6 +3767,67 @@ input ObjectUploadCliOutputsInput {
   """Total bytes uploaded"""
   totalSize: Float!
   uploadedFiles: Int!
+}
+
+"""
+Static files to copy from another cloud account: download keyPrefix/ from the bucket, then upload it as sourcePath '.'
+"""
+type ObjectUploadSource {
+  """
+  Read-only credentials when the cloud is aws. Returned only to the CLI that claims the step, by claimStep.
+  """
+  aws: AwsUploadCredentials
+
+  """Bucket that holds the files."""
+  bucketName: String!
+
+  """Folder in the bucket the files are under."""
+  keyPrefix: String!
+
+  """Region of the bucket."""
+  region: String!
+}
+
+"""
+What your proxy must add to every request to a hostname with origin_lock. Requests without it are refused.
+"""
+type OriginLock {
+  """The request header your proxy adds."""
+  header: String!
+
+  """The hostname as routed. A preview hostname is locked as its wildcard."""
+  hostname: String!
+
+  """The proxy the hostname is locked to."""
+  provider: OriginLockProviderEnum!
+
+  """
+  The header's value. Keep it secret: anyone with it can skip your proxy.
+  """
+  value: String!
+}
+
+"""The proxy a hostname is locked to"""
+enum OriginLockProviderEnum {
+  """Cloudflare adds the header"""
+  CLOUDFLARE
+
+  """Any proxy you run adds the header"""
+  HEADER
+}
+
+"""
+Where a deploy's post-deploy commands are. Queued and started mean the version is live.
+"""
+enum PostDeployState {
+  """The version is live and the commands are about to start."""
+  QUEUED
+
+  """The deploy asked to skip the post-deploy commands."""
+  SKIPPED
+
+  """The commands are running."""
+  STARTED
 }
 
 """A pre-signed upload for one file"""
@@ -1632,109 +3845,707 @@ type PresignedUpload {
   url: String!
 }
 
-type Project {
-  cloudProvider: String
+"""A preview environment built from a `previews:` template."""
+type PreviewEnvironment {
+  """When the preview was created."""
   createdAt: String!
+
+  """
+  own: its own databases on the parent servers. shared: the parent databases. Null when no service binds a database.
+  """
+  databases: String
+
+  """Environment id."""
   id: String!
+
+  """The preview's name: its `--as` name, or its id."""
   name: String!
+
+  """Slug of the environment the preview is built from."""
+  parentEnvironment: String!
+
+  """Every service deployed to the preview."""
+  services: [String!]!
+
+  """Environment slug: the template and the name."""
   slug: String!
+
+  """Where it was last lifted from."""
+  sourceRef: PreviewSourceRef
+
+  """Template name from `previews:`."""
+  template: String!
+
+  """Hostnames the preview serves, as https URLs."""
+  urls: [String!]!
+}
+
+"""Where a preview was lifted from."""
+type PreviewSourceRef {
+  """Branch checked out when the preview was last lifted."""
+  branch: String
+
+  """Commit checked out when the preview was last lifted."""
+  commit: String
+}
+
+"""Where the preview was lifted from, read from local git."""
+input PreviewSourceRefInput {
+  """Branch checked out when the preview was lifted."""
+  branch: String
+
+  """Commit checked out when the preview was lifted."""
+  commit: String
+}
+
+"""
+An app the team deploys, described by its `gantry.yml`, with one or more environments.
+"""
+type Project {
+  """Cloud the project deploys to, such as `aws`."""
+  cloudProvider: String
+
+  """When the project was created."""
+  createdAt: String!
+
+  """Project id, the `id` in `gantry.yml`."""
+  id: String!
+
+  """Display name."""
+  name: String!
+
+  """URL-safe name, unique in the team."""
+  slug: String!
+
+  """Free-text label for grouping projects. Null when none is set."""
   tag: String
 
   """Team ID"""
   teamId: String!
 }
 
+"""The outcome of a project change."""
 type ProjectMutationResult {
+  """What happened, or why the change was refused."""
   message: String
+
+  """The project after the change. Null when the change was refused."""
   project: Project
+
+  """Whether the change was made."""
   success: Boolean!
-}
-
-input PromoteVersionInput {
-  """Source version ID to promote from"""
-  sourceVersionId: String!
-
-  """Target environment ID to promote to"""
-  targetEnvironmentId: String!
-}
-
-type PromoteVersionResult {
-  message: String
-
-  """New version ID in the target environment"""
-  newVersionId: String
-
-  """New version number in the target environment"""
-  newVersionNumber: Int
-
-  """Promotion record ID"""
-  promotionId: String
-  success: Boolean!
-
-  """YAML snapshot from the source version (for passing to startDeployment)"""
-  yamlSnapshot: String
 }
 
 type Query {
-  bastion(slug: String, team: String): Bastion
-  bastionPrivateKey(slug: String, team: String): BastionPrivateKeyResult!
-  bastions(networkId: String, team: String): [Bastion!]!
-  blueprint(reference: String!): Blueprint
-  cache(id: String!, team: String): Cache
-  cacheEngineVersions(aws: AwsCacheCatalogFilterInput, engine: CacheEngineEnum, provider: CloudProviderEnum!, region: String): [CacheEngineVersion!]!
-  cacheSizes(engine: CacheEngineEnum, provider: CloudProviderEnum!, region: String): [CacheSize!]!
-  cacheTypes(provider: CloudProviderEnum!): [CacheTypeInfo!]!
-  caches(team: String): [Cache!]!
-  certificates(cloudAccountId: String, domainId: String, team: String): [Certificate!]!
-  cloudAccountResources(cloudAccountId: String!, groupBy: ResourceGroupingEnum = PROJECT, team: String): CloudAccountResourcesResult!
-  cloudRegions(provider: CloudProviderEnum!): [CloudRegion!]!
-  clouds(team: String): [CloudAccount!]!
-  clusterTypes(provider: CloudProviderEnum!): [ClusterTypeInfo!]!
-  clusters(team: String): [Cluster!]!
-  commandRun(environmentSlug: String!, outputCursor: String, projectId: String!, runId: String!, service: String!, team: String): CommandRunStatus!
-  database(id: String!, team: String): Database
-  databaseCredentials(id: String!, team: String): DatabaseCredentialsResult!
-  databaseEngineVersions(aws: AwsDatabaseCatalogFilterInput, engine: DatabaseEngineEnum, provider: CloudProviderEnum!, region: String): [DatabaseEngineVersion!]!
-  databaseLogs(cursor: String, grep: String, id: String!, limit: Int, since: String = "1h", team: String): LogPage!
+  """One bastion by slug, or null when there is none."""
+  bastion(
+    """Bastion slug"""
+    slug: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Bastion
+
+  """
+  A bastion's SSH private key, sign-in user and host key. Needs use access.
+  """
+  bastionPrivateKey(
+    """Bastion slug"""
+    slug: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): BastionPrivateKeyResult!
+
+  """
+  The team's bastions that you can view, oldest first. Deleted bastions are left out.
+  """
+  bastions(
+    """List only the bastions in this network"""
+    networkId: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Bastion!]!
+
+  """
+  A published blueprint version. Null when the reference matches none, or names a tag that points at no version.
+  """
+  blueprint(
+    """
+    `@<namespace>/<name>:<version>` for a version, `@<namespace>/<name>:<tag>` for a tag, or `@<namespace>/<name>` for the `latest` tag.
+    """
+    reference: String!
+  ): Blueprint
+
+  """One cache. Null when it does not exist or was destroyed."""
+  cache(
+    """Cache ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Cache
+
+  """Engine versions a cache can be created with in a cloud"""
+  cacheEngineVersions(
+    """Filters that only apply to AWS"""
+    aws: AwsCacheCatalogFilterInput
+
+    """Only versions of this engine"""
+    engine: CacheEngineEnum
+
+    """Cloud to list versions for"""
+    provider: CloudProviderEnum!
+
+    """Only versions available in this region"""
+    region: String
+  ): [CacheEngineVersion!]!
+
+  """Node sizes a cache can be created with in a cloud"""
+  cacheSizes(
+    """Only sizes this engine can run on"""
+    engine: CacheEngineEnum
+
+    """Cloud to list sizes for"""
+    provider: CloudProviderEnum!
+
+    """Only sizes available in this region"""
+    region: String
+  ): [CacheSize!]!
+
+  """Cache engines a cloud offers, with guidance on when to pick each"""
+  cacheTypes(
+    """Cloud to list engines for"""
+    provider: CloudProviderEnum!
+  ): [CacheTypeInfo!]!
+
+  """The team's caches that the token can view, oldest first"""
+  caches(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Cache!]!
+
+  """The team's certificates the token can view, oldest first."""
+  certificates(
+    """Only certificates issued in this cloud account."""
+    cloudAccountId: String
+
+    """Only certificates tied to this domain."""
+    domainId: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Certificate!]!
+
+  """Infrastructure no live version uses, waiting for the team to remove it"""
+  cleanupItems(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [CleanupItem!]!
+
+  """
+  The resources Gantry created in a cloud account for the team's environments.
+  """
+  cloudAccountResources(
+    """Cloud account ID"""
+    cloudAccountId: String!
+
+    """How to group the resources"""
+    groupBy: ResourceGroupingEnum = PROJECT
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CloudAccountResourcesResult!
+
+  """Regions the cloud offers."""
+  cloudRegions(
+    """Cloud to list regions for"""
+    provider: CloudProviderEnum!
+  ): [CloudRegion!]!
+
+  """The team's cloud accounts that you can view, oldest first."""
+  clouds(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [CloudAccount!]!
+
+  """Kinds of cluster the cloud offers, for choosing one in createCluster."""
+  clusterTypes(
+    """Cloud to list cluster types for"""
+    provider: CloudProviderEnum!
+  ): [ClusterTypeInfo!]!
+
+  """
+  The team's clusters that you can view, oldest first. Destroyed clusters are left out.
+  """
+  clusters(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Cluster!]!
+
+  """State and new output of a command started with `startCommandRun`."""
+  commandRun(
+    """Environment slug."""
+    environmentSlug: String!
+
+    """Cursor from the previous poll, to read only newer output."""
+    outputCursor: String
+
+    """Project id."""
+    projectId: String!
+
+    """Run id from `startCommandRun`."""
+    runId: String!
+
+    """Service name from gantry.yml."""
+    service: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CommandRunStatus!
+
+  """One database server. Null when it does not exist or was destroyed."""
+  database(
+    """Database server ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Database
+
+  """
+  The server's master username and password. Needs manage access, since the master user can drop databases.
+  """
+  databaseCredentials(
+    """Database server ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DatabaseCredentialsResult!
+
+  """Engine versions a database server can be created with in a cloud"""
+  databaseEngineVersions(
+    """Filters that only apply to AWS"""
+    aws: AwsDatabaseCatalogFilterInput
+
+    """Only versions of this engine"""
+    engine: DatabaseEngineEnum
+
+    """Cloud to list versions for"""
+    provider: CloudProviderEnum!
+
+    """Only versions available in this region"""
+    region: String
+  ): [DatabaseEngineVersion!]!
+
+  """
+  Engine logs of a database server: the Postgres log, or the MySQL and MariaDB error log.
+  """
+  databaseLogs(
+    """Cursor from an earlier page, to read only the lines written after it."""
+    cursor: String
+
+    """Return only lines that match this filter. At most 1024 characters."""
+    grep: String
+
+    """Database server id."""
+    id: String!
+
+    """Most lines to return, from 1 to 1000. Default: 200."""
+    limit: Int
+
+    """
+    How far back to read, as a duration such as `30m`, `1h` or `2d`. Default: `1h`.
+    """
+    since: String = "1h"
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): LogPage!
 
   """Database users Gantry created on this server, one per service binding"""
-  databaseServiceUsers(id: String!, team: String): [DatabaseServiceUser!]!
-  databaseSizes(aws: AwsDatabaseCatalogFilterInput, engine: DatabaseEngineEnum, provider: CloudProviderEnum!, region: String): [DatabaseSize!]!
-  databaseTypes(provider: CloudProviderEnum!): [DatabaseTypeInfo!]!
-  databases(team: String): [Database!]!
-  deployment(id: String!, team: String): Deployment
-  deploymentStep(id: String!, team: String): DeploymentStep
-  deploymentsByVersion(team: String, versionId: String!): [Deployment!]!
-  domain(id: String!, team: String): Domain
-  domains(team: String): [Domain!]!
-  environments(projectId: String, team: String): [Environment!]!
-  filesystem(id: String!, team: String): Filesystem
-  filesystems(team: String): [Filesystem!]!
-  loadBalancerTypes(provider: CloudProviderEnum!): [LoadBalancerTypeInfo!]!
-  loadBalancers(team: String): [LoadBalancer!]!
-  networks(team: String): [Network!]!
-  project(id: String, slug: String, team: String): Project
-  projects(team: String): [Project!]!
-  releaseOutput(after: String, team: String, versionId: String!): ReleaseOutput!
-  resolveProject(input: ResolveProjectInput!): ResolveProjectResult!
-  secret(id: String!, team: String): Secret
-  secrets(cloudAccountId: String, team: String): [Secret!]!
-  serviceLogs(cursor: String, environmentSlug: String!, function: String, grep: String, limit: Int, projectId: String!, service: String!, since: String = "1h", team: String): LogPage!
-  servicesByProject(projectId: String!, team: String): [Service!]!
-  teardownPreview(environmentSlug: String!, projectId: String!, team: String): TeardownPreviewResult!
-  versionDnsRecords(team: String, versionId: String!): [VersionDnsRecord!]!
-  versionRouteUrls(team: String, versionId: String!): [VersionRouteUrl!]!
-  versionsByProject(environmentId: String!, projectId: String!, team: String): [Version!]!
+  databaseServiceUsers(
+    """Database server id"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [DatabaseServiceUser!]!
+
+  """Server sizes a database can be created with in a cloud"""
+  databaseSizes(
+    """Filters that only apply to AWS"""
+    aws: AwsDatabaseCatalogFilterInput
+
+    """Only sizes this engine can run on"""
+    engine: DatabaseEngineEnum
+
+    """Cloud to list sizes for"""
+    provider: CloudProviderEnum!
+
+    """Only sizes available in this region"""
+    region: String
+  ): [DatabaseSize!]!
+
+  """Database engines a cloud offers, with guidance on when to pick each"""
+  databaseTypes(
+    """Cloud to list engines for"""
+    provider: CloudProviderEnum!
+  ): [DatabaseTypeInfo!]!
+
+  """The team's database servers that the token can view, oldest first"""
+  databases(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Database!]!
+
+  """A deployment with its steps. Null when no deployment has that ID."""
+  deployment(
+    """Deployment ID."""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Deployment
+  deploymentStep(
+    """Deployment ID."""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DeploymentStep
+
+  """Every deployment of a version, with its steps."""
+  deploymentsByVersion(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+
+    """Version ID."""
+    versionId: String!
+  ): [Deployment!]!
+
+  """A connected domain. Null when the team has none with this id."""
+  domain(
+    """Domain id."""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Domain
+
+  """The team's connected domains the token can view, oldest first."""
+  domains(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Domain!]!
+
+  """Env vars stored at one scope"""
+  envVars(
+    """The scope to list"""
+    input: EnvVarTargetInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [EnvVar!]!
+
+  """
+  Environments the token can view, in each project's environment order. Previews are listed by previewEnvironments.
+  """
+  environments(
+    """
+    Only this project's environments. Without it, every environment of the team.
+    """
+    projectId: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Environment!]!
+
+  """One filesystem. Null when it does not exist or was destroyed."""
+  filesystem(
+    """Filesystem ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Filesystem
+
+  """The team's filesystems that the token can view"""
+  filesystems(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Filesystem!]!
+
+  """
+  One firewall, with the cloud accounts it is deployed in and the hostnames behind it. Null when it does not exist or was deleted.
+  """
+  firewall(
+    """Firewall ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Firewall
+
+  """The team's firewalls that you can view, oldest first."""
+  firewalls(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Firewall!]!
+
+  """
+  Kinds of load balancer the cloud offers, for choosing one in createLoadBalancer.
+  """
+  loadBalancerTypes(
+    """Cloud to list load balancer types for"""
+    provider: CloudProviderEnum!
+  ): [LoadBalancerTypeInfo!]!
+
+  """
+  The team's load balancers that you can view, oldest first. Destroyed load balancers are left out.
+  """
+  loadBalancers(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [LoadBalancer!]!
+
+  """
+  The team's networks that you can view, oldest first. Destroyed networks are left out.
+  """
+  networks(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Network!]!
+
+  """
+  The provider, header and secret your proxy adds to requests to a locked hostname. Null unless a live deploy sets origin_lock for it.
+  """
+  originLock(
+    """The hostname, as written in gantry.yml."""
+    hostname: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): OriginLock
+
+  """The project's preview environments, oldest first."""
+  previewEnvironments(
+    """Project id."""
+    projectId: String!
+
+    """Only previews of this template."""
+    template: String
+  ): [PreviewEnvironment!]!
+
+  """
+  A project by id or by slug. Null when none matches, or when neither is given.
+  """
+  project(
+    """Project id. Wins over `slug`."""
+    id: String
+
+    """
+    Project slug. A slug is unique only in a team, so a multi-team token needs `team`.
+    """
+    slug: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Project
+
+  """The team's projects the token can view, oldest first."""
+  projects(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Project!]!
+
+  """
+  What the release and post-deploy commands of a version printed, a page at a time.
+  """
+  releaseOutput(
+    """Cursor from the previous page. Returns only newer lines."""
+    after: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+
+    """Version ID."""
+    versionId: String!
+  ): ReleaseOutput!
+
+  """
+  The environment's live versions and the release in progress. Null before anything goes live.
+  """
+  releaseStatus(
+    """Environment slug, such as `production`."""
+    environment: String!
+
+    """Project ID."""
+    projectId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ReleaseStatus
+
+  """
+  Compose a `gantry.yml` with its blueprint and variables, and plan what a deploy would do. Changes nothing.
+  """
+  resolveProject(
+    """The config to resolve."""
+    input: ResolveProjectInput!
+  ): ResolveProjectResult!
+
+  """
+  The env a service runs with in an environment's live version, with the layer each value came from
+  """
+  resolvedServiceEnv(
+    """Environment slug"""
+    environmentSlug: String!
+
+    """Project ID"""
+    projectId: String!
+
+    """Service name"""
+    service: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): ResolvedServiceEnv!
+
+  """One secret, with its keys. Null when it does not exist or was deleted."""
+  secret(
+    """Secret ID"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): Secret
+
+  """The team's secrets that the token can view, oldest first"""
+  secrets(
+    """Only secrets in this cloud account"""
+    cloudAccountId: String
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Secret!]!
+
+  """
+  Runtime logs of a service in one environment: the newest lines from `since`, or with a `cursor` from an earlier page, the lines written after it.
+  """
+  serviceLogs(
+    """Cursor from an earlier page, to read only the lines written after it."""
+    cursor: String
+
+    """Environment slug."""
+    environmentSlug: String!
+
+    """
+    Function of a serverless service to read. Default: its `http` function.
+    """
+    function: String
+
+    """Return only lines that match this filter. At most 1024 characters."""
+    grep: String
+
+    """Most lines to return, from 1 to 1000. Default: 200."""
+    limit: Int
+
+    """Project id."""
+    projectId: String!
+
+    """Service name from gantry.yml."""
+    service: String!
+
+    """
+    How far back to read, as a duration such as `30m`, `1h` or `2d`. Default: `1h`.
+    """
+    since: String = "1h"
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): LogPage!
+
+  """Every service of a project."""
+  servicesByProject(
+    """Project ID."""
+    projectId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Service!]!
+
+  """
+  List what tearing down an environment would destroy, with a token that startTeardown needs within 5 minutes.
+  """
+  teardownPreview(
+    """Environment slug, such as `production`."""
+    environmentSlug: String!
+
+    """Project ID."""
+    projectId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): TeardownPreviewResult!
+
+  """
+  The DNS record each routed hostname of a version needs, one per hostname.
+  """
+  versionDnsRecords(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+
+    """Version ID."""
+    versionId: String!
+  ): [VersionDnsRecord!]!
+
+  """The URLs a version serves, one per routed path."""
+  versionRouteUrls(
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+
+    """Version ID."""
+    versionId: String!
+  ): [VersionRouteUrl!]!
+
+  """Every version of a project in one environment."""
+  versionsByProject(
+    """Environment ID."""
+    environmentId: String!
+
+    """Project ID."""
+    projectId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [Version!]!
+
+  """The token making the call: its teams, kind and access levels."""
   whoami: WhoAmIResponse!
 }
 
+"""
+The part of a certificate issued in one region, for clouds that issue per region.
+"""
 type RegionalCertificate {
+  """Id of the certificate this belongs to."""
   certificateId: String!
+
+  """When the regional certificate was requested."""
   createdAt: String!
 
   """DNS validation records (resolved from domainDnsRecords table)"""
   dnsRecords: [DnsValidationRecord!]
+
+  """Regional certificate id."""
   id: String!
+
+  """
+  When validation was last checked in this region. Null before the first check.
+  """
   lastValidatedAt: String
 
   """Cloud the certificate is issued in, e.g. aws"""
@@ -1742,9 +4553,36 @@ type RegionalCertificate {
 
   """Outputs only this cloud has. Its `provider` equals `provider`."""
   providerData: JSON!
+
+  """Region the certificate is issued in."""
   region: String!
+
+  """Status in this region."""
   status: CertificateStatusEnum!
+
+  """Validation checks run since the last reset."""
   validationAttempts: Float!
+}
+
+"""The environment a release operation acts on."""
+input ReleaseEnvironmentInput {
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+}
+
+"""The result of a release operation."""
+type ReleaseOperationResult {
+  """Deployment ID to poll"""
+  deploymentId: String
+
+  """Why the operation was refused, or a note on it."""
+  message: String
+
+  """Whether the operation was accepted and queued."""
+  success: Boolean!
 }
 
 """
@@ -1753,106 +4591,339 @@ A page of a version's release and post-deploy command output, oldest first
 type ReleaseOutput {
   """Pass back as `after` to read only newer lines"""
   cursor: String
+
+  """The lines on this page, oldest first."""
   lines: [ReleaseOutputLine!]!
 }
 
+"""One line of release or post-deploy command output."""
 type ReleaseOutputLine {
+  """ID of the deployment that ran the command."""
   deploymentId: String!
 
   """One line the version's release or post-deploy commands printed"""
   message: String!
+
+  """ID of the step that ran the command."""
   stepId: String
+
+  """When the line was printed."""
   timestamp: String!
 }
 
+"""A version's part in the environment's release"""
+enum ReleaseRole {
+  """The new version, taking part of the traffic."""
+  CANARY
+
+  """The version taking the stable traffic."""
+  LIVE
+
+  """The version a cutover replaced, kept so an abort can put it back."""
+  PREVIOUS
+
+  """The new version, running with no traffic."""
+  STAGED
+}
+
+"""
+Where the release in progress stands: staged at 0%, split across both versions, cut over with the previous version kept, or none.
+"""
+enum ReleaseState {
+  """
+  The new version takes all traffic, and the previous one is kept until the release completes.
+  """
+  CUT_OVER
+
+  """No release is in progress. One version takes all traffic."""
+  NONE
+
+  """The new version takes part of the traffic."""
+  SPLIT
+
+  """The new version runs beside the live one with no traffic."""
+  STAGED
+}
+
+"""Which versions of an environment take traffic, and how much."""
+type ReleaseStatus {
+  """
+  When the hold on the release in progress times out, for compute that holds a release between steps. At the cutover hold the release then rolls back; at the complete hold it completes.
+  """
+  holdExpiresAt: String
+
+  """When the current traffic split was applied"""
+  since: String!
+
+  """Where the release in progress stands."""
+  state: ReleaseState!
+
+  """Deployment strategy the environment releases under"""
+  strategy: String!
+
+  """The versions in the release."""
+  versions: [ReleaseVersion!]!
+}
+
+"""A version taking part in the environment's release."""
+type ReleaseVersion {
+  """When the version was lifted"""
+  createdAt: String!
+
+  """Version number. Null on a preview environment."""
+  number: Int
+
+  """The version's part in the release."""
+  role: ReleaseRole!
+
+  """The slot (a or b) the version is served from"""
+  slot: String
+
+  """Version ID."""
+  versionId: String!
+
+  """Share of traffic, 0 to 100"""
+  weight: Int!
+}
+
+"""A problem that stopped the config from resolving."""
 type ResolutionErrorType {
+  """Stable error code."""
   code: String!
+
+  """What is wrong."""
   message: String!
+
+  """Key path in the config where the problem is."""
   path: String!
+
+  """How to fix it, when there is a known fix."""
   suggestion: String
 }
 
+"""A `gantry.yml` to resolve against a project."""
 input ResolveProjectInput {
+  """
+  Environment slug to resolve. Without it, every environment in the YAML.
+  """
   environment: String
+
+  """Project id. Must match the `id` in the YAML."""
   projectId: String!
+
+  """Variable values that win over every other source."""
   variables: [VariableOverrideInput!]
+
+  """The `gantry.yml` content."""
   yaml: String!
 }
 
+"""The outcome of resolving a `gantry.yml`."""
 type ResolveProjectResult {
+  """Blueprint the config references. Null when it uses none."""
   blueprintReference: String
+
+  """One entry per resolved environment."""
   environments: [ResolvedEnvironmentType!]!
+
+  """Every problem found. Empty when `ok`."""
   errors: [ResolutionErrorType!]!
+
+  """Whether the config resolved with no errors."""
   ok: Boolean!
 }
 
+"""The access level the token has to one kind of resource."""
 type ResolvedAccess {
+  """`none`, `view`, `use` or `manage`."""
   level: String!
+
+  """Kind of resource, such as `clusters`."""
   resource: String!
 }
 
+"""One variable in the env a service runs with, and where it came from"""
+type ResolvedEnvVar {
+  """Variable name"""
+  key: String!
+
+  """Lower layers that set the same key, nearest first"""
+  overrides: [EnvVarSourceEnum!]!
+
+  """The layer whose value won"""
+  source: EnvVarSourceEnum!
+
+  """
+  The value. For SECRET, the secret reference; for BINDING, the bound resource, with the key ending in _*.
+  """
+  value: String!
+}
+
+"""The config of one environment after resolution."""
 type ResolvedEnvironmentType {
+  """The composed config, with blueprint and variables applied."""
   config: JSON!
+
+  """Environment slug."""
   environment: String!
+
+  """What a deploy would do."""
   plan: DeploymentPlanType!
+
+  """Every resolved variable and where its value came from."""
   provenance: [VariableProvenanceEntry!]!
+
+  """The composed config as YAML."""
   resolvedYaml: String!
 }
 
+"""The env a service runs with in its live version"""
+type ResolvedServiceEnv {
+  """Every variable, with its source"""
+  variables: [ResolvedEnvVar!]!
+
+  """
+  The live version this env was read from. Null on a preview environment.
+  """
+  versionNumber: Int
+}
+
+"""Resources of one environment."""
 type ResourceEnvironmentGroup {
+  """Environment ID"""
   environmentId: String!
+
+  """Environment name"""
   environmentName: String!
+
+  """Resources of this environment"""
   resources: [CloudResource!]!
 }
 
 """How to group cloud account resources"""
 enum ResourceGroupingEnum {
+  """One group per project, then per environment, in byProject."""
   PROJECT
+
+  """One group per resource type, in byType."""
   TYPE
 }
 
+"""Resources of one project, grouped by environment."""
 type ResourceProjectGroup {
+  """Resources per environment"""
   environments: [ResourceEnvironmentGroup!]!
+
+  """Project ID"""
   projectId: String!
+
+  """Project name"""
   projectName: String!
 }
 
 """Status of a cloud resource"""
 enum ResourceStatusEnum {
+  """The resource exists and is in use."""
   ACTIVE
+
+  """The resource is deleted."""
   DELETED
+
+  """The resource is destroyed."""
   DESTROYED
+
+  """The resource is being destroyed."""
   DESTROYING
+
+  """The resource is waiting to be deleted."""
   PENDING_DELETION
+
+  """The resource is being created."""
   PROVISIONING
 }
 
+"""Resources of one type."""
 type ResourceTypeGroup {
+  """Name to show for the resource type"""
   displayName: String!
+
+  """Kind of resource, as the cloud names it"""
   resourceType: String!
+
+  """Resources of this type"""
   resources: [CloudResource!]!
 }
 
+"""The environment to roll back, and optionally the version to make live."""
+input RollbackInput {
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Project ID"""
+  projectId: String!
+
+  """
+  Version to make live. Defaults to the latest earlier version with an older build than the environment's current one.
+  """
+  versionId: String
+}
+
+"""How one path on a hostname reaches its service."""
 type RoutingPathEntryType {
+  """How that service runs, as in `ServicePlanEntryType.deploymentType`."""
   deploymentType: String!
+
+  """Path pattern."""
   path: String!
+
+  """
+  Hops a request takes from the viewer to the service, viewer first: `cdn`, `load-balancer`, `gateway`, `container`, `function` or `bucket`.
+  """
   routeHops: [String!]!
+
+  """Service the path sends requests to."""
   service: String!
 }
 
+"""How one hostname would be routed in the environment."""
 type RoutingPlanEntryType {
+  """Hostname."""
   domain: String!
+
+  """
+  What the hostname DNS points at: `cdn`, `load-balancer`, `gateway` or `direct`.
+  """
   entryType: String!
+
+  """Load balancer slug, when the hostname points at one."""
   loadBalancer: String
+
+  """Each path route on the hostname."""
   paths: [RoutingPathEntryType!]!
 }
 
+"""
+A set of key-value pairs stored in the cloud's secret store. The API returns its keys, never its values.
+"""
 type Secret {
+  """Cloud account the secret is stored in"""
   cloudAccountId: String!
+
+  """When the secret was created, as an ISO 8601 timestamp"""
   createdAt: String!
+
+  """What the secret is for"""
   description: String
+
+  """Secret ID"""
   id: String!
+
+  """
+  Keys the secret holds. A service references one as `<secret-slug>:<key>`.
+  """
   keys: [String!]!
+
+  """Name, unique in its cloud account"""
   name: String!
 
   """Cloud the secret lives in, from its cloud account"""
@@ -1860,29 +4931,53 @@ type Secret {
 
   """Cloud-specific identifiers. Never holds secret values."""
   providerData: JSON!
+
+  """The secret's identifier in its cloud"""
   providerSecretId: String
+
+  """Region the secret is stored in"""
   region: String!
 
   """Team ID"""
   teamId: String!
 }
 
+"""One key and its value"""
 input SecretKeyValueInput {
+  """Key name. Must not be empty."""
   key: String!
+
+  """Value stored under the key"""
   value: String!
 }
 
+"""Result of a secret change"""
 type SecretMutationResult {
+  """What happened, safe to show to a user"""
   message: String
+
+  """The secret, when the change succeeded"""
   secret: Secret
+
+  """Whether the change was accepted"""
   success: Boolean!
 }
 
+"""A service declared in a project, as recorded by its deploys."""
 type Service {
+  """When the service was first recorded."""
   createdAt: String!
+
+  """Service ID."""
   id: String!
+
+  """Service name, as declared in `gantry.yml`."""
   name: String!
+
+  """ID of the project the service belongs to."""
   projectId: String!
+
+  """The compute the service runs on. Null until it has deployed."""
   runtime: ServiceRuntimeEnum
 
   """Team ID"""
@@ -1892,31 +4987,139 @@ type Service {
   type: ServiceTypeEnum
 }
 
+"""How one service would deploy to the environment."""
 type ServicePlanEntryType {
+  """Cluster it runs on. Null when it sets none."""
   cluster: String
+
+  """
+  How the service runs: `container`, `serverless`, `static` and so on. `disabled` when it does not deploy to the environment.
+  """
   deploymentType: String!
+
+  """Service name."""
   name: String!
+
+  """
+  What the service is built from: an image, a build, a source folder or a handler.
+  """
   source: String!
+
+  """Service `type` from the config, such as `http` or `static`."""
   type: String!
 }
 
+"""The kind of compute a service runs on."""
 enum ServiceRuntimeEnum {
+  """Long-running containers on a cluster."""
   CONTAINER
+
+  """Serverless functions."""
   SERVERLESS
 }
 
+"""What a service serves."""
 enum ServiceTypeEnum {
+  """A web app or API that answers HTTP requests."""
   HTTP
+
+  """Static files served through the CDN."""
   STATIC
 }
 
-type StartCommandRunResult {
-  aws: AwsLambdaCommandInvocation
+"""Env vars to store at a scope"""
+input SetEnvVarsInput {
+  """Required for CLOUD_ACCOUNT"""
+  cloudAccountId: String
+
+  """Required for ENVIRONMENT"""
+  environmentSlug: String
+
+  """Required for NETWORK"""
+  networkId: String
+
+  """Required for PROJECT and ENVIRONMENT"""
+  projectId: String
+
+  """Where the variables apply"""
+  scope: EnvVarScopeEnum!
+
+  """
+  ENVIRONMENT only: a service name, for an override that applies to that service only
+  """
+  service: String
+
+  """Variables to store"""
+  variables: [EnvVarInput!]!
+}
+
+"""
+A firewall's complete rule list, replacing the current one. Send the section of the firewall's cloud.
+"""
+input SetFirewallRulesInput {
+  """Rules of an AWS firewall"""
+  aws: AwsFirewallRulesInput
+
+  """Firewall ID"""
+  id: String!
+}
+
+"""The firewall to attach to a load balancer, or none."""
+input SetLoadBalancerFirewallInput {
+  """Firewall ID to attach. Null detaches the current firewall."""
+  firewallId: String
+
+  """Load balancer ID"""
+  id: String!
+}
+
+"""How much traffic the new version of a canary release takes."""
+input ShiftTrafficInput {
+  """Also complete the release, dropping the previous version. Only at 100."""
+  complete: Boolean
+
+  """Environment slug (e.g. "production")"""
+  environment: String!
+
+  """Share of traffic, 0 to 100, the new version takes"""
+  percent: Int!
+
+  """Project ID"""
+  projectId: String!
+}
+
+"""A session to a bastion, opened by startBastionSession."""
+type StartBastionSessionResult {
+  """A session to the bastion's SSH port, for a bastion on AWS"""
+  aws: AwsShellSession
+
+  """What happened, safe to show to a user"""
   message: String
-  runId: String
+
+  """Whether the session started"""
   success: Boolean!
 }
 
+"""
+A started command. Poll it with `commandRun` using `runId`, or invoke it through `aws` on a serverless service.
+"""
+type StartCommandRunResult {
+  """
+  On a serverless service on AWS, the invocation the client makes itself.
+  """
+  aws: AwsLambdaCommandInvocation
+
+  """Why the command did not start."""
+  message: String
+
+  """Id of the run on a container service, for `commandRun`."""
+  runId: String
+
+  """Whether the command started."""
+  success: Boolean!
+}
+
+"""What to deploy, and where."""
 input StartDeploymentInput {
   """The full gantry.yml configuration"""
   config: JSON!
@@ -1936,26 +5139,44 @@ input StartDeploymentInput {
   versionId: String
 }
 
+"""The result of startDeployment."""
 type StartDeploymentResult {
   """Primary deployment (first service)"""
   deployment: Deployment
 
   """All deployment IDs created (one per service)"""
   deploymentIds: [String!]
+
+  """Why the deployment did not start, or a note on it."""
   message: String
+
+  """Whether the deployment started."""
   success: Boolean!
 
   """Version ID for this deployment"""
   versionId: String
 }
 
+"""
+An opened interactive session. The client connects to it directly, so the API holds nothing open.
+"""
 type StartShellSessionResult {
+  """On AWS, what the session plugin needs to connect."""
   aws: AwsShellSession
+
+  """The running instance the session attached to."""
   instanceId: String
+
+  """Why no session opened."""
   message: String
+
+  """Whether the session opened."""
   success: Boolean!
 }
 
+"""
+The environment to tear down, with the token and phrase that confirm it.
+"""
 input StartTeardownInput {
   """Confirmation phrase typed by user"""
   confirmationPhrase: String!
@@ -1972,16 +5193,27 @@ input StartTeardownInput {
   teardownToken: String!
 }
 
+"""The result of startTeardown."""
 type StartTeardownResult {
+  """Why the teardown was refused, or a note on it."""
   message: String
+
+  """The resources the teardown destroys."""
   resources: [TeardownResource!]
+
+  """Whether the teardown started."""
   success: Boolean!
+
+  """ID of the teardown deployment to poll."""
   teardownId: String
 }
 
 """Who executes the step - Gantry (cloud) or the CLI (local)"""
 enum StepExecutor {
+  """The CLI runs the step on the machine that started the deploy."""
   CLI
+
+  """Gantry runs the step in the cloud."""
   WORKER
 }
 
@@ -2004,56 +5236,156 @@ type SubmitManifestResult {
   success: Boolean!
 }
 
+"""Whether a subnet is reachable from the internet"""
 enum SubnetTypeEnum {
+  """No inbound route from the internet."""
   PRIVATE
+
+  """Has a route to and from the internet."""
   PUBLIC
 }
 
+"""The preview to tear down."""
+input TeardownPreviewEnvironmentInput {
+  """The preview's name: its `--as` name, or its id."""
+  name: String!
+
+  """Project id."""
+  projectId: String!
+
+  """Template name from `previews:`."""
+  template: String!
+}
+
+"""The outcome of tearing down a preview."""
+type TeardownPreviewEnvironmentResult {
+  """What happened, for the CLI to print."""
+  message: String!
+
+  """Whether the preview is gone or on its way out."""
+  success: Boolean!
+
+  """
+  Teardown deployment id when the preview had cloud resources to destroy.
+  """
+  teardownId: String
+}
+
+"""
+What tearing down an environment would destroy, and a token to confirm it.
+"""
 type TeardownPreviewResult {
+  """ID of the environment."""
   environmentId: String!
+
+  """Name of the environment."""
   environmentName: String!
 
   """ISO timestamp when the teardown token expires"""
   expiresAt: DateTime!
+
+  """The resources the teardown would destroy."""
   resources: [TeardownResource!]!
+
+  """
+  The routing the environment uses. A teardown takes the environment out of all of it.
+  """
+  routing: [TeardownRouting!]!
 
   """JWT token to be passed to startTeardown - expires in 5 minutes"""
   teardownToken: String!
+
+  """How many resources the teardown would destroy."""
   totalResources: Float!
 }
 
+"""A resource a teardown destroys, or has destroyed."""
 type TeardownResource {
+  """ID of the resource record in Gantry."""
   id: String!
+
+  """The cloud's identifier for the resource."""
   resourceId: String
+
+  """Kind of resource, such as `environment`."""
   resourceType: String!
+
+  """State of the resource, such as `active` or `pending-removal`."""
   status: String!
 }
 
-input TriggerRerouteInput {
-  """The full gantry.yml configuration (used to identify project)"""
-  config: JSON!
+"""Routing a teardown changes: one CDN, load balancer or gateway."""
+type TeardownRouting {
+  """What the teardown does to it."""
+  change: TeardownRoutingChangeEnum!
 
-  """Environment name to reroute (e.g., "dev", "production")"""
-  environment: String!
+  """What serves the routing."""
+  edge: TeardownRoutingEdgeEnum!
+
+  """A CDN or gateway's hostnames, or the load balancer's name."""
+  name: String!
+
+  """Other environments that keep routing through it."""
+  otherEnvironments: Int!
 }
 
-type TriggerRerouteResult {
-  """Deployment ID for polling"""
-  deploymentId: String
-  message: String
-  success: Boolean!
+"""What a teardown does to routing the environment uses."""
+enum TeardownRoutingChangeEnum {
+  """
+  Nothing else routes through it. A CDN is removed with its DNS records; a load balancer drops its rules for the environment.
+  """
+  REMOVED
 
-  """Version ID of the live version"""
-  versionId: String
+  """Other environments still route through it, and keep their routes."""
+  UPDATED
+}
 
-  """Version number of the live version"""
-  versionNumber: Float
+"""What serves the routing a teardown changes."""
+enum TeardownRoutingEdgeEnum {
+  """A CDN, identified by its hostnames."""
+  CDN
+
+  """A hostname served directly by its service."""
+  DIRECT
+
+  """A gateway, identified by its hostnames."""
+  GATEWAY
+
+  """A load balancer, identified by its name."""
+  LOAD_BALANCER
+}
+
+"""Env vars to remove from a scope"""
+input UnsetEnvVarsInput {
+  """Required for CLOUD_ACCOUNT"""
+  cloudAccountId: String
+
+  """Required for ENVIRONMENT"""
+  environmentSlug: String
+
+  """Names of the variables to remove"""
+  keys: [String!]!
+
+  """Required for NETWORK"""
+  networkId: String
+
+  """Required for PROJECT and ENVIRONMENT"""
+  projectId: String
+
+  """Where the variables apply"""
+  scope: EnvVarScopeEnum!
+
+  """
+  ENVIRONMENT only: a service name, for an override that applies to that service only
+  """
+  service: String
 }
 
 """
 Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly.
 """
 input UpdateDatabaseInput {
+  """Settings for a server in an AWS cloud account"""
   aws: AwsDatabaseSettingsInput
 
   """
@@ -2074,10 +5406,27 @@ input UpdateDatabaseInput {
   storageGb: Int
 }
 
-input UpdateSecretInput {
-  description: String
+"""A new name for a firewall."""
+input UpdateFirewallInput {
+  """Firewall ID"""
   id: String!
+
+  """New display name"""
+  name: String!
+}
+
+"""Changes to a secret. Fields left out stay as they are."""
+input UpdateSecretInput {
+  """New description"""
+  description: String
+
+  """Secret ID"""
+  id: String!
+
+  """Every key and value the secret should hold. Replaces the current set."""
   keyValuePairs: [SecretKeyValueInput!]
+
+  """New name, unique in the cloud account"""
   name: String
 }
 
@@ -2087,54 +5436,142 @@ type UploadUrls {
   store: [PresignedUpload!]!
 }
 
+"""A variable value given for this resolution only."""
 input VariableOverrideInput {
+  """Variable name."""
   name: String!
+
+  """Value as a string. It is converted to the variable's declared type."""
   value: String!
 }
 
+"""A resolved variable and where its value came from."""
 type VariableProvenanceEntry {
+  """Variable name."""
   name: String!
+
+  """
+  Where the value came from: `blueprint_default`, `profile`, `blueprint_variables`, `value`, `env_override` or `cli`.
+  """
   source: String!
+
+  """Declared type, such as `string` or `number`."""
   type: String!
+
+  """Resolved value, as a string."""
   value: String!
 }
 
+"""One deployable snapshot of a project configuration for an environment."""
 type Version {
+  """When the version was created."""
   createdAt: String!
+
+  """ID of the environment the version is for."""
   environmentId: String!
+
+  """Git commit, branch or tag the version was lifted from."""
   gitRef: String
+
+  """Version ID."""
   id: String!
-  number: Int!
+
+  """
+  The build number this version deploys. Null on a preview environment, whose builds take no number.
+  """
+  number: Int
+
+  """ID of the project."""
   projectId: String!
 
   """Team ID"""
   teamId: String!
+
+  """The `gantry.yml` the version was created from."""
   yamlSnapshot: String!
 }
 
+"""
+A DNS record a routed hostname needs so it resolves to its edge. On external DNS, add it yourself. On DNS Gantry manages, Gantry keeps it in sync.
+"""
 type VersionDnsRecord {
+  """The routed hostname the record is for."""
   hostname: String!
+
+  """Whether Gantry manages the domain's DNS and syncs the record."""
   managed: Boolean!
+
+  """Record name, as a fully qualified domain name."""
   name: String!
+
+  """Record type, such as `CNAME`."""
   recordType: String!
+
+  """
+  Sync state of the record: `not_applicable` on external DNS, otherwise `pending`, `applied` or `verified`.
+  """
   syncStatus: String!
+
+  """Record value: the edge endpoint the hostname points at."""
   value: String!
 }
 
+"""A URL a version serves, with the service behind it."""
 type VersionRouteUrl {
+  """
+  Short label for the path's cache, from the path or inherited from its hostname: `not cached`, `cached 1y` or a named cache policy. Null when neither sets one.
+  """
   cache: String
+
+  """Hostname of the route."""
   domain: String
+
+  """
+  Slug of the firewall in front of the route's hostname, set by this version or inherited from another project routing the hostname. Null when there is none.
+  """
+  firewall: String
+
+  """
+  The zero trust provider the route's hostname is locked to (origin_lock), set by this version or inherited from another project routing the hostname. Null when it is not locked; the `originLock` query returns the header to add.
+  """
+  originLock: String
+
+  """Path of the route as written in gantry.yml, such as `/` or `/api/*`."""
   path: String!
+
+  """Service that serves the route."""
   serviceName: String!
+
+  """Full URL of the route."""
   url: String!
 }
 
+"""Who the token belongs to and what it may do."""
 type WhoAmIResponse {
+  """
+  Access level per kind of resource in `teamId`. All `none` when no team is settled.
+  """
   access: [ResolvedAccess!]!
+
+  """Whether the token authenticated. Always true in a response."""
   authenticated: Boolean!
+
+  """Whether the token has admin rights in `teamId`."""
   isAdmin: Boolean!
+
+  """
+  `personal` for a token that acts as its user, or `team` for a team token.
+  """
   kind: String!
+
+  """
+  The team this call acts in, when one is settled: the token covers exactly one team, or the request named one. Null for a personal token that covers several teams and named none.
+  """
   teamId: String
+
+  """Every team the token may act in."""
   teamIds: [String!]!
+
+  """Name given to the token when it was created."""
   tokenName: String!
 }

@@ -12,6 +12,7 @@ import type {
   TeardownPreviewQueryVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
+import { addExamples } from '../lib/examples'
 import { printError } from '../lib/output'
 import { loadProjectIdentity, resolveEnvironmentSlug } from '../lib/project-identity'
 import { sanitizeTerminal } from '../lib/sanitize'
@@ -42,11 +43,57 @@ const TEARDOWN_PREVIEW_QUERY = /* GraphQL */ `
         status
       }
       totalResources
+      routing {
+        edge
+        name
+        otherEnvironments
+        change
+      }
       teardownToken
       expiresAt
     }
   }
 `
+
+type TeardownRouting = TeardownPreviewQuery['teardownPreview']['routing'][number]
+
+const EDGE_LABELS: Record<TeardownRouting['edge'], string> = {
+  CDN: 'CDN',
+  LOAD_BALANCER: 'Load balancer',
+  GATEWAY: 'Gateway',
+  DIRECT: 'Host',
+}
+
+function routingLine(item: TeardownRouting): string {
+  const line = `    - ${EDGE_LABELS[item.edge]}: ${sanitizeTerminal(item.name)}`
+  if (item.change === 'REMOVED') return line
+  const others =
+    item.otherEnvironments === 1
+      ? '1 other environment still routes through it'
+      : `${String(item.otherEnvironments)} other environments still route through it`
+  return `${line} (${others})`
+}
+
+/** The routing sections of the teardown confirmation, without colour. Empty with no routing. */
+export function routingSections(routing: TeardownRouting[]): string[] {
+  const removed = routing.filter((r) => r.change === 'REMOVED')
+  const updated = routing.filter((r) => r.change === 'UPDATED')
+  return [
+    ...(removed.length > 0 ? ['  Routing to be removed:', ...removed.map(routingLine), ''] : []),
+    ...(updated.length > 0 ? ['  Routing to be updated:', ...updated.map(routingLine), ''] : []),
+  ]
+}
+
+/** The total line: resources, then routing removed and updated when there is any. */
+export function totalLine(resources: number, routing: TeardownRouting[]): string {
+  const removed = routing.filter((r) => r.change === 'REMOVED').length
+  const updated = routing.length - removed
+  return [
+    `${String(resources)} resource(s)`,
+    ...(removed > 0 ? [`${String(removed)} routing removed`] : []),
+    ...(updated > 0 ? [`${String(updated)} routing updated`] : []),
+  ].join(', ')
+}
 
 const START_TEARDOWN_MUTATION = /* GraphQL */ `
   mutation StartTeardown($input: StartTeardownInput!) {
@@ -113,7 +160,7 @@ async function promptForPhraseWithTimeout(phrase: string, expiresAt: Date): Prom
 }
 
 export function registerTeardownCommand(program: Command): void {
-  program
+  const teardownCmd = program
     .command('teardown')
     .description('Tear down all infrastructure for an environment')
     .argument('<environment>', 'Environment name to tear down (e.g., "staging")')
@@ -164,8 +211,17 @@ export function registerTeardownCommand(program: Command): void {
       }
 
       console.log('')
-      console.log(chalk.gray(`  Total: ${String(preview.totalResources)} resource(s)`))
+      for (const line of routingSections(preview.routing)) {
+        console.log(line.startsWith('    -') ? chalk.yellow(line) : chalk.white.bold(line))
+      }
+      console.log(chalk.gray(`  Total: ${totalLine(preview.totalResources, preview.routing)}`))
       console.log('')
+      if (preview.routing.some((r) => r.change === 'REMOVED')) {
+        console.log(
+          chalk.gray('  A CDN nothing else routes through is removed, with its DNS records.')
+        )
+        console.log('')
+      }
 
       const expiresAt = new Date(preview.expiresAt)
 
@@ -216,4 +272,11 @@ export function registerTeardownCommand(program: Command): void {
         process.exit(1)
       }
     })
+
+  addExamples(teardownCmd, [
+    {
+      command: 'gantry teardown staging',
+      description: 'Remove all infrastructure of the staging environment',
+    },
+  ])
 }

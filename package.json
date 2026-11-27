@@ -27,6 +27,12 @@
   "bin": {
     "gantry": "./dist/index.js"
   },
+  "exports": {
+    "./program": {
+      "types": "./dist/program.d.ts",
+      "import": "./dist/program.js"
+    }
+  },
   "files": [
     "dist",
     "schema",

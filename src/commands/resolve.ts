@@ -5,9 +5,11 @@ import type { Command } from 'commander'
 import { stringify as stringifyYaml } from 'yaml'
 
 import { globalCwd } from '../lib/command-options'
+import { addExamples } from '../lib/examples'
 import { printError } from '../lib/output'
 import { findConfigPath } from '../lib/project-identity'
 import { formatProvenanceTable, parseCliVarFlags, resolveYaml } from '../lib/resolve-yaml'
+import { SCHEMA_HEADER } from '../lib/schema-header'
 
 interface ResolveOptions {
   cwd?: string
@@ -17,8 +19,9 @@ interface ResolveOptions {
 }
 
 export function registerResolveCommand(program: Command): void {
-  program
-    .command('resolve <environment>')
+  const resolveCmd = program
+    .command('resolve')
+    .argument('<environment>', 'Environment name')
     .description('Render the composed gantry.yml for an environment')
     .option('-C, --cwd <directory>', 'Change working directory')
     .option('-f, --file <path>', 'Path to gantry.yml (defaults to ./gantry.yml)')
@@ -98,7 +101,7 @@ export function registerResolveCommand(program: Command): void {
       if (options.output) {
         const outPath = path.resolve(workingDir, options.output)
         try {
-          fs.writeFileSync(outPath, yamlOut, 'utf-8')
+          fs.writeFileSync(outPath, `${SCHEMA_HEADER}\n${yamlOut}`, 'utf-8')
           process.stderr.write(`Wrote resolved YAML to ${outPath}\n`)
         } catch (error) {
           printError(
@@ -110,4 +113,15 @@ export function registerResolveCommand(program: Command): void {
         process.stdout.write(yamlOut)
       }
     })
+
+  addExamples(resolveCmd, [
+    {
+      command: 'gantry resolve production',
+      description: 'Print the gantry.yml production deploys, with blueprints and profiles applied',
+    },
+    {
+      command: 'gantry resolve staging --output resolved.yml --var image_tag=1.4.2',
+      description: 'Write it to a file with a variable overridden',
+    },
+  ])
 }

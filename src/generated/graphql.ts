@@ -147,6 +147,22 @@ export type AwsDatabaseSettingsInput = {
   username?: string | null | undefined;
 };
 
+/** An AWS resource a record points at instead of a value */
+export type AwsDnsAliasTargetInput = {
+  /** DNS name of the alias target */
+  dnsName: string;
+  /** Whether the record follows the target's health */
+  evaluateTargetHealth: boolean;
+  /** Hosted zone id of the alias target, such as a load balancer's zone */
+  hostedZoneId: string;
+};
+
+/** DNS record settings for a domain whose DNS is in an AWS account */
+export type AwsDnsRecordSettingsInput = {
+  /** Point the record at an AWS resource instead of a value */
+  alias: AwsDnsAliasTargetInput;
+};
+
 /** EFS performance mode */
 export type AwsEfsPerformanceModeEnum =
   /** Lowest latency per operation. The right choice for most workloads. */
@@ -531,6 +547,12 @@ export type CloudProviderEnum =
   /** Vultr. */
   | 'VULTR';
 
+/** DNS record settings for a domain whose DNS is in Cloudflare */
+export type CloudflareDnsRecordSettingsInput = {
+  /** Route traffic through the Cloudflare proxy */
+  proxied: boolean;
+};
+
 /** Status of a cluster */
 export type ClusterStatusEnum =
   /** The cluster is ready to run services. */
@@ -640,6 +662,32 @@ export type CreateDatabaseInput = {
   slug: string;
   /** Storage in GB */
   storageGb?: number | null | undefined;
+};
+
+/** A DNS record to create on a domain with managed DNS */
+export type CreateDnsRecordInput = {
+  /** Settings for a domain whose DNS is in an AWS account. Refused for other clouds. */
+  aws?: AwsDnsRecordSettingsInput | null | undefined;
+  /** CAA records only, 0 to 255 */
+  caaFlags?: number | null | undefined;
+  /** CAA records only: issue, issuewild or iodef */
+  caaTag?: string | null | undefined;
+  /** Settings for a domain whose DNS is in Cloudflare. Refused for other clouds. */
+  cloudflare?: CloudflareDnsRecordSettingsInput | null | undefined;
+  /** Domain id */
+  domainId: string;
+  /** Record name, such as www or the domain itself */
+  name: string;
+  /** SRV records only */
+  port?: number | null | undefined;
+  /** MX and SRV records only */
+  priority?: number | null | undefined;
+  /** Record type, such as A, CNAME, MX or TXT */
+  recordType: string;
+  /** Record value */
+  value: string;
+  /** SRV records only */
+  weight?: number | null | undefined;
 };
 
 /** A root domain to register with the team. */
@@ -867,6 +915,34 @@ export type DeploymentStepStatus =
   | 'PROCESSING'
   /** Ready and queued for Gantry to run. */
   | 'QUEUED';
+
+/** Who created a DNS record */
+export type DnsRecordSource =
+  /** Gantry, to validate a certificate. Read-only. */
+  | 'CERTIFICATE'
+  /** A person or API client. Can be changed. */
+  | 'MANUAL'
+  /** Gantry, to route a hostname. Read-only. */
+  | 'ROUTE';
+
+/** Whether a record has reached the domain's DNS provider */
+export type DnsRecordSyncStatus =
+  /** At the DNS provider */
+  | 'APPLIED'
+  /** Being pushed now */
+  | 'APPLYING'
+  /** The DNS provider holds a different value */
+  | 'DRIFT'
+  /** The last push failed */
+  | 'FAILED'
+  /** The domain uses external DNS, so Gantry does not push it */
+  | 'NOT_APPLICABLE'
+  /** Waiting to be pushed */
+  | 'PENDING'
+  /** Removed from the DNS provider */
+  | 'REMOVED'
+  /** Being removed from the DNS provider */
+  | 'REMOVING';
 
 /** One env var to store */
 export type EnvVarInput = {
@@ -1313,6 +1389,30 @@ export type UpdateDatabaseInput = {
   storageGb?: number | null | undefined;
 };
 
+/** Changes to a DNS record Gantry did not create. Leave a field out to keep it. Changing the type replaces its extra fields. */
+export type UpdateDnsRecordInput = {
+  /** Settings for a domain whose DNS is in an AWS account. Refused for other clouds. */
+  aws?: AwsDnsRecordSettingsInput | null | undefined;
+  /** CAA records only, 0 to 255 */
+  caaFlags?: number | null | undefined;
+  /** CAA records only: issue, issuewild or iodef */
+  caaTag?: string | null | undefined;
+  /** Settings for a domain whose DNS is in Cloudflare. Refused for other clouds. */
+  cloudflare?: CloudflareDnsRecordSettingsInput | null | undefined;
+  /** Record name */
+  name?: string | null | undefined;
+  /** SRV records only */
+  port?: number | null | undefined;
+  /** MX and SRV records only */
+  priority?: number | null | undefined;
+  /** Record type */
+  recordType?: string | null | undefined;
+  /** Record value */
+  value?: string | null | undefined;
+  /** SRV records only */
+  weight?: number | null | undefined;
+};
+
 /** A new name for a firewall. */
 export type UpdateFirewallInput = {
   /** Firewall ID */
@@ -1647,6 +1747,41 @@ export type CancelDeploymentMutationVariables = Exact<{
 
 
 export type CancelDeploymentMutation = { cancelDeployment: { success: boolean, message: string | null } };
+
+export type GetDnsDomainsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetDnsDomainsQuery = { domains: Array<{ id: string, name: string }> };
+
+export type GetDnsRecordsQueryVariables = Exact<{
+  domainId: string;
+  source?: DnsRecordSource | null | undefined;
+}>;
+
+
+export type GetDnsRecordsQuery = { dnsRecords: Array<{ id: string, recordType: string, name: string, value: string, valueData: Record<string, unknown> | null, provider: string | null, providerData: Record<string, unknown> | null, source: DnsRecordSource, verified: boolean, syncStatus: DnsRecordSyncStatus, syncError: string | null, conflict: boolean }> };
+
+export type CreateDnsRecordMutationVariables = Exact<{
+  input: CreateDnsRecordInput;
+}>;
+
+
+export type CreateDnsRecordMutation = { createDnsRecord: { success: boolean, message: string | null, record: { id: string } | null } };
+
+export type UpdateDnsRecordMutationVariables = Exact<{
+  id: string;
+  input: UpdateDnsRecordInput;
+}>;
+
+
+export type UpdateDnsRecordMutation = { updateDnsRecord: { success: boolean, message: string | null } };
+
+export type VerifyDnsRecordMutationVariables = Exact<{
+  id: string;
+}>;
+
+
+export type VerifyDnsRecordMutation = { verifyDnsRecord: { success: boolean, message: string | null } };
 
 export type GetDomainsQueryVariables = Exact<{ [key: string]: never; }>;
 

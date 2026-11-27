@@ -9,6 +9,7 @@ import type {
   AwsClusterSettingsInput,
   AwsDatabaseDeploymentModeEnum,
   AwsDatabaseSettingsInput,
+  AwsDnsRecordSettingsInput,
   AwsEfsPerformanceModeEnum,
   AwsEfsThroughputModeEnum,
   AwsFilesystemSettingsInput,
@@ -200,6 +201,31 @@ export function toAwsDatabaseDeploymentMode(mode: string): AwsDatabaseDeployment
 
 export function awsCacheSettings(serverless: boolean): AwsCacheSettingsInput {
   return { deploymentMode: serverless ? 'SERVERLESS' : 'NODE_BASED' }
+}
+
+export interface AwsDnsRecordFlags {
+  awsAliasZone?: string
+  awsAliasTarget?: string
+  awsAliasEvaluateHealth?: boolean
+}
+
+/** Point a Route 53 record at an AWS resource instead of a value. */
+export function buildAwsDnsRecordSettings(
+  flags: AwsDnsRecordFlags
+): Result<AwsDnsRecordSettingsInput | undefined> {
+  const { awsAliasZone: hostedZoneId, awsAliasTarget: dnsName } = flags
+  if (hostedZoneId === undefined && dnsName === undefined && !flags.awsAliasEvaluateHealth) {
+    return { ok: true, value: undefined }
+  }
+  if (!hostedZoneId || !dnsName) {
+    return { ok: false, message: 'An alias needs both --aws-alias-zone and --aws-alias-target.' }
+  }
+  return {
+    ok: true,
+    value: {
+      alias: { hostedZoneId, dnsName, evaluateTargetHealth: flags.awsAliasEvaluateHealth === true },
+    },
+  }
 }
 
 export interface AwsCacheUpdateFlags {

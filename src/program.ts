@@ -11,6 +11,7 @@ import { registerClustersCommand } from './commands/clusters'
 import { registerDatabasesCommand } from './commands/databases'
 import { registerDeployCommand, registerRollbackCommand } from './commands/deploy'
 import { registerDeploymentsCommand } from './commands/deployments'
+import { registerDnsCommand } from './commands/dns'
 import { registerDomainsCommand } from './commands/domains'
 import { registerEnvCommand } from './commands/env'
 import { registerEnvironmentsCommand } from './commands/environments'
@@ -94,6 +95,7 @@ export function buildProgram(): Command {
   registerDeploymentsCommand(program)
   registerDomainsCommand(program)
   registerCertificatesCommand(program)
+  registerDnsCommand(program)
   registerLoadBalancersCommand(program)
   registerFirewallsCommand(program)
   registerOriginLockCommand(program)

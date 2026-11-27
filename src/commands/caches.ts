@@ -1,4 +1,4 @@
-import { input, select } from '@inquirer/prompts'
+import { confirm, input, select } from '@inquirer/prompts'
 import type { Command } from 'commander'
 import ora from 'ora'
 
@@ -14,9 +14,12 @@ import type {
   GetCachesQueryVariables,
   GetCacheTypesQuery,
   GetCacheTypesQueryVariables,
+  UpdateCacheMutation,
+  UpdateCacheMutationVariables,
 } from '../generated/graphql'
 import { activeOnly, createBastionInteractive, selectBastion } from '../lib/bastion-prompts'
 import { openBastionTunnel } from '../lib/bastion-tunnel'
+import { buildCacheUpdate, type CacheUpdateOptions } from '../lib/cache-update'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, isAws, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
 import {
@@ -29,7 +32,9 @@ import { getDefaultPort, normalizeEngine, toCacheEngineEnum } from '../lib/engin
 import { addExamples } from '../lib/examples'
 import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
+import { repairResource } from '../lib/repair'
 import { sanitizeTerminal } from '../lib/sanitize'
+import { isInteractive } from '../lib/terminal'
 
 type Cache = GetCachesQuery['caches'][number]
 
@@ -51,9 +56,20 @@ const CACHES_QUERY = /* GraphQL */ `
       status
       cloudAccountId
       networkId
+      provider
       endpoint
       port
       createdAt
+    }
+  }
+`
+
+const UPDATE_CACHE_MUTATION = /* GraphQL */ `
+  mutation UpdateCache($id: String!, $input: UpdateCacheInput!) {
+    updateCache(id: $id, input: $input) {
+      success
+      message
+      deploymentId
     }
   }
 `
@@ -461,6 +477,87 @@ export function registerCachesCommand(program: Command): void {
       }
     )
 
+  const updateCmd = cachesCmd
+    .command('update')
+    .description('Change a cache. Setting changes apply right away.')
+    .argument('<slug>', 'Cache slug')
+    .option('--name <name>', 'New display name')
+    .option('--size <size>', 'Node size (see "gantry caches sizes"). Restarts the nodes.')
+    .option('--engine-version <version>', 'Engine version. It can only go up.')
+    .option('--backup-days <days>', 'Days of backups kept. 0 keeps none.')
+    .addOption(awsOption('--aws-nodes <count>', 'Node-based: number of nodes'))
+    .addOption(awsOption('--aws-shards <count>', 'Cluster mode: number of shards'))
+    .addOption(awsOption('--aws-replicas <count>', 'Cluster mode: replicas per shard'))
+    .addOption(awsOption('--aws-max-storage <gb>', 'Serverless: data storage limit in GB'))
+    .addOption(awsOption('--aws-max-ecpu <count>', 'Serverless: ECPU per second limit'))
+    .addOption(awsOption('--aws-snapshot-time <hh:mm>', 'Daily backup time in UTC'))
+    .option('-y, --yes', 'Skip the confirmation prompt')
+    .action(async (slug: string, options: CacheUpdateOptions & { yes?: boolean }) => {
+      try {
+        const update = buildCacheUpdate(options)
+        if (!update.ok) {
+          printError(update.message)
+          process.exit(1)
+        }
+        const cache = await findCache(slug)
+        if (!cache) {
+          printError('Cache not found.')
+          process.exit(1)
+        }
+        const foreign = foreignAwsFlagsMessage(cache.provider, options)
+        if (foreign) {
+          printError(foreign)
+          process.exit(1)
+        }
+        if (update.warnings.length > 0 && options.yes !== true) {
+          const warning = update.warnings.join(' ')
+          if (!isInteractive()) {
+            printError(`${warning} Re-run with --yes to confirm.`)
+            process.exit(1)
+          }
+          console.log(warning)
+          if (!(await confirm({ message: `Update "${cache.slug}"?`, default: false }))) {
+            console.log('Update cancelled.')
+            return
+          }
+        }
+
+        const { updateCache: result } = await graphqlRequest<
+          UpdateCacheMutation,
+          UpdateCacheMutationVariables
+        >(UPDATE_CACHE_MUTATION, { id: cache.id, input: update.input })
+        if (!result.success) {
+          printError(result.message ?? 'There was an error while updating the cache.')
+          process.exit(1)
+        }
+        printSuccess(result.message ?? 'Cache updated.')
+        if (result.deploymentId) {
+          console.log(`  Deployment: ${result.deploymentId}`)
+        }
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  const repairCmd = cachesCmd
+    .command('repair')
+    .description("Apply a cache's saved configuration to its infrastructure again")
+    .argument('<slug>', 'Cache slug')
+    .action(async (slug: string) => {
+      try {
+        const cache = await findCache(slug)
+        if (!cache) {
+          printError('Cache not found.')
+          process.exit(1)
+        }
+        await repairResource('CACHE', cache, 'gantry caches list')
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
   const tunnelCmd = cachesCmd
     .command('tunnel')
     .description('Create a local tunnel to a cache')
@@ -624,6 +721,19 @@ export function registerCachesCommand(program: Command): void {
       command:
         'gantry caches create --cloud c4xp9w --network n8kd2q --name Sessions --engine valkey --size cache.t4g.micro --backup-days 7',
       description: 'Create a Valkey cache that keeps a week of backups',
+    },
+  ])
+  addExamples(updateCmd, [
+    { command: 'gantry caches update sessions --size cache.t4g.medium', description: 'Resize' },
+    {
+      command: 'gantry caches update sessions --aws-replicas 2 --backup-days 7 -y',
+      description: 'Add replicas and keep a week of backups',
+    },
+  ])
+  addExamples(repairCmd, [
+    {
+      command: 'gantry caches repair sessions',
+      description: 'Fix a cache whose last deploy failed or whose infrastructure drifted',
     },
   ])
   addExamples(tunnelCmd, [

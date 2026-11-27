@@ -9,6 +9,7 @@ import type {
   AwsClusterSettingsInput,
   AwsDatabaseDeploymentModeEnum,
   AwsDatabaseSettingsInput,
+  AwsDnsRecordSettingsInput,
   AwsEfsPerformanceModeEnum,
   AwsEfsThroughputModeEnum,
   AwsFilesystemSettingsInput,
@@ -150,6 +151,35 @@ export function buildAwsNetworkSettings(
   return { ok: true, value: Object.keys(aws).length > 0 ? aws : undefined }
 }
 
+export interface AwsNetworkUpdateFlags extends AwsNetworkFlags {
+  awsInternet?: boolean
+}
+
+/** `gantry networks update` AWS flags, with the warnings a confirmation shows. */
+export function buildAwsNetworkUpdate(
+  flags: AwsNetworkUpdateFlags
+): Result<{ aws: AwsNetworkSettingsInput; warnings: string[] }> {
+  const internet = choose(flags.awsInternet, flags.awsNoInternet, 'internet')
+  if (!internet.ok) return internet
+  const settings = buildAwsNetworkSettings({ awsNat: flags.awsNat })
+  if (!settings.ok) return settings
+
+  const aws: AwsNetworkSettingsInput = { ...settings.value }
+  if (internet.value !== undefined) aws.enableInternetAccess = internet.value
+
+  const warnings: string[] = []
+  if (aws.enableInternetAccess === false) {
+    warnings.push(
+      'The network loses its internet gateway and NAT gateways, so nothing in it can reach the internet.'
+    )
+  } else if (aws.natGatewayOption === 'NONE') {
+    warnings.push('Services in private subnets lose outbound internet access.')
+  } else if (aws.natGatewayOption === 'PER_AZ') {
+    warnings.push('A NAT gateway in every zone costs more and survives a zone outage.')
+  }
+  return { ok: true, value: { aws, warnings } }
+}
+
 /** The parameter group family an AWS catalog entry carries in its provider data. */
 export function awsCatalogFamily(providerData: Record<string, unknown>): string | undefined {
   return typeof providerData.parameterGroupFamily === 'string'
@@ -171,6 +201,68 @@ export function toAwsDatabaseDeploymentMode(mode: string): AwsDatabaseDeployment
 
 export function awsCacheSettings(serverless: boolean): AwsCacheSettingsInput {
   return { deploymentMode: serverless ? 'SERVERLESS' : 'NODE_BASED' }
+}
+
+export interface AwsDnsRecordFlags {
+  awsAliasZone?: string
+  awsAliasTarget?: string
+  awsAliasEvaluateHealth?: boolean
+}
+
+/** Point a Route 53 record at an AWS resource instead of a value. */
+export function buildAwsDnsRecordSettings(
+  flags: AwsDnsRecordFlags
+): Result<AwsDnsRecordSettingsInput | undefined> {
+  const { awsAliasZone: hostedZoneId, awsAliasTarget: dnsName } = flags
+  if (hostedZoneId === undefined && dnsName === undefined && !flags.awsAliasEvaluateHealth) {
+    return { ok: true, value: undefined }
+  }
+  if (!hostedZoneId || !dnsName) {
+    return { ok: false, message: 'An alias needs both --aws-alias-zone and --aws-alias-target.' }
+  }
+  return {
+    ok: true,
+    value: {
+      alias: { hostedZoneId, dnsName, evaluateTargetHealth: flags.awsAliasEvaluateHealth === true },
+    },
+  }
+}
+
+export interface AwsCacheUpdateFlags {
+  awsNodes?: string
+  awsShards?: string
+  awsReplicas?: string
+  awsMaxStorage?: string
+  awsMaxEcpu?: string
+  awsSnapshotTime?: string
+}
+
+const AWS_CACHE_NUMBER_FLAGS = [
+  ['awsNodes', '--aws-nodes', 'numCacheNodes'],
+  ['awsShards', '--aws-shards', 'numNodeGroups'],
+  ['awsReplicas', '--aws-replicas', 'replicasPerNodeGroup'],
+  ['awsMaxStorage', '--aws-max-storage', 'maxDataStorageGb'],
+  ['awsMaxEcpu', '--aws-max-ecpu', 'maxEcpuPerSecond'],
+] as const
+
+const SNAPSHOT_TIME = /^([01]\d|2[0-3]):[0-5]\d$/
+
+export function buildAwsCacheUpdate(flags: AwsCacheUpdateFlags): Result<AwsCacheSettingsInput> {
+  const aws: AwsCacheSettingsInput = {}
+  for (const [option, flag, field] of AWS_CACHE_NUMBER_FLAGS) {
+    const raw = flags[option]
+    if (raw === undefined) continue
+    const value = parseNumber(raw, true)
+    if (value === null) return { ok: false, message: notANumberMessage(flag, true) }
+    aws[field] = value
+  }
+  if (flags.awsSnapshotTime !== undefined) {
+    if (!SNAPSHOT_TIME.test(flags.awsSnapshotTime)) {
+      return { ok: false, message: '--aws-snapshot-time must be a UTC time like 03:30.' }
+    }
+    aws.dailySnapshotTime = flags.awsSnapshotTime
+  }
+  return { ok: true, value: aws }
 }
 
 const CAPACITY_PROVIDERS: Partial<Record<string, AwsCapacityProviderTypeEnum>> = {

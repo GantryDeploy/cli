@@ -255,6 +255,24 @@ input AwsDatabaseSettingsInput {
   username: String
 }
 
+"""An AWS resource a record points at instead of a value"""
+input AwsDnsAliasTargetInput {
+  """DNS name of the alias target"""
+  dnsName: String!
+
+  """Whether the record follows the target's health"""
+  evaluateTargetHealth: Boolean!
+
+  """Hosted zone id of the alias target, such as a load balancer's zone"""
+  hostedZoneId: String!
+}
+
+"""DNS record settings for a domain whose DNS is in an AWS account"""
+input AwsDnsRecordSettingsInput {
+  """Point the record at an AWS resource instead of a value"""
+  alias: AwsDnsAliasTargetInput!
+}
+
 """EFS performance mode"""
 enum AwsEfsPerformanceModeEnum {
   """Lowest latency per operation. The right choice for most workloads."""
@@ -1369,6 +1387,12 @@ type CloudResource {
   status: ResourceStatusEnum!
 }
 
+"""DNS record settings for a domain whose DNS is in Cloudflare"""
+input CloudflareDnsRecordSettingsInput {
+  """Route traffic through the Cloudflare proxy"""
+  proxied: Boolean!
+}
+
 """Compute a team runs container services on, in one cloud region."""
 type Cluster {
   """Cloud account the cluster belongs to"""
@@ -1664,6 +1688,55 @@ input CreateDatabaseInput {
   storageGb: Int
 }
 
+"""Result of creating a database on a server"""
+type CreateDatabaseOnServerResult {
+  """What happened, safe to show to a user"""
+  message: String!
+
+  """Whether the database was created"""
+  success: Boolean!
+}
+
+"""A DNS record to create on a domain with managed DNS"""
+input CreateDnsRecordInput {
+  """
+  Settings for a domain whose DNS is in an AWS account. Refused for other clouds.
+  """
+  aws: AwsDnsRecordSettingsInput
+
+  """CAA records only, 0 to 255"""
+  caaFlags: Int
+
+  """CAA records only: issue, issuewild or iodef"""
+  caaTag: String
+
+  """
+  Settings for a domain whose DNS is in Cloudflare. Refused for other clouds.
+  """
+  cloudflare: CloudflareDnsRecordSettingsInput
+
+  """Domain id"""
+  domainId: String!
+
+  """Record name, such as www or the domain itself"""
+  name: String!
+
+  """SRV records only"""
+  port: Int
+
+  """MX and SRV records only"""
+  priority: Int
+
+  """Record type, such as A, CNAME, MX or TXT"""
+  recordType: String!
+
+  """Record value"""
+  value: String!
+
+  """SRV records only"""
+  weight: Int
+}
+
 """A root domain to register with the team."""
 input CreateDomainInput {
   """Root domain FQDN (e.g., example.com)"""
@@ -1819,6 +1892,21 @@ input CreateSecretInput {
   name: String!
 }
 
+"""Result of creating a user on a database server"""
+type CreateUserOnServerResult {
+  """What happened, safe to show to a user"""
+  message: String!
+
+  """The user's generated password. Returned once and never again."""
+  password: String
+
+  """Secret holding the username and password. Null when saving it failed."""
+  secretId: String
+
+  """Whether the user was created"""
+  success: Boolean!
+}
+
 """The configuration to validate, and to record as a new version."""
 input CreateVersionInput {
   """The full gantry.yml configuration"""
@@ -1936,6 +2024,23 @@ type Database {
   updatedAt: String!
 }
 
+"""Whether databases and users can be created on a server yet"""
+type DatabaseAccessResult {
+  """
+  Deployment to poll when the server is not ready yet. Try again once it succeeds.
+  """
+  deploymentId: String
+
+  """What happened, safe to show to a user"""
+  message: String
+
+  """Whether the server accepts new databases and users now"""
+  ready: Boolean!
+
+  """Whether the check succeeded"""
+  success: Boolean!
+}
+
 """The master user of a database server"""
 type DatabaseCredentialsResult {
   """What happened, safe to show to a user"""
@@ -1984,6 +2089,15 @@ type DatabaseEngineVersion {
 
   """Version string, e.g. 16.4"""
   version: String!
+}
+
+"""A privilege on one database for a user created on a server"""
+input DatabaseGrantInput {
+  """Database on the server the privilege applies to"""
+  database: String!
+
+  """Privilege the engine understands, such as SELECT or ALL PRIVILEGES"""
+  privilege: String!
 }
 
 """Result of a database server change"""
@@ -2360,6 +2474,105 @@ enum DeploymentStepStatus {
 
   """Ready and queued for Gantry to run."""
   QUEUED
+}
+
+"""A DNS record Gantry tracks for a domain"""
+type DnsRecord {
+  """Whether another record has the same type and name but another value"""
+  conflict: Boolean!
+
+  """When the record was created"""
+  createdAt: String!
+
+  """Record id"""
+  id: String!
+
+  """When the record was last checked"""
+  lastCheckedAt: String
+
+  """Record name"""
+  name: String!
+
+  """Cloud of the domain's DNS provider"""
+  provider: String
+
+  """Settings only that cloud has, such as an alias target or proxying"""
+  providerData: JSON
+
+  """Record type, such as A, CNAME, MX or TXT"""
+  recordType: String!
+
+  """Who created the record"""
+  source: DnsRecordSource!
+
+  """Why the last push failed, safe to show to a user"""
+  syncError: String
+
+  """Whether it reached the DNS provider"""
+  syncStatus: DnsRecordSyncStatus!
+
+  """When the record last changed"""
+  updatedAt: String!
+
+  """Record value"""
+  value: String!
+
+  """Extra data an MX, SRV or CAA record carries, such as its priority"""
+  valueData: JSON
+
+  """Whether the record last resolved to its value"""
+  verified: Boolean!
+}
+
+"""Result of a DNS record change"""
+type DnsRecordMutationResult {
+  """What happened, safe to show to a user"""
+  message: String
+
+  """The record, when it changed"""
+  record: DnsRecord
+
+  """Whether the change was accepted"""
+  success: Boolean!
+}
+
+"""Who created a DNS record"""
+enum DnsRecordSource {
+  """Gantry, to validate a certificate. Read-only."""
+  CERTIFICATE
+
+  """A person or API client. Can be changed."""
+  MANUAL
+
+  """Gantry, to route a hostname. Read-only."""
+  ROUTE
+}
+
+"""Whether a record has reached the domain's DNS provider"""
+enum DnsRecordSyncStatus {
+  """At the DNS provider"""
+  APPLIED
+
+  """Being pushed now"""
+  APPLYING
+
+  """The DNS provider holds a different value"""
+  DRIFT
+
+  """The last push failed"""
+  FAILED
+
+  """The domain uses external DNS, so Gantry does not push it"""
+  NOT_APPLICABLE
+
+  """Waiting to be pushed"""
+  PENDING
+
+  """Removed from the DNS provider"""
+  REMOVED
+
+  """Being removed from the DNS provider"""
+  REMOVING
 }
 
 """
@@ -3226,6 +3439,33 @@ type Mutation {
   ): DatabaseMutationResult!
 
   """
+  Create a database on a database server. Needs prepareDatabaseAccess to report the server ready.
+  """
+  createDatabaseOnServer(
+    """Database server id"""
+    databaseId: String!
+
+    """
+    Name of the new database: lowercase letters, digits and underscores, starting with a letter
+    """
+    name: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CreateDatabaseOnServerResult!
+
+  """
+  Create a DNS record on a domain with managed DNS. Gantry pushes it to the domain's DNS provider and checks that it resolves.
+  """
+  createDnsRecord(
+    """The record to create"""
+    input: CreateDnsRecordInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DnsRecordMutationResult!
+
+  """
   Register a root domain with the team. A subdomain is refused, and the team's plan caps how many domains it can have.
   """
   createDomain(
@@ -3312,6 +3552,25 @@ type Mutation {
   ): SecretMutationResult!
 
   """
+  Create a user on a database server with a generated password, and save its credentials as a secret. The password is returned once. Needs prepareDatabaseAccess to report the server ready.
+  """
+  createUserOnServer(
+    """Database server id"""
+    databaseId: String!
+
+    """Privileges to give the user. None leaves it able only to log in."""
+    grants: [DatabaseGrantInput!]! = []
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+
+    """
+    Name of the new user: lowercase letters, digits and underscores, starting with a letter
+    """
+    username: String!
+  ): CreateUserOnServerResult!
+
+  """
   Validate a gantry.yml configuration. With an environment, also record it as the next version there.
   """
   createVersion(
@@ -3388,6 +3647,17 @@ type Mutation {
     input: LiftPreviewEnvironmentInput!
   ): LiftPreviewEnvironmentResult!
 
+  """
+  Get a database server ready for databases and users to be created on it. When it is not ready, returns a deploymentId to poll before trying again.
+  """
+  prepareDatabaseAccess(
+    """Database server id"""
+    databaseId: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DatabaseAccessResult!
+
   """Apply the routing of the environment's live versions again."""
   reapplyRouting(
     """The environment to act on."""
@@ -3396,6 +3666,20 @@ type Mutation {
     """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): ReleaseOperationResult!
+
+  """
+  Apply a resource's saved configuration to its infrastructure again. Works when the infrastructure is deployed, failed or drifted and nothing else is changing it. Needs manage on the resource.
+  """
+  repairResource(
+    """Resource id"""
+    id: String!
+
+    """Kind of resource to repair"""
+    resourceType: RepairableResourceTypeEnum!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): RepairResult!
 
   """Make the env vars at a scope exactly the ones given, removing the rest"""
   replaceEnvVars(
@@ -3574,11 +3858,14 @@ type Mutation {
   ): TeardownPreviewEnvironmentResult!
 
   """
-  Sync the certificate status and check validation again in every region that is validating or has failed.
+  Sync the certificate status and check validation again in every region that is validating or has failed, or only in `region`.
   """
   triggerCertificateValidation(
     """Certificate id."""
     id: String!
+
+    """Only check the copy of the certificate in this region."""
+    region: String
 
     """Team id to act for. Required when the token covers more than one team."""
     team: String
@@ -3594,6 +3881,20 @@ type Mutation {
   ): EnvVarsMutationResult!
 
   """
+  Change a cache. A setting change deploys the cache right away and returns a deploymentId to poll.
+  """
+  updateCache(
+    """Cache id"""
+    id: String!
+
+    """Settings to change. A field left out keeps its value."""
+    input: UpdateCacheInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): CacheMutationResult!
+
+  """
   Change a database server. A setting change deploys the server right away and returns a deploymentId to poll.
   """
   updateDatabase(
@@ -3607,6 +3908,20 @@ type Mutation {
     team: String
   ): DatabaseMutationResult!
 
+  """
+  Change a DNS record you created on a domain with managed DNS. Records Gantry created can't be changed.
+  """
+  updateDnsRecord(
+    """Record id"""
+    id: String!
+
+    """Changes to make. A field left out keeps its value."""
+    input: UpdateDnsRecordInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DnsRecordMutationResult!
+
   """Rename a firewall. Its deployments are unchanged."""
   updateFirewall(
     """The new name"""
@@ -3615,6 +3930,20 @@ type Mutation {
     """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): FirewallMutationResult!
+
+  """
+  Change a network. An internet access or NAT gateway change deploys the network right away and returns a deploymentId to poll.
+  """
+  updateNetwork(
+    """Network id"""
+    id: String!
+
+    """Settings to change. A field left out keeps its value."""
+    input: UpdateNetworkInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): NetworkMutationResult!
 
   """
   Rename a secret, change its description, or replace its keys and values
@@ -3626,6 +3955,17 @@ type Mutation {
     """Team id to act for. Required when the token covers more than one team."""
     team: String
   ): SecretMutationResult!
+
+  """
+  Check a DNS record again. On a domain with managed DNS, Gantry first pushes it to the DNS provider, which also fixes a record that drifted.
+  """
+  verifyDnsRecord(
+    """Record id"""
+    id: String!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): DnsRecordMutationResult!
 }
 
 """A private network in one cloud region that resources run in."""
@@ -4226,6 +4566,18 @@ type Query {
     versionId: String!
   ): [Deployment!]!
 
+  """DNS records Gantry tracks for a domain, including the ones it created."""
+  dnsRecords(
+    """Domain id"""
+    domainId: String!
+
+    """Only records with this source"""
+    source: DnsRecordSource
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): [DnsRecord!]!
+
   """A connected domain. Null when the team has none with this id."""
   domain(
     """Domain id."""
@@ -4684,6 +5036,39 @@ type ReleaseVersion {
 
   """Share of traffic, 0 to 100"""
   weight: Int!
+}
+
+"""Outcome of `repairResource`"""
+type RepairResult {
+  """What happened, safe to show to a user"""
+  message: String!
+
+  """Whether the repair started"""
+  success: Boolean!
+}
+
+"""Resource types whose infrastructure can be repaired"""
+enum RepairableResourceTypeEnum {
+  """A bastion"""
+  BASTION
+
+  """A cache"""
+  CACHE
+
+  """A compute cluster"""
+  CLUSTER
+
+  """A database server"""
+  DATABASE
+
+  """A filesystem"""
+  FILESYSTEM
+
+  """A load balancer"""
+  LOAD_BALANCER
+
+  """A network"""
+  NETWORK
 }
 
 """A problem that stopped the config from resolving."""
@@ -5382,6 +5767,28 @@ input UnsetEnvVarsInput {
 }
 
 """
+Settings to change on a cache. Leave a field out to keep it. A change that reaches the cache applies right away; resizing restarts its nodes.
+"""
+input UpdateCacheInput {
+  """
+  Settings for a cache in an AWS cloud account. Deployment mode, cluster mode and the encryption key are fixed at creation.
+  """
+  aws: AwsCacheSettingsInput
+
+  """Days of backups kept. 0 keeps none. Memcached keeps none."""
+  backupRetentionDays: Int
+
+  """Engine version. It can only go up."""
+  engineVersion: String
+
+  """User-friendly name"""
+  name: String
+
+  """Node size. A serverless cache has none."""
+  size: String
+}
+
+"""
 Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly.
 """
 input UpdateDatabaseInput {
@@ -5406,6 +5813,45 @@ input UpdateDatabaseInput {
   storageGb: Int
 }
 
+"""
+Changes to a DNS record Gantry did not create. Leave a field out to keep it. Changing the type replaces its extra fields.
+"""
+input UpdateDnsRecordInput {
+  """
+  Settings for a domain whose DNS is in an AWS account. Refused for other clouds.
+  """
+  aws: AwsDnsRecordSettingsInput
+
+  """CAA records only, 0 to 255"""
+  caaFlags: Int
+
+  """CAA records only: issue, issuewild or iodef"""
+  caaTag: String
+
+  """
+  Settings for a domain whose DNS is in Cloudflare. Refused for other clouds.
+  """
+  cloudflare: CloudflareDnsRecordSettingsInput
+
+  """Record name"""
+  name: String
+
+  """SRV records only"""
+  port: Int
+
+  """MX and SRV records only"""
+  priority: Int
+
+  """Record type"""
+  recordType: String
+
+  """Record value"""
+  value: String
+
+  """SRV records only"""
+  weight: Int
+}
+
 """A new name for a firewall."""
 input UpdateFirewallInput {
   """Firewall ID"""
@@ -5413,6 +5859,22 @@ input UpdateFirewallInput {
 
   """New display name"""
   name: String!
+}
+
+"""
+Settings to change on a network. Leave a field out to keep it. The address range and subnets can't change.
+"""
+input UpdateNetworkInput {
+  """
+  Settings for a network in an AWS cloud account. Turning internet access off removes the NAT gateway.
+  """
+  aws: AwsNetworkSettingsInput
+
+  """User-friendly name"""
+  name: String
+
+  """URL-friendly identifier, unique in the team"""
+  slug: String
 }
 
 """Changes to a secret. Fields left out stay as they are."""

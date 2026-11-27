@@ -1,4 +1,4 @@
-import { input } from '@inquirer/prompts'
+import { confirm, input } from '@inquirer/prompts'
 import type { Command } from 'commander'
 
 import type {
@@ -6,15 +6,26 @@ import type {
   CreateNetworkMutationVariables,
   GetNetworksQuery,
   GetNetworksQueryVariables,
+  UpdateNetworkInput,
+  UpdateNetworkMutation,
+  UpdateNetworkMutationVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, isAws } from '../lib/clouds'
-import { awsOption, buildAwsNetworkSettings, type AwsNetworkFlags } from '../lib/clouds/aws'
+import {
+  awsOption,
+  buildAwsNetworkSettings,
+  buildAwsNetworkUpdate,
+  type AwsNetworkFlags,
+  type AwsNetworkUpdateFlags,
+} from '../lib/clouds/aws'
 import { addExamples } from '../lib/examples'
 import { resolveCloud, selectRegion } from '../lib/interactive-prompts'
 import { buildNetworkSubnets } from '../lib/network-create'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
+import { repairResource } from '../lib/repair'
 import { sanitizeTerminal } from '../lib/sanitize'
+import { isInteractive } from '../lib/terminal'
 
 const NETWORKS_QUERY = /* GraphQL */ `
   query GetNetworks {
@@ -23,12 +34,38 @@ const NETWORKS_QUERY = /* GraphQL */ `
       name
       slug
       region
+      provider
       cloudAccountId
       stackStatus
       createdAt
     }
   }
 `
+
+const UPDATE_NETWORK_MUTATION = /* GraphQL */ `
+  mutation UpdateNetwork($id: String!, $input: UpdateNetworkInput!) {
+    updateNetwork(id: $id, input: $input) {
+      success
+      message
+      deploymentId
+    }
+  }
+`
+
+interface NetworkUpdateFlags extends AwsNetworkUpdateFlags {
+  name?: string
+  slug?: string
+  yes?: boolean
+}
+
+type Network = GetNetworksQuery['networks'][number]
+
+async function findNetwork(slugOrId: string): Promise<Network | undefined> {
+  const { networks } = await graphqlRequest<GetNetworksQuery, GetNetworksQueryVariables>(
+    NETWORKS_QUERY
+  )
+  return networks.find((n) => n.id === slugOrId) ?? networks.find((n) => n.slug === slugOrId)
+}
 
 const CREATE_NETWORK_MUTATION = /* GraphQL */ `
   mutation CreateNetwork($input: CreateNetworkInput!) {
@@ -180,6 +217,112 @@ export function registerNetworksCommand(program: Command): void {
       }
     })
 
+  const updateCmd = networksCmd
+    .command('update')
+    .description("Change a network. The address range and subnets can't change.")
+    .argument('<slug>', 'Network slug')
+    .option('--name <name>', 'New display name')
+    .option('--slug <slug>', 'New slug')
+    .addOption(awsOption('--aws-nat <option>', 'NAT gateways: none, single or per-az'))
+    .addOption(awsOption('--aws-internet', 'Give the network internet access'))
+    .addOption(awsOption('--aws-no-internet', 'Remove internet access and its NAT gateways'))
+    .option('-y, --yes', 'Skip the confirmation prompt')
+    .action(async (slug: string, options: NetworkUpdateFlags) => {
+      try {
+        const network = await findNetwork(slug)
+        if (!network) {
+          printError('Network not found.')
+          process.exit(1)
+        }
+        const foreign = foreignAwsFlagsMessage(network.provider, options)
+        if (foreign) {
+          printError(foreign)
+          process.exit(1)
+        }
+
+        const input: UpdateNetworkInput = {}
+        if (options.name !== undefined) input.name = options.name
+        if (options.slug !== undefined) input.slug = options.slug
+        const warnings: string[] = []
+        if (isAws(network.provider)) {
+          const aws = buildAwsNetworkUpdate(options)
+          if (!aws.ok) {
+            printError(aws.message)
+            process.exit(1)
+          }
+          if (Object.keys(aws.value.aws).length > 0) input.aws = aws.value.aws
+          warnings.push(...aws.value.warnings)
+        }
+        if (Object.keys(input).length === 0) {
+          printError('Nothing to change. Pass at least one setting.')
+          process.exit(1)
+        }
+
+        if (warnings.length > 0 && options.yes !== true) {
+          const warning = warnings.join(' ')
+          if (!isInteractive()) {
+            printError(`${warning} Re-run with --yes to confirm.`)
+            process.exit(1)
+          }
+          console.log(warning)
+          if (!(await confirm({ message: `Update "${network.slug}"?`, default: false }))) {
+            console.log('Update cancelled.')
+            return
+          }
+        }
+
+        const { updateNetwork: result } = await graphqlRequest<
+          UpdateNetworkMutation,
+          UpdateNetworkMutationVariables
+        >(UPDATE_NETWORK_MUTATION, { id: network.id, input })
+        if (!result.success) {
+          printError(result.message ?? 'There was an error while updating the network.')
+          process.exit(1)
+        }
+        printSuccess(result.message ?? 'Network updated.')
+        if (result.deploymentId) {
+          console.log(`  Deployment: ${sanitizeTerminal(result.deploymentId)}`)
+        }
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  const repairCmd = networksCmd
+    .command('repair')
+    .description("Apply a network's saved configuration to its infrastructure again")
+    .argument('<slug>', 'Network slug')
+    .action(async (slug: string) => {
+      try {
+        const network = await findNetwork(slug)
+        if (!network) {
+          printError('Network not found.')
+          process.exit(1)
+        }
+        await repairResource('NETWORK', network, 'gantry networks list')
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  addExamples(updateCmd, [
+    {
+      command: 'gantry networks update production-vpc --aws-nat per-az',
+      description: 'On AWS, run a NAT gateway in every zone',
+    },
+    {
+      command: 'gantry networks update staging-vpc --name "Staging network"',
+      description: 'Rename a network',
+    },
+  ])
+  addExamples(repairCmd, [
+    {
+      command: 'gantry networks repair production-vpc',
+      description: 'Fix a network whose last deploy failed or whose infrastructure drifted',
+    },
+  ])
   addExamples(networksCmd, [
     { command: 'gantry networks list', description: "List the team's networks" },
     {

@@ -4,12 +4,14 @@ import { Command } from 'commander'
 
 import { registerBastionsCommand } from './commands/bastions'
 import { registerCachesCommand } from './commands/caches'
+import { registerCertificatesCommand } from './commands/certificates'
 import { registerCleanupCommand } from './commands/cleanup'
 import { registerCloudsCommand } from './commands/clouds'
 import { registerClustersCommand } from './commands/clusters'
 import { registerDatabasesCommand } from './commands/databases'
 import { registerDeployCommand, registerRollbackCommand } from './commands/deploy'
 import { registerDeploymentsCommand } from './commands/deployments'
+import { registerDnsCommand } from './commands/dns'
 import { registerDomainsCommand } from './commands/domains'
 import { registerEnvCommand } from './commands/env'
 import { registerEnvironmentsCommand } from './commands/environments'
@@ -32,6 +34,7 @@ import { registerTeardownCommand } from './commands/teardown'
 import { registerValidateCommand } from './commands/validate'
 import { registerVersionsCommand } from './commands/versions'
 import { registerWhoamiCommand } from './commands/whoami'
+import { setCliVersion, setCommand } from './lib/client-identity'
 import { setTeam } from './lib/config'
 import { isRecord } from './lib/is-record'
 
@@ -48,11 +51,13 @@ function packageVersion(): string {
 
 export function buildProgram(): Command {
   const program = new Command()
+  const version = packageVersion()
+  setCliVersion(version)
 
   program
     .name('gantry')
     .description('Gantry CLI - Command line interface for Gantry')
-    .version(packageVersion())
+    .version(version)
     .option('-C, --cwd <directory>', 'Change working directory')
     .option(
       '-T, --team <teamId>',
@@ -89,6 +94,8 @@ export function buildProgram(): Command {
   registerVersionsCommand(program)
   registerDeploymentsCommand(program)
   registerDomainsCommand(program)
+  registerCertificatesCommand(program)
+  registerDnsCommand(program)
   registerLoadBalancersCommand(program)
   registerFirewallsCommand(program)
   registerOriginLockCommand(program)
@@ -96,8 +103,9 @@ export function buildProgram(): Command {
 
   // One place to record the global `--team`, rather than every command reading it
   // off `optsWithGlobals()` and threading it down to its request.
-  program.hook('preAction', (thisCommand) => {
+  program.hook('preAction', (thisCommand, actionCommand) => {
     setTeam(thisCommand.opts<{ team?: string }>().team)
+    setCommand(actionCommand)
   })
 
   return program

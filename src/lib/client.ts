@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
+import { clientIdentityHeaders } from './client-identity'
 import { getApiUrl, getTeam, loadToken } from './config'
 import { isRecord } from './is-record'
 import { redact, sanitizeTerminal } from './sanitize'
@@ -374,6 +375,7 @@ async function executeGraphqlRequest<T>(
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        ...clientIdentityHeaders(),
         // Sent as a header rather than a query argument so one flag covers every
         // command. A `team` argument on the operation still wins, for a client
         // that wants to name the team per call.

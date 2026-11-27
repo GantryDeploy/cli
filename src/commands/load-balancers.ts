@@ -9,6 +9,8 @@ import type {
   GetLoadBalancerTypesQuery,
   GetLoadBalancerTypesQueryVariables,
   LoadBalancerTypeEnum,
+  SetLoadBalancerFirewallMutation,
+  SetLoadBalancerFirewallMutationVariables,
 } from '../generated/graphql'
 import { formatApiError, graphqlRequest } from '../lib/client'
 import { foreignAwsFlagsMessage, invalidConfiguration, noTypesForCloud } from '../lib/clouds'
@@ -58,6 +60,16 @@ const LOAD_BALANCER_TYPES_QUERY = /* GraphQL */ `
       guidance
       requiresNetwork
       requiresRegion
+    }
+  }
+`
+
+const SET_LOAD_BALANCER_FIREWALL_MUTATION = /* GraphQL */ `
+  mutation SetLoadBalancerFirewall($input: SetLoadBalancerFirewallInput!) {
+    setLoadBalancerFirewall(input: $input) {
+      success
+      message
+      deploymentId
     }
   }
 `
@@ -187,6 +199,17 @@ export function registerLoadBalancersCommand(program: Command): void {
     .addOption(
       awsOption('--aws-certificate-arn <arn>', 'Default certificate for the HTTPS listener')
     )
+    .option(
+      '--allowed-cidr <cidr>',
+      'Address range (CIDR) that may reach the load balancer (repeatable; default: anywhere, or its network when internal)',
+      (cidr: string, previous: string[] | undefined) => [...(previous ?? []), cidr]
+    )
+    .addOption(
+      awsOption(
+        '--aws-cdn-only',
+        'Accept requests from CloudFront. With no --allowed-cidr, nothing else can reach it.'
+      )
+    )
     .action(
       async (options: {
         cloud?: string
@@ -197,6 +220,8 @@ export function registerLoadBalancersCommand(program: Command): void {
         region?: string
         internal?: boolean
         awsCertificateArn?: string
+        allowedCidr?: string[]
+        awsCdnOnly?: boolean
       }) => {
         try {
           const requestedType = options.type ? toLoadBalancerType(options.type) : undefined
@@ -265,8 +290,16 @@ export function registerLoadBalancersCommand(program: Command): void {
               visibility: options.internal ? 'INTERNAL' : 'PUBLIC',
               networkId,
               region,
-              ...(options.awsCertificateArn
-                ? { aws: { defaultSslCertificateArn: options.awsCertificateArn } }
+              ...(options.allowedCidr ? { allowedCidrs: options.allowedCidr } : {}),
+              ...(options.awsCertificateArn || options.awsCdnOnly
+                ? {
+                    aws: {
+                      ...(options.awsCertificateArn
+                        ? { defaultSslCertificateArn: options.awsCertificateArn }
+                        : {}),
+                      ...(options.awsCdnOnly ? { cdnOnly: true } : {}),
+                    },
+                  }
                 : {}),
             },
           })
@@ -281,6 +314,49 @@ export function registerLoadBalancersCommand(program: Command): void {
           printSuccess(`Load balancer created: ${loadBalancer.name} (${loadBalancer.slug})`)
           console.log(`  ID: ${sanitizeTerminal(loadBalancer.id)}`)
           console.log(`  Visibility: ${loadBalancer.visibility.toLowerCase()}`)
+          if (result.deploymentId) {
+            console.log(`  Deployment: ${sanitizeTerminal(result.deploymentId)}`)
+          }
+        } catch (error) {
+          printError(formatApiError(error))
+          process.exit(1)
+        }
+      }
+    )
+
+  const firewallCmd = lbCmd
+    .command('firewall')
+    .argument('<load-balancer>', 'Load balancer ID')
+    .argument('[firewall]', 'Firewall ID to attach (see "gantry firewalls list")')
+    .option('--none', 'Detach the current firewall')
+    .description('Attach a firewall to a load balancer, or detach it')
+    .action(
+      async (
+        loadBalancerId: string,
+        firewallId: string | undefined,
+        options: { none?: boolean }
+      ) => {
+        try {
+          if (Boolean(firewallId) === Boolean(options.none)) {
+            printError('Give a firewall ID to attach, or --none to detach.')
+            process.exit(1)
+          }
+          const data = await graphqlRequest<
+            SetLoadBalancerFirewallMutation,
+            SetLoadBalancerFirewallMutationVariables
+          >(SET_LOAD_BALANCER_FIREWALL_MUTATION, {
+            input: { id: loadBalancerId, firewallId: firewallId ?? null },
+          })
+          const result = data.setLoadBalancerFirewall
+          if (!result.success) {
+            printError(result.message ?? invalidConfiguration('firewall'))
+            process.exit(1)
+          }
+          printSuccess(
+            firewallId
+              ? 'Firewall attached. It takes effect once it is deployed in the load balancer region.'
+              : 'Firewall detached.'
+          )
           if (result.deploymentId) {
             console.log(`  Deployment: ${sanitizeTerminal(result.deploymentId)}`)
           }
@@ -307,6 +383,13 @@ export function registerLoadBalancersCommand(program: Command): void {
       description: 'List the load balancer types a cloud offers',
     },
   ])
+  addExamples(firewallCmd, [
+    {
+      command: 'gantry lb firewall lb7k2m fw3q9x',
+      description: 'Attach a firewall to a load balancer',
+    },
+    { command: 'gantry lb firewall lb7k2m --none', description: 'Detach its firewall' },
+  ])
   addExamples(createCmd, [
     {
       command: 'gantry lb create',
@@ -321,6 +404,11 @@ export function registerLoadBalancersCommand(program: Command): void {
       command:
         'gantry lb create --cloud c4xp9w --type APPLICATION --network n8kd2q --name "Internal API" --internal',
       description: 'Create one that takes traffic only from inside the network',
+    },
+    {
+      command:
+        'gantry lb create --cloud c4xp9w --type APPLICATION --network n8kd2q --name "Staging" --allowed-cidr 203.0.113.0/24',
+      description: 'Create one that only an office range can reach',
     },
   ])
 }

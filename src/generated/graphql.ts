@@ -413,6 +413,8 @@ export type AwsInstanceRequirementsInput = {
 
 /** Load balancer settings for an AWS cloud account */
 export type AwsLoadBalancerSettingsInput = {
+  /** Application load balancers only: accept traffic only from CloudFront, alongside allowedCidrs */
+  cdnOnly?: boolean | null | undefined;
   /** Application load balancers only: response when no route matches */
   defaultAction?: AwsAlbDefaultActionInput | null | undefined;
   /** Application load balancers only: ACM certificate for HTTPS traffic */
@@ -692,6 +694,8 @@ export type CreateFirewallInput = {
 
 /** A new load balancer to create. */
 export type CreateLoadBalancerInput = {
+  /** Addresses (CIDRs) that may reach the load balancer. Empty accepts its visibility default. */
+  allowedCidrs?: Array<string> | null | undefined;
   /** Only for an AWS cloud account */
   aws?: AwsLoadBalancerSettingsInput | null | undefined;
   /** Cloud account ID */
@@ -1041,6 +1045,13 @@ export type ObjectUploadCliOutputsInput = {
   uploadedFiles: number;
 };
 
+/** The proxy a hostname is locked to */
+export type OriginLockProviderEnum =
+  /** Cloudflare adds the header */
+  | 'CLOUDFLARE'
+  /** Any proxy you run adds the header */
+  | 'HEADER';
+
 /** Where a deploy's post-deploy commands are. Queued and started mean the version is live. */
 export type PostDeployState =
   /** The version is live and the commands are about to start. */
@@ -1141,6 +1152,14 @@ export type SetFirewallRulesInput = {
   /** Rules of an AWS firewall */
   aws?: AwsFirewallRulesInput | null | undefined;
   /** Firewall ID */
+  id: string;
+};
+
+/** The firewall to attach to a load balancer, or none. */
+export type SetLoadBalancerFirewallInput = {
+  /** Firewall ID to attach. Null detaches the current firewall. */
+  firewallId?: string | null | undefined;
+  /** Load balancer ID */
   id: string;
 };
 
@@ -1688,6 +1707,13 @@ export type GetLoadBalancerTypesQueryVariables = Exact<{
 
 export type GetLoadBalancerTypesQuery = { loadBalancerTypes: Array<{ type: LoadBalancerTypeEnum, displayName: string, provider: string, description: string, guidance: string, requiresNetwork: boolean, requiresRegion: boolean }> };
 
+export type SetLoadBalancerFirewallMutationVariables = Exact<{
+  input: SetLoadBalancerFirewallInput;
+}>;
+
+
+export type SetLoadBalancerFirewallMutation = { setLoadBalancerFirewall: { success: boolean, message: string | null, deploymentId: string | null } };
+
 export type CreateLoadBalancerMutationVariables = Exact<{
   input: CreateLoadBalancerInput;
 }>;
@@ -1731,7 +1757,7 @@ export type GetOriginLockQueryVariables = Exact<{
 }>;
 
 
-export type GetOriginLockQuery = { originLock: { hostname: string, header: string, value: string } | null };
+export type GetOriginLockQuery = { originLock: { hostname: string, provider: OriginLockProviderEnum, header: string, value: string } | null };
 
 export type LiftPreviewEnvironmentMutationVariables = Exact<{
   input: LiftPreviewEnvironmentInput;

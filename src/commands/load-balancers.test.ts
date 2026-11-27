@@ -432,5 +432,72 @@ describe('load-balancers command', () => {
         expect(printedErrors()).toContain('Unknown load balancer type.')
       }
     )
+
+    it('sends allowed address ranges and CloudFront only', async () => {
+      graphqlRequest
+        .mockResolvedValueOnce(lbTypes)
+        .mockResolvedValueOnce({ createLoadBalancer: created })
+
+      await run([
+        ...flags,
+        '--allowed-cidr',
+        '203.0.113.0/24',
+        '--allowed-cidr',
+        '2001:db8::/32',
+        '--aws-cdn-only',
+      ])
+
+      expect(graphqlRequest.mock.calls[1]?.[1]).toMatchObject({
+        input: { allowedCidrs: ['203.0.113.0/24', '2001:db8::/32'], aws: { cdnOnly: true } },
+      })
+    })
+  })
+
+  describe('firewall', () => {
+    it('attaches a firewall and prints the deployment', async () => {
+      graphqlRequest.mockResolvedValueOnce({
+        setLoadBalancerFirewall: { success: true, deploymentId: 'z3cy6t' },
+      })
+
+      await run(['lb', 'firewall', 'l5zq8c', 'fw3q9x'])
+
+      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
+        input: { id: 'l5zq8c', firewallId: 'fw3q9x' },
+      })
+      expect(printed()).toContain('Deployment: z3cy6t')
+    })
+
+    it('detaches the firewall with --none', async () => {
+      graphqlRequest.mockResolvedValueOnce({ setLoadBalancerFirewall: { success: true } })
+
+      await run(['lb', 'firewall', 'l5zq8c', '--none'])
+
+      expect(graphqlRequest.mock.calls[0]?.[1]).toEqual({
+        input: { id: 'l5zq8c', firewallId: null },
+      })
+    })
+
+    it.each([
+      ['neither a firewall nor --none', ['lb', 'firewall', 'l5zq8c']],
+      ['both a firewall and --none', ['lb', 'firewall', 'l5zq8c', 'fw3q9x', '--none']],
+    ])('refuses %s without calling the API', async (_case, args) => {
+      await expect(run(args)).rejects.toThrow('process.exit(1)')
+
+      expect(graphqlRequest).not.toHaveBeenCalled()
+      expect(printedErrors()).toContain('Give a firewall ID to attach, or --none to detach.')
+    })
+
+    it('prints the server message when the firewall cannot attach', async () => {
+      graphqlRequest.mockResolvedValueOnce({
+        setLoadBalancerFirewall: {
+          success: false,
+          message: 'The firewall configuration is not valid.',
+        },
+      })
+
+      await expect(run(['lb', 'firewall', 'l5zq8c', 'fw3q9x'])).rejects.toThrow('process.exit(1)')
+
+      expect(printedErrors()).toContain('The firewall configuration is not valid.')
+    })
   })
 })

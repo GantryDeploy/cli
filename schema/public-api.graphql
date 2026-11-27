@@ -646,6 +646,11 @@ type AwsLambdaCommandInvocation {
 
 """Load balancer settings for an AWS cloud account"""
 input AwsLoadBalancerSettingsInput {
+  """
+  Application load balancers only: accept traffic only from CloudFront, alongside allowedCidrs
+  """
+  cdnOnly: Boolean
+
   """Application load balancers only: response when no route matches"""
   defaultAction: AwsAlbDefaultActionInput
 
@@ -1724,6 +1729,11 @@ input CreateFirewallInput {
 
 """A new load balancer to create."""
 input CreateLoadBalancerInput {
+  """
+  Addresses (CIDRs) that may reach the load balancer. Empty accepts its visibility default.
+  """
+  allowedCidrs: [String!]
+
   """Only for an AWS cloud account"""
   aws: AwsLoadBalancerSettingsInput
 
@@ -2685,6 +2695,9 @@ type Firewall {
   """Firewall ID"""
   id: String!
 
+  """Load balancers it is attached to"""
+  loadBalancers: [FirewallLoadBalancer!]!
+
   """Display name"""
   name: String!
 
@@ -2700,6 +2713,9 @@ type Firewall {
   """Identifier that gantry.yml routes use to name the firewall"""
   slug: String!
 
+  """What it can sit in front of, by its cloud"""
+  targets: [FirewallTargetEnum!]!
+
   """Team ID"""
   teamId: String!
 
@@ -2708,6 +2724,18 @@ type Firewall {
 
   """Hostnames live versions route through it"""
   uses: [FirewallUse!]!
+}
+
+"""A load balancer a firewall is attached to."""
+type FirewallLoadBalancer {
+  """Load balancer ID"""
+  id: String!
+
+  """Load balancer name"""
+  name: String!
+
+  """Load balancer slug"""
+  slug: String!
 }
 
 """Outcome of a firewall mutation."""
@@ -2755,8 +2783,20 @@ enum FirewallPlacementStatus {
   RELEASED
 }
 
+"""What a firewall can sit in front of"""
+enum FirewallTargetEnum {
+  """A CDN, set by a hostname's cdn.firewall in gantry.yml"""
+  CDN
+
+  """A load balancer, attached from the console, CLI or API"""
+  LOAD_BALANCER
+}
+
 """A hostname a live version routes through a firewall."""
 type FirewallUse {
+  """CDN the hostname is placed on, once it is"""
+  cdnId: String
+
   """Hostname behind the firewall"""
   hostname: String!
 
@@ -2868,6 +2908,11 @@ type LiftPreviewEnvironmentResult {
 A load balancer that routes traffic to services, shared by any project that routes to it.
 """
 type LoadBalancer {
+  """
+  Addresses (CIDRs) that may reach it. Empty accepts the visibility default.
+  """
+  allowedCidrs: [String!]!
+
   """Cloud account the load balancer belongs to"""
   cloudAccountId: String!
 
@@ -2876,6 +2921,9 @@ type LoadBalancer {
 
   """Hostname or URL clients reach, once provisioned"""
   endpoint: String
+
+  """Firewall attached to the load balancer"""
+  firewallId: String
 
   """Load balancer ID"""
   id: String!
@@ -3408,6 +3456,17 @@ type Mutation {
     team: String
   ): FirewallMutationResult!
 
+  """
+  Attach a firewall to a load balancer, or detach it with a null firewallId. The load balancer redeploys once the firewall is deployed in its region.
+  """
+  setLoadBalancerFirewall(
+    """The load balancer and its firewall"""
+    input: SetLoadBalancerFirewallInput!
+
+    """Team id to act for. Required when the token covers more than one team."""
+    team: String
+  ): LoadBalancerMutationResult!
+
   """Send a share of traffic to the new version of a canary release."""
   shiftTraffic(
     """The environment, and the share of traffic."""
@@ -3730,19 +3789,31 @@ type ObjectUploadSource {
 }
 
 """
-What your zero trust provider must add to every request to a hostname with origin_lock. Requests without it are refused.
+What your proxy must add to every request to a hostname with origin_lock. Requests without it are refused.
 """
 type OriginLock {
-  """The request header your provider adds."""
+  """The request header your proxy adds."""
   header: String!
 
   """The hostname as routed. A preview hostname is locked as its wildcard."""
   hostname: String!
 
+  """The proxy the hostname is locked to."""
+  provider: OriginLockProviderEnum!
+
   """
-  The header's value. Keep it secret: anyone with it can skip your provider.
+  The header's value. Keep it secret: anyone with it can skip your proxy.
   """
   value: String!
+}
+
+"""The proxy a hostname is locked to"""
+enum OriginLockProviderEnum {
+  """Cloudflare adds the header"""
+  CLOUDFLARE
+
+  """Any proxy you run adds the header"""
+  HEADER
 }
 
 """
@@ -4249,7 +4320,7 @@ type Query {
   ): [Network!]!
 
   """
-  The header and secret your zero trust provider adds to requests to a locked hostname. Null until a deploy with origin_lock has gone live for it.
+  The provider, header and secret your proxy adds to requests to a locked hostname. Null unless a live deploy sets origin_lock for it.
   """
   originLock(
     """The hostname, as written in gantry.yml."""
@@ -4990,6 +5061,15 @@ input SetFirewallRulesInput {
   aws: AwsFirewallRulesInput
 
   """Firewall ID"""
+  id: String!
+}
+
+"""The firewall to attach to a load balancer, or none."""
+input SetLoadBalancerFirewallInput {
+  """Firewall ID to attach. Null detaches the current firewall."""
+  firewallId: String
+
+  """Load balancer ID"""
   id: String!
 }
 

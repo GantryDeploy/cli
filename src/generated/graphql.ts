@@ -1321,6 +1321,16 @@ export type UpdateFirewallInput = {
   name: string;
 };
 
+/** Settings to change on a network. Leave a field out to keep it. The address range and subnets can't change. */
+export type UpdateNetworkInput = {
+  /** Settings for a network in an AWS cloud account. Turning internet access off removes the NAT gateway. */
+  aws?: AwsNetworkSettingsInput | null | undefined;
+  /** User-friendly name */
+  name?: string | null | undefined;
+  /** URL-friendly identifier, unique in the team */
+  slug?: string | null | undefined;
+};
+
 /** Changes to a secret. Fields left out stay as they are. */
 export type UpdateSecretInput = {
   /** New description */
@@ -1814,7 +1824,15 @@ export type ServiceLogsQuery = { serviceLogs: { cursor: string, lines: Array<{ t
 export type GetNetworksQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetNetworksQuery = { networks: Array<{ id: string, name: string, slug: string, region: string, cloudAccountId: string, stackStatus: string | null, createdAt: string }> };
+export type GetNetworksQuery = { networks: Array<{ id: string, name: string, slug: string, region: string, provider: string, cloudAccountId: string, stackStatus: string | null, createdAt: string }> };
+
+export type UpdateNetworkMutationVariables = Exact<{
+  id: string;
+  input: UpdateNetworkInput;
+}>;
+
+
+export type UpdateNetworkMutation = { updateNetwork: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type CreateNetworkMutationVariables = Exact<{
   input: CreateNetworkInput;

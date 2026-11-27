@@ -150,6 +150,35 @@ export function buildAwsNetworkSettings(
   return { ok: true, value: Object.keys(aws).length > 0 ? aws : undefined }
 }
 
+export interface AwsNetworkUpdateFlags extends AwsNetworkFlags {
+  awsInternet?: boolean
+}
+
+/** `gantry networks update` AWS flags, with the warnings a confirmation shows. */
+export function buildAwsNetworkUpdate(
+  flags: AwsNetworkUpdateFlags
+): Result<{ aws: AwsNetworkSettingsInput; warnings: string[] }> {
+  const internet = choose(flags.awsInternet, flags.awsNoInternet, 'internet')
+  if (!internet.ok) return internet
+  const settings = buildAwsNetworkSettings({ awsNat: flags.awsNat })
+  if (!settings.ok) return settings
+
+  const aws: AwsNetworkSettingsInput = { ...settings.value }
+  if (internet.value !== undefined) aws.enableInternetAccess = internet.value
+
+  const warnings: string[] = []
+  if (aws.enableInternetAccess === false) {
+    warnings.push(
+      'The network loses its internet gateway and NAT gateways, so nothing in it can reach the internet.'
+    )
+  } else if (aws.natGatewayOption === 'NONE') {
+    warnings.push('Services in private subnets lose outbound internet access.')
+  } else if (aws.natGatewayOption === 'PER_AZ') {
+    warnings.push('A NAT gateway in every zone costs more and survives a zone outage.')
+  }
+  return { ok: true, value: { aws, warnings } }
+}
+
 /** The parameter group family an AWS catalog entry carries in its provider data. */
 export function awsCatalogFamily(providerData: Record<string, unknown>): string | undefined {
   return typeof providerData.parameterGroupFamily === 'string'

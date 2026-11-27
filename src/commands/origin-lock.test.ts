@@ -32,6 +32,7 @@ async function run(args: string[]): Promise<void> {
 const shopLock = {
   originLock: {
     hostname: 'shop.example.com',
+    provider: 'CLOUDFLARE',
     header: 'X-Gantry-Origin-Lock',
     value: 'olk_7Gm2xQp9rT4vWc8nYb3e',
   },
@@ -72,6 +73,20 @@ describe('origin-lock command', () => {
     expect(out).toContain(
       'Add a Cloudflare Transform Rule that sets this request header on shop.example.com, and proxy its DNS record.'
     )
+  })
+
+  it('tells a hostname locked to any proxy how to set the header there', async () => {
+    graphqlRequest.mockResolvedValueOnce({
+      originLock: { ...shopLock.originLock, provider: 'HEADER' },
+    })
+
+    await run(['show', 'shop.example.com', '--reveal'])
+
+    const out = printed()
+    expect(out).toContain(
+      'Configure your proxy to set this header on every request it forwards to shop.example.com, replacing any value the client sent, and point its DNS at your proxy.'
+    )
+    expect(out).not.toContain('Cloudflare')
   })
 
   it.each([

@@ -12,6 +12,7 @@ const ORIGIN_LOCK_QUERY = /* GraphQL */ `
   query GetOriginLock($hostname: String!) {
     originLock(hostname: $hostname) {
       hostname
+      provider
       header
       value
     }
@@ -22,7 +23,7 @@ async function shouldReveal(reveal: boolean): Promise<boolean> {
   if (reveal) return true
   if (!isInteractive()) return false
   return confirm({
-    message: 'Print the header value? Anyone with it can skip Cloudflare.',
+    message: 'Print the header value? Anyone with it can skip your proxy.',
     default: false,
   })
 }
@@ -30,12 +31,12 @@ async function shouldReveal(reveal: boolean): Promise<boolean> {
 export function registerOriginLockCommand(program: Command): void {
   const originLockCmd = program
     .command('origin-lock')
-    .description('Show the request header a locked hostname needs from Cloudflare')
+    .description('Show the request header a locked hostname needs from your proxy')
 
   const showCmd = originLockCmd
     .command('show')
     .argument('<hostname>', 'Hostname as written in gantry.yml')
-    .description('Show the header and value Cloudflare must add to requests to a locked hostname')
+    .description('Show the header and value your proxy must add to requests to a locked hostname')
     .option('--reveal', 'Print the header value without asking')
     .action(async (hostname: string, options: { reveal?: boolean }) => {
       try {
@@ -56,8 +57,11 @@ export function registerOriginLockCommand(program: Command): void {
             ? `  Value:  ${sanitizeTerminal(originLock.value)}`
             : '  Value:  hidden. Re-run with --reveal to print it.'
         )
+        const where = sanitizeTerminal(originLock.hostname)
         console.log(
-          `\n  Add a Cloudflare Transform Rule that sets this request header on ${sanitizeTerminal(originLock.hostname)}, and proxy its DNS record.`
+          originLock.provider === 'CLOUDFLARE'
+            ? `\n  Add a Cloudflare Transform Rule that sets this request header on ${where}, and proxy its DNS record.`
+            : `\n  Configure your proxy to set this header on every request it forwards to ${where}, replacing any value the client sent, and point its DNS at your proxy.`
         )
       } catch (error) {
         printError(formatApiError(error))
@@ -68,7 +72,7 @@ export function registerOriginLockCommand(program: Command): void {
   addExamples(originLockCmd, [
     {
       command: 'gantry origin-lock show shop.example.com',
-      description: 'Show the header Cloudflare adds to requests to a locked hostname',
+      description: 'Show the header your proxy adds to requests to a locked hostname',
     },
   ])
   addExamples(showCmd, [

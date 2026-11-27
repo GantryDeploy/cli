@@ -187,6 +187,20 @@ The command then prints the `ssh` commands for connecting by hand: one line adds
 | `GANTRY_TEAM`      | Which team to act in, for a token that covers more than one |
 | `GANTRY_API_URL`   | API endpoint. Defaults to `https://api.gantrydeploy.com`    |
 
+## What the CLI sends to the API
+
+Besides your token and the request itself, every API request carries two headers:
+
+```
+User-Agent: gantry-cli/1.4.0 (node 24.22.1; darwin arm64; ci)
+X-Gantry-Command: deploy cutover
+```
+
+- `User-Agent` holds the CLI version, the Node.js version, your operating system and CPU architecture. `ci` is added only when the `CI` environment variable is set.
+- `X-Gantry-Command` holds the name of the command you ran. It never includes arguments, flag names or flag values.
+
+The CLI sends no analytics or crash reports anywhere else.
+
 ## Contributing
 
 An `.nvmrc` is provided; run `nvm use` first.

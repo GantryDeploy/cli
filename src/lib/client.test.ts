@@ -8,6 +8,7 @@ import {
   isMutationDocument,
   NetworkError,
 } from './client'
+import { setCliVersion } from './client-identity'
 import { getApiUrl, getTeam, loadToken } from './config'
 
 vi.mock('./config', () => ({
@@ -33,6 +34,7 @@ describe('client', () => {
     vi.mocked(loadToken).mockReturnValue('gpat_test_abc123')
     vi.mocked(getTeam).mockReturnValue(null)
     vi.mocked(getApiUrl).mockReturnValue('https://api.gantrydeploy.com')
+    setCliVersion('1.4.0')
     vi.useFakeTimers()
   })
 
@@ -90,6 +92,15 @@ describe('client', () => {
 
         const { headers } = mockFetch.mock.calls[0][1] as { headers: Record<string, string> }
         expect(headers['X-Gantry-Team']).toBe('x7qm2d')
+      })
+
+      it('identifies the CLI release in the User-Agent', async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ data: {} }))
+
+        await runWithTimers(graphqlRequest('query { test }'))
+
+        const { headers } = mockFetch.mock.calls[0][1] as { headers: Record<string, string> }
+        expect(headers['User-Agent']).toMatch(/^gantry-cli\/1\.4\.0 \(node \d+\.\d+\.\d+; \w+ \w+/)
       })
     })
 

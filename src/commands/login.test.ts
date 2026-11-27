@@ -154,7 +154,7 @@ describe('login command', () => {
     expect(printedOutput()).toContain('Pass --team')
   })
 
-  it.each([
+  it.each<[string, Error]>([
     ['an AuthenticationError', new errors.AuthenticationError('Invalid or expired API token.')],
     ['an HTTP 401 with GraphQL errors', new errors.GantryApiError('x', [], 401)],
     ['an HTTP 403 with GraphQL errors', new errors.GantryApiError('x', [], 403)],

@@ -173,6 +173,43 @@ export function awsCacheSettings(serverless: boolean): AwsCacheSettingsInput {
   return { deploymentMode: serverless ? 'SERVERLESS' : 'NODE_BASED' }
 }
 
+export interface AwsCacheUpdateFlags {
+  awsNodes?: string
+  awsShards?: string
+  awsReplicas?: string
+  awsMaxStorage?: string
+  awsMaxEcpu?: string
+  awsSnapshotTime?: string
+}
+
+const AWS_CACHE_NUMBER_FLAGS = [
+  ['awsNodes', '--aws-nodes', 'numCacheNodes'],
+  ['awsShards', '--aws-shards', 'numNodeGroups'],
+  ['awsReplicas', '--aws-replicas', 'replicasPerNodeGroup'],
+  ['awsMaxStorage', '--aws-max-storage', 'maxDataStorageGb'],
+  ['awsMaxEcpu', '--aws-max-ecpu', 'maxEcpuPerSecond'],
+] as const
+
+const SNAPSHOT_TIME = /^([01]\d|2[0-3]):[0-5]\d$/
+
+export function buildAwsCacheUpdate(flags: AwsCacheUpdateFlags): Result<AwsCacheSettingsInput> {
+  const aws: AwsCacheSettingsInput = {}
+  for (const [option, flag, field] of AWS_CACHE_NUMBER_FLAGS) {
+    const raw = flags[option]
+    if (raw === undefined) continue
+    const value = parseNumber(raw, true)
+    if (value === null) return { ok: false, message: notANumberMessage(flag, true) }
+    aws[field] = value
+  }
+  if (flags.awsSnapshotTime !== undefined) {
+    if (!SNAPSHOT_TIME.test(flags.awsSnapshotTime)) {
+      return { ok: false, message: '--aws-snapshot-time must be a UTC time like 03:30.' }
+    }
+    aws.dailySnapshotTime = flags.awsSnapshotTime
+  }
+  return { ok: true, value: aws }
+}
+
 const CAPACITY_PROVIDERS: Partial<Record<string, AwsCapacityProviderTypeEnum>> = {
   fargate: 'FARGATE',
   'fargate-spot': 'FARGATE_SPOT',

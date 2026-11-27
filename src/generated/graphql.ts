@@ -1283,6 +1283,20 @@ export type UnsetEnvVarsInput = {
   service?: string | null | undefined;
 };
 
+/** Settings to change on a cache. Leave a field out to keep it. A change that reaches the cache applies right away; resizing restarts its nodes. */
+export type UpdateCacheInput = {
+  /** Settings for a cache in an AWS cloud account. Deployment mode, cluster mode and the encryption key are fixed at creation. */
+  aws?: AwsCacheSettingsInput | null | undefined;
+  /** Days of backups kept. 0 keeps none. Memcached keeps none. */
+  backupRetentionDays?: number | null | undefined;
+  /** Engine version. It can only go up. */
+  engineVersion?: string | null | undefined;
+  /** User-friendly name */
+  name?: string | null | undefined;
+  /** Node size. A serverless cache has none. */
+  size?: string | null | undefined;
+};
+
 /** Settings to change on a database server. Leave a field out to keep it. A change that reaches the server applies right away; a size change restarts it briefly. */
 export type UpdateDatabaseInput = {
   /** Settings for a server in an AWS cloud account */
@@ -1330,7 +1344,15 @@ export type VariableOverrideInput = {
 export type GetCachesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetCachesQuery = { caches: Array<{ id: string, name: string, slug: string, engine: CacheEngineEnum, status: CacheStatusEnum, cloudAccountId: string, networkId: string, endpoint: string | null, port: number | null, createdAt: string }> };
+export type GetCachesQuery = { caches: Array<{ id: string, name: string, slug: string, engine: CacheEngineEnum, status: CacheStatusEnum, cloudAccountId: string, networkId: string, provider: string, endpoint: string | null, port: number | null, createdAt: string }> };
+
+export type UpdateCacheMutationVariables = Exact<{
+  id: string;
+  input: UpdateCacheInput;
+}>;
+
+
+export type UpdateCacheMutation = { updateCache: { success: boolean, message: string | null, deploymentId: string | null } };
 
 export type GetCacheTypesQueryVariables = Exact<{
   provider: CloudProviderEnum;

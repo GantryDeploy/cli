@@ -44,14 +44,11 @@ updates:
         applies-to: security-updates
         patterns: ['*']
     ignore:
-      # Keep Node's types at the oldest supported runtime (engines: ^22.13.0 || >=24).
+      # Keep Node's types at the oldest supported runtime (engines: ^22.22.2 || >=24.15.0).
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
       # typescript-eslint 8 caps its typescript peer below 6.1.
       - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-      # tsup 9 requires Node ^22.18, and CI packs on 22.13.0.
-      - dependency-name: 'tsup'
         update-types: ['version-update:semver-major']
     # `[]` opts out of the default `dependencies` and `javascript` labels.
     labels: []

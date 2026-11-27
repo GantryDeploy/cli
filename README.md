@@ -8,7 +8,7 @@ gantry login
 gantry lift production
 ```
 
-Requires Node.js 22.13+ or 24+ (the current LTS lines).
+Requires Node.js 22.22.2+ or 24.15+.
 
 ## What this is for
 

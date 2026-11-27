@@ -22,7 +22,7 @@
   ],
   "type": "module",
   "engines": {
-    "node": "^22.13.0 || >=24"
+    "node": "^22.22.2 || >=24.15.0"
   },
   "bin": {
     "gantry": "./dist/index.js"

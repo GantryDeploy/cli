@@ -131,6 +131,8 @@ Each command waits until the change is applied and exits non-zero if it fails, i
 
 Each service that binds a database gets its own database user, created on deploy. `gantry databases users <server>` lists them with their service, environment, auth and access.
 
+For something outside your services, such as a reporting tool, `gantry databases create-user <server> --name <user> --grant <database>:<privilege>` adds a user with a generated password. The command prints the password once and saves the username and password as a Gantry secret; `--json` prints them for a script. `gantry databases create-db <server> --name <db>` adds an empty database. The first time either runs on a network, it waits a few minutes while Gantry sets up access to the server.
+
 A deploy fails when the bound Postgres database already holds tables, views, sequences or schemas owned by another database user. `gantry databases adopt <server> <database>` moves them to Gantry's owner role. Each user that owned any of them becomes a member of that role, so it keeps working, now with owner rights over the whole database. The command asks first; pass `--yes` where there is no terminal.
 
 ## Private and public bastions

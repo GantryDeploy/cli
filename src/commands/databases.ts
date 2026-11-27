@@ -7,6 +7,11 @@ import type {
   AdoptDatabaseMutationVariables,
   CreateDatabaseMutation,
   CreateDatabaseMutationVariables,
+  CreateDatabaseOnServerMutation,
+  CreateDatabaseOnServerMutationVariables,
+  CreateUserOnServerMutation,
+  CreateUserOnServerMutationVariables,
+  DatabaseGrantInput,
   DatabaseLogsQuery,
   DatabaseLogsQueryVariables,
   GetDatabaseCredentialsQuery,
@@ -23,6 +28,8 @@ import type {
   GetDatabaseSizesQueryVariables,
   GetDatabaseTypesQuery,
   GetDatabaseTypesQueryVariables,
+  PrepareDatabaseAccessMutation,
+  PrepareDatabaseAccessMutationVariables,
   RotateDatabaseServiceUserMutation,
   RotateDatabaseServiceUserMutationVariables,
   UpdateDatabaseMutation,
@@ -49,6 +56,7 @@ import { resolveCloud, selectNetwork } from '../lib/interactive-prompts'
 import { streamLogs, withLogQueryOptions } from '../lib/log-stream'
 import type { LogQueryOptions } from '../lib/log-stream'
 import { createTable, formatDate, printError, printSuccess, slugify } from '../lib/output'
+import { repairResource } from '../lib/repair'
 import { sanitizeTerminal } from '../lib/sanitize'
 import { openDirectTunnel } from '../lib/ssh-tunnel'
 import { isInteractive } from '../lib/terminal'
@@ -215,6 +223,41 @@ const UPDATE_DATABASE_MUTATION = /* GraphQL */ `
   }
 `
 
+const PREPARE_ACCESS_MUTATION = /* GraphQL */ `
+  mutation PrepareDatabaseAccess($databaseId: String!) {
+    prepareDatabaseAccess(databaseId: $databaseId) {
+      success
+      message
+      ready
+      deploymentId
+    }
+  }
+`
+
+const CREATE_DATABASE_ON_SERVER_MUTATION = /* GraphQL */ `
+  mutation CreateDatabaseOnServer($databaseId: String!, $name: String!) {
+    createDatabaseOnServer(databaseId: $databaseId, name: $name) {
+      success
+      message
+    }
+  }
+`
+
+const CREATE_USER_ON_SERVER_MUTATION = /* GraphQL */ `
+  mutation CreateUserOnServer(
+    $databaseId: String!
+    $username: String!
+    $grants: [DatabaseGrantInput!]!
+  ) {
+    createUserOnServer(databaseId: $databaseId, username: $username, grants: $grants) {
+      success
+      message
+      password
+      secretId
+    }
+  }
+`
+
 const OPERATION_QUERY = /* GraphQL */ `
   query GetDatabaseOperation($id: String!) {
     deployment(id: $id) {
@@ -332,6 +375,42 @@ async function waitForOperation(deploymentId: string): Promise<{ ok: boolean; me
     }
   }
   return { ok: false, message: 'Timed out waiting for the operation to finish.' }
+}
+
+/** Waits for the server to accept new databases and users, deploying what it needs first. */
+async function prepareServerAccess(db: Database): Promise<void> {
+  const { prepareDatabaseAccess: access } = await graphqlRequest<
+    PrepareDatabaseAccessMutation,
+    PrepareDatabaseAccessMutationVariables
+  >(PREPARE_ACCESS_MUTATION, { databaseId: db.id })
+  if (!access.success) {
+    printError(access.message ?? 'There was an error while setting up database access.')
+    process.exit(1)
+  }
+  if (access.ready) return
+  if (!access.deploymentId) {
+    printError('There was an error while setting up database access.')
+    process.exit(1)
+  }
+
+  const spinner = ora(`Setting up access to ${db.slug}...`).start()
+  const outcome = await waitForOperation(access.deploymentId)
+  if (!outcome.ok) {
+    spinner.fail(outcome.message || 'There was an error while setting up database access.')
+    process.exit(1)
+  }
+  spinner.stop()
+}
+
+/** `analytics:SELECT` into a grant. The privilege may contain spaces, as in ALL PRIVILEGES. */
+function parseGrant(value: string): DatabaseGrantInput {
+  const separator = value.indexOf(':')
+  const database = value.slice(0, separator).trim()
+  const privilege = value.slice(separator + 1).trim()
+  if (separator < 1 || !privilege) {
+    throw new Error(`--grant ${value} is not <database>:<privilege>, such as analytics:SELECT.`)
+  }
+  return { database, privilege }
 }
 
 async function findDatabase(slugOrId: string): Promise<Database | undefined> {
@@ -986,6 +1065,98 @@ export function registerDatabasesCommand(program: Command): void {
       }
     })
 
+  const repairCmd = dbCmd
+    .command('repair')
+    .description("Apply a database server's saved configuration to its infrastructure again")
+    .argument('<server>', 'Database server slug')
+    .action(async (server: string) => {
+      try {
+        const db = await requireDatabase(server)
+        await repairResource('DATABASE', db, 'gantry databases list')
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  const createDbCmd = dbCmd
+    .command('create-db')
+    .description('Create a database on a database server')
+    .argument('<server>', 'Database server slug')
+    .requiredOption('--name <db>', 'Name of the new database')
+    .action(async (server: string, options: { name: string }) => {
+      try {
+        const db = await requireDatabase(server)
+        await prepareServerAccess(db)
+        const { createDatabaseOnServer: result } = await graphqlRequest<
+          CreateDatabaseOnServerMutation,
+          CreateDatabaseOnServerMutationVariables
+        >(CREATE_DATABASE_ON_SERVER_MUTATION, { databaseId: db.id, name: options.name })
+        if (!result.success) {
+          printError(result.message)
+          process.exit(1)
+        }
+        printSuccess(`Created database ${options.name} on ${db.slug}.`)
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
+  const createUserCmd = dbCmd
+    .command('create-user')
+    .description(
+      'Create a user on a database server for something outside your services. Services get their own users automatically.'
+    )
+    .argument('<server>', 'Database server slug')
+    .requiredOption('--name <user>', 'Name of the new user')
+    .option(
+      '--grant <database:privilege>',
+      'A privilege on one database, such as analytics:SELECT. Repeat for more.',
+      (value: string, previous: string[]) => [...previous, value],
+      new Array<string>()
+    )
+    .option('--json', 'Print the username, password and secret id as JSON')
+    .action(async (server: string, options: { name: string; grant: string[]; json?: boolean }) => {
+      try {
+        const grants = options.grant.map(parseGrant)
+        const db = await requireDatabase(server)
+        await prepareServerAccess(db)
+        const { createUserOnServer: result } = await graphqlRequest<
+          CreateUserOnServerMutation,
+          CreateUserOnServerMutationVariables
+        >(CREATE_USER_ON_SERVER_MUTATION, {
+          databaseId: db.id,
+          username: options.name,
+          grants,
+        })
+        if (!result.success || !result.password) {
+          printError(result.message)
+          process.exit(1)
+        }
+        if (options.json) {
+          console.log(
+            JSON.stringify({
+              username: options.name,
+              password: result.password,
+              secretId: result.secretId ?? null,
+            })
+          )
+          return
+        }
+        printSuccess(`Created user ${options.name} on ${db.slug}.`)
+        console.log(`  Password: ${result.password}  (shown once)`)
+        if (result.secretId) {
+          console.log(`  Saved as secret: ${result.secretId}`)
+        } else {
+          console.log(`  ${sanitizeTerminal(result.message)}`)
+        }
+      } catch (error) {
+        printError(formatApiError(error))
+        process.exit(1)
+      }
+    })
+
   const tunnelCmd = dbCmd
     .command('tunnel')
     .description('Create a local tunnel to a database server')
@@ -1296,6 +1467,25 @@ export function registerDatabasesCommand(program: Command): void {
     {
       command: 'gantry db update main-db --backup-days 14 --high-availability',
       description: 'Keep two weeks of backups and add a standby copy',
+    },
+  ])
+  addExamples(repairCmd, [
+    {
+      command: 'gantry db repair main-db',
+      description: 'Fix a server whose last deploy failed or whose infrastructure drifted',
+    },
+  ])
+  addExamples(createDbCmd, [
+    { command: 'gantry db create-db main-db --name analytics', description: 'Add a database' },
+  ])
+  addExamples(createUserCmd, [
+    {
+      command: 'gantry db create-user main-db --name reporting --grant analytics:SELECT',
+      description: 'Add a read-only user for a reporting tool',
+    },
+    {
+      command: 'gantry db create-user main-db --name etl --grant "analytics:ALL PRIVILEGES" --json',
+      description: 'Add a user and capture its password in a script',
     },
   ])
   addExamples(tunnelCmd, [

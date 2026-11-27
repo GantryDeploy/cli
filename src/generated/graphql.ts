@@ -775,6 +775,14 @@ export type DatabaseEngineEnum =
   /** PostgreSQL */
   | 'POSTGRESQL';
 
+/** A privilege on one database for a user created on a server */
+export type DatabaseGrantInput = {
+  /** Database on the server the privilege applies to */
+  database: string;
+  /** Privilege the engine understands, such as SELECT or ALL PRIVILEGES */
+  privilege: string;
+};
+
 /** Status of a database */
 export type DatabaseStatusEnum =
   /** Ready for connections */
@@ -1098,6 +1106,23 @@ export type ReleaseState =
   | 'SPLIT'
   /** The new version runs beside the live one with no traffic. */
   | 'STAGED';
+
+/** Resource types whose infrastructure can be repaired */
+export type RepairableResourceTypeEnum =
+  /** A bastion */
+  | 'BASTION'
+  /** A cache */
+  | 'CACHE'
+  /** A compute cluster */
+  | 'CLUSTER'
+  /** A database server */
+  | 'DATABASE'
+  /** A filesystem */
+  | 'FILESYSTEM'
+  /** A load balancer */
+  | 'LOAD_BALANCER'
+  /** A network */
+  | 'NETWORK';
 
 /** A `gantry.yml` to resolve against a project. */
 export type ResolveProjectInput = {
@@ -1464,6 +1489,30 @@ export type UpdateDatabaseMutationVariables = Exact<{
 
 
 export type UpdateDatabaseMutation = { updateDatabase: { success: boolean, message: string | null, deploymentId: string | null } };
+
+export type PrepareDatabaseAccessMutationVariables = Exact<{
+  databaseId: string;
+}>;
+
+
+export type PrepareDatabaseAccessMutation = { prepareDatabaseAccess: { success: boolean, message: string | null, ready: boolean, deploymentId: string | null } };
+
+export type CreateDatabaseOnServerMutationVariables = Exact<{
+  databaseId: string;
+  name: string;
+}>;
+
+
+export type CreateDatabaseOnServerMutation = { createDatabaseOnServer: { success: boolean, message: string } };
+
+export type CreateUserOnServerMutationVariables = Exact<{
+  databaseId: string;
+  username: string;
+  grants: Array<DatabaseGrantInput> | DatabaseGrantInput;
+}>;
+
+
+export type CreateUserOnServerMutation = { createUserOnServer: { success: boolean, message: string, password: string | null, secretId: string | null } };
 
 export type GetDatabaseOperationQueryVariables = Exact<{
   id: string;
@@ -2085,6 +2134,14 @@ export type GetReleaseDeploymentQueryVariables = Exact<{
 
 
 export type GetReleaseDeploymentQuery = { deployment: { id: string, status: DeploymentStatus, lastMessage: string | null, versionId: string | null, steps: Array<{ stepType: string, status: DeploymentStepStatus }> | null } | null };
+
+export type RepairResourceMutationVariables = Exact<{
+  resourceType: RepairableResourceTypeEnum;
+  id: string;
+}>;
+
+
+export type RepairResourceMutation = { repairResource: { success: boolean, message: string } };
 
 export type ResolveProjectQueryVariables = Exact<{
   input: ResolveProjectInput;
